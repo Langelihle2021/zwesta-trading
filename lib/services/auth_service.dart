@@ -26,15 +26,31 @@ class AuthService extends ChangeNotifier {
 
   // Load saved authentication from local storage
   void _loadFromStorage() {
-    final tokenJson = _prefs.getString('auth_token');
-    final userJson = _prefs.getString('current_user');
-    
-    if (tokenJson != null && userJson != null) {
-      _token = tokenJson;
-      _currentUser = User.fromJson(jsonDecode(userJson));
-    } else {
-      // For web demo, auto-login with mock user
-      _token = 'demo_token_web';
+    try {
+      final tokenJson = _prefs.getString('auth_token');
+      final userJson = _prefs.getString('current_user');
+      
+      if (tokenJson != null && userJson != null) {
+        _token = tokenJson;
+        _currentUser = User.fromJson(jsonDecode(userJson));
+      } else {
+        // For mobile demo, auto-login with mock user
+        _token = 'demo_token_mobile';
+        _currentUser = User(
+          id: '123',
+          username: 'demo',
+          email: 'demo@zwesta.com',
+          firstName: 'Demo',
+          lastName: 'User',
+          profileImage: '',
+          accountType: 'Premium',
+        );
+      }
+    } catch (e, stackTrace) {
+      // Log error but don't crash
+      debugPrintStack(label: 'AuthService._loadFromStorage error: $e', stackTrace: stackTrace);
+      // Reset to demo user on error
+      _token = 'demo_token_mobile';
       _currentUser = User(
         id: '123',
         username: 'demo',

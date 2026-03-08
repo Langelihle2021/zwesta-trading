@@ -12,37 +12,53 @@ import 'utils/theme.dart';
 import 'utils/environment_config.dart';
 
 void main() async {
-  // Don't show error widget - let Flutter handle it
-  WidgetsFlutterBinding.ensureInitialized();
-  final prefs = await SharedPreferences.getInstance();
-  
-  // Set environment based on app mode
-  EnvironmentConfig.setEnvironment(
-    const String.fromEnvironment('ZWESTA_ENV', defaultValue: 'production') == 'production'
-        ? Environment.production
-        : const String.fromEnvironment('ZWESTA_ENV') == 'staging'
-            ? Environment.staging
-            : Environment.development,
-  );
+  // Catch any startup errors
+  FlutterError.onError = (FlutterErrorDetails details) {
+    debugPrintStack(
+      label: 'Flutter Error',
+      stackTrace: details.stack,
+    );
+  };
 
-  // Enable offline mode if specified
-  const String offlineEnv = String.fromEnvironment('OFFLINE_MODE', defaultValue: 'false');
-  if (offlineEnv.toLowerCase() == 'true') {
-    EnvironmentConfig.setOfflineMode(true);
-  }
+  try {
+    // Don't show error widget - let Flutter handle it
+    WidgetsFlutterBinding.ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Set environment based on app mode
+    EnvironmentConfig.setEnvironment(
+      const String.fromEnvironment('ZWESTA_ENV', defaultValue: 'production') == 'production'
+          ? Environment.production
+          : const String.fromEnvironment('ZWESTA_ENV') == 'staging'
+              ? Environment.staging
+              : Environment.development,
+    );
 
-  // Override API URL if provided
-  const String apiUrlEnv = String.fromEnvironment('API_URL', defaultValue: '');
-  if (apiUrlEnv.isNotEmpty) {
-    EnvironmentConfig.setApiUrl(apiUrlEnv);
-  }
+    // Enable offline mode if specified
+    const String offlineEnv = String.fromEnvironment('OFFLINE_MODE', defaultValue: 'false');
+    if (offlineEnv.toLowerCase() == 'true') {
+      EnvironmentConfig.setOfflineMode(true);
+    }
 
-  // Log configuration if in debug mode
-  if (EnvironmentConfig.debugMode) {
-    debugPrint(EnvironmentConfig.getConfigSummary());
+    // Override API URL if provided
+    const String apiUrlEnv = String.fromEnvironment('API_URL', defaultValue: '');
+    if (apiUrlEnv.isNotEmpty) {
+      EnvironmentConfig.setApiUrl(apiUrlEnv);
+    }
+
+    // Log configuration if in debug mode
+    if (EnvironmentConfig.debugMode) {
+      debugPrint(EnvironmentConfig.getConfigSummary());
+    }
+    
+    runApp(MyApp(prefs: prefs));
+  } catch (e, stackTrace) {
+    debugPrintStack(
+      label: 'Main startup error: $e',
+      stackTrace: stackTrace,
+    );
+    rethrow;
   }
-  
-  runApp(MyApp(prefs: prefs));
 }
 
 class MyApp extends StatelessWidget {
