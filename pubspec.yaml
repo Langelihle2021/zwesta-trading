@@ -36,9 +36,6 @@ dependencies:
   # Navigation  
   go_router: ^12.0.0
 
-  # PDF Generation and Export
-  pdf: ^3.10.0
-  printing: ^5.11.0
   
   # File handling
   path_provider: ^2.1.0

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import '../services/statement_service.dart';
 import '../services/trading_service.dart';
-import '../services/pdf_export_service.dart';
 import '../utils/constants.dart';
 import '../widgets/custom_widgets.dart';
 
@@ -280,12 +278,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
                       },
                     ),
                     PopupMenuItem(
-                      child: const Text('Export as PDF'),
-                      onTap: () {
-                        _exportStatementPdf(context, statement);
-                      },
-                    ),
-                    PopupMenuItem(
                       child: const Text('Delete'),
                       onTap: () {
                         context.read<StatementService>().deleteStatement(statement.id);
@@ -397,26 +389,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
         ],
       ),
     );
-  }
-
-  void _exportStatementPdf(BuildContext context, dynamic statement) async {
-    final account = context.read<TradingService>().accounts
-        .firstWhere((a) => a.id == statement.accountId);
-
-    try {
-      final pdf = await PdfExportService.generateStatementPdf(statement, account);
-      await Printing.sharePdf(
-        bytes: await pdf.save(),
-        filename: 'statement_${statement.accountNumber}_${DateTime.now().millisecondsSinceEpoch}.pdf',
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error exporting PDF: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
   }
 
   Widget _buildDetailRow(String label, String value) {
