@@ -1,0 +1,42 @@
+definitions:
+  environment:
+    flutter: stable
+    xcode: latest
+    cocoapods: default
+
+workflows:
+  android-workflow:
+    name: Build Android APK
+    instance_type: mac_mini_m2
+    
+    environment:
+      flutter: 3.16.0
+      
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch:
+        include_patterns:
+          - main
+          - master
+          - develop
+    
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+        
+      - name: Build APK (Release)
+        script: flutter build apk --release
+        
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - flutter_drive.log
+      
+    publishing:
+      email:
+        recipients:
+          - $CM_BUILD_STEP_STATUS@codemagic.io
+      slack:
+        channel: '#flutter-builds'
+        notify_on_build_start: true
