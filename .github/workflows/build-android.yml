@@ -26,6 +26,13 @@ jobs:
         flutter-version: '3.19.0'
         channel: 'stable'
     
+    - name: Clean gradle caches
+      run: |
+        rm -rf ~/.gradle
+        rm -rf android/.gradle
+        rm -rf android/app/.gradle
+      shell: bash
+    
     - name: Get dependencies
       run: flutter pub get
     
