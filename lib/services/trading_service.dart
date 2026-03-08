@@ -40,13 +40,6 @@ class TradingService extends ChangeNotifier {
       notifyListeners();
     }
   }
-      }
-    } catch (e) {
-      print('ERROR in TradingService initialization: $e');
-      _useApi = false;
-      _initializeMockData();
-    }
-  }
 
   // Getters
   List<Trade> get trades => _trades;
