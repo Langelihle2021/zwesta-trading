@@ -43,9 +43,6 @@ dependencies:
   # File handling
   path_provider: ^2.1.0
   
-  # Device info (for VPS/App identification)
-  device_info_plus: ^9.0.0
-  
   # Logging and Analytics
   logger: ^2.0.0
   
