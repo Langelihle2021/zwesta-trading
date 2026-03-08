@@ -15,6 +15,19 @@ class AuthService extends ChangeNotifier {
   bool _isInitialized = false;
 
   AuthService() {
+    // Set demo user immediately - synchronously available
+    _token = 'demo_token_mobile';
+    _currentUser = User(
+      id: '123',
+      username: 'demo',
+      email: 'demo@zwesta.com',
+      firstName: 'Demo',
+      lastName: 'User',
+      profileImage: '',
+      accountType: 'Premium',
+    );
+    
+    // Initialize preferences asynchronously in background
     _initializePreferences();
   }
 
@@ -23,22 +36,13 @@ class AuthService extends ChangeNotifier {
       _prefs = await SharedPreferences.getInstance();
       _loadFromStorage();
       _isInitialized = true;
+      notifyListeners();
     } catch (e) {
       debugPrint('SharedPreferences initialization error: $e');
-      // Set demo user as fallback
-      _token = 'demo_token_mobile';
-      _currentUser = User(
-        id: '123',
-        username: 'demo',
-        email: 'demo@zwesta.com',
-        firstName: 'Demo',
-        lastName: 'User',
-        profileImage: '',
-        accountType: 'Premium',
-      );
+      // Already have demo user set, no need to reset
       _isInitialized = true;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   // Getters
