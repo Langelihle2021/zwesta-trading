@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.zwesta.zwesta_trading">
-    <!-- This is the root manifest for the Android project -->
+    <!-- Flutter v2 embedding indicator -->
+    <meta-data android:name="flutterEmbedding" android:value="2"/>
 </manifest>
