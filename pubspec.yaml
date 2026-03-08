@@ -40,6 +40,9 @@ dependencies:
   # File handling
   path_provider: ^2.1.0
   
+  # PDF Generation
+  pdf: ^3.10.0
+  
   # Logging and Analytics
   logger: ^2.0.0
   

@@ -1,4 +1,3 @@
-import 'dart:html' as html;
 import 'package:intl/intl.dart';
 import '../models/trade.dart';
 
@@ -247,13 +246,8 @@ class PDFService {
 </html>
     ''';
 
-    // Create and download HTML file
-    final blob = html.Blob([html_content], 'text/html');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    final link = html.AnchorElement(href: url)
-      ..setAttribute('download', 'Zwesta_Trading_Report_${DateTime.now().millisecondsSinceEpoch}.html')
-      ..click();
-    html.Url.revokeObjectUrl(url);
+    // Note: For APK builds, use PdfExportService instead for proper PDF export
+    // Web-only functionality removed for mobile compatibility
   }
 }
 
