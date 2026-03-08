@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.zwesta.zwesta_trading">
+    package="com.example.zwesta_trading">
 
     <!-- Required permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
