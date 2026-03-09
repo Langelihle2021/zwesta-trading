@@ -1302,6 +1302,79 @@ class DynamicPositionSizer:
 strategy_tracker = StrategyPerformanceTracker()
 position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
 
+# ==================== AUTO-INITIALIZE DEMO BOTS ====================
+def initialize_demo_bots():
+    """Auto-initialize demo trading bots on startup"""
+    demo_bots_config = [
+        {
+            'botId': 'DemoBot_EURUSD_TrendFollow',
+            'accountId': 'Demo MT5 - XM Global',
+            'symbols': ['EURUSD', 'GBPUSD', 'USDJPY'],
+            'strategy': 'Trend Following',
+            'riskPerTrade': 100,
+            'maxDailyLoss': 500,
+            'enabled': True,
+            'autoSwitch': True,
+            'dynamicSizing': True,
+            'basePositionSize': 1.0
+        },
+        {
+            'botId': 'DemoBot_Commodities_MeanReversion',
+            'accountId': 'Demo MT5 - XM Global',
+            'symbols': ['XAUUSD', 'XAGUSD', 'WTIUSD'],
+            'strategy': 'Mean Reversion',
+            'riskPerTrade': 75,
+            'maxDailyLoss': 400,
+            'enabled': True,
+            'autoSwitch': True,
+            'dynamicSizing': True,
+            'basePositionSize': 0.8
+        },
+        {
+            'botId': 'DemoBot_Indices_RangeTrading',
+            'accountId': 'Demo MT5 - XM Global',
+            'symbols': ['SPX500', 'UK100', 'GER40'],
+            'strategy': 'Range Trading',
+            'riskPerTrade': 125,
+            'maxDailyLoss': 600,
+            'enabled': True,
+            'autoSwitch': True,
+            'dynamicSizing': True,
+            'basePositionSize': 1.2
+        }
+    ]
+    
+    for bot_config in demo_bots_config:
+        now = datetime.now()
+        active_bots[bot_config['botId']] = {
+            'botId': bot_config['botId'],
+            'accountId': bot_config['accountId'],
+            'symbols': bot_config['symbols'],
+            'strategy': bot_config['strategy'],
+            'riskPerTrade': bot_config['riskPerTrade'],
+            'maxDailyLoss': bot_config['maxDailyLoss'],
+            'enabled': bot_config['enabled'],
+            'autoSwitch': bot_config['autoSwitch'],
+            'dynamicSizing': bot_config['dynamicSizing'],
+            'basePositionSize': bot_config['basePositionSize'],
+            'totalTrades': 0,
+            'winningTrades': 0,
+            'totalProfit': 0,
+            'totalLosses': 0,
+            'totalInvestment': 0,
+            'createdAt': now.isoformat(),
+            'startTime': now.isoformat(),
+            'profitHistory': [],
+            'tradeHistory': [],
+            'dailyProfits': {},
+            'maxDrawdown': 0,
+            'peakProfit': 0,
+            'strategyHistory': [],
+            'lastStrategySwitch': now.isoformat(),
+            'volatilityLevel': 'Medium',
+        }
+        logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
+
 # ==================== BOT TRADING ENDPOINTS ====================
 
 
@@ -1796,13 +1869,19 @@ if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
     logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
     logger.info(f"MT5 Server: {MT5_CONFIG['server']}")
+    
+    # Initialize demo bots on startup
+    logger.info("Initializing demo trading bots...")
+    initialize_demo_bots()
+    logger.info(f"✅ {len(active_bots)} demo bots initialized and ready")
+    
     try:
         # Try ports in order: 9000, 5000, 3000
         ports = [9000, 5000, 3000]
         started = False
         for port in ports:
             try:
-                logger.info(f"Attempting to start on http://localhost:{port}")
+                logger.info(f"Attempting to start on http://0.0.0.0:{port}")
                 app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
                 started = True
                 break
@@ -1814,3 +1893,4 @@ if __name__ == '__main__':
             logger.error("Failed to start server on any port")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+
