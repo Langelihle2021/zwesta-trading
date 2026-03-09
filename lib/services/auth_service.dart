@@ -72,33 +72,51 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Mock API call - replace with actual endpoint
-      await Future.delayed(const Duration(seconds: 2));
-      
       if (username.isEmpty || password.isEmpty) {
         throw Exception('Username and password are required');
       }
 
-      // Mock successful login
-      _token = 'mock_token_${DateTime.now().millisecondsSinceEpoch}';
-      _currentUser = User(
-        id: '123',
-        username: username,
-        email: '$username@zwesta.com',
-        firstName: 'Trading',
-        lastName: 'User',
-        accountType: 'Premium',
-      );
+      // Call real backend login API
+      // The backend login endpoint accepts email (username is email)
+      final response = await http.post(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/user/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': username, // Backend expects email
+        }),
+      ).timeout(const Duration(seconds: 10));
 
-      // Save to storage
-      await _prefs.setString('auth_token', _token!);
-      await _prefs.setString('current_user', jsonEncode(_currentUser!.toJson()));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        
+        if (data['success'] == true) {
+          _token = data['session_token']; // Get real session token from backend
+          _currentUser = User(
+            id: data['user_id'] ?? '0',
+            username: username,
+            email: data['email'] ?? '$username@zwesta.com',
+            firstName: data['name']?.split(' ')[0] ?? 'Trading',
+            lastName: data['name']?.split(' ').length > 1 ? data['name'].split(' ')[1] : 'User',
+            accountType: 'Premium',
+          );
 
-      _isLoading = false;
-      notifyListeners();
-      return true;
+          // Save to storage - use the REAL session token from backend
+          await _prefs.setString('auth_token', _token!);
+          await _prefs.setString('user_id', data['user_id'] ?? '');
+          await _prefs.setString('current_user', jsonEncode(_currentUser!.toJson()));
+
+          _isLoading = false;
+          notifyListeners();
+          return true;
+        } else {
+          throw Exception(data['error'] ?? 'Login failed');
+        }
+      } else {
+        final data = jsonDecode(response.body);
+        throw Exception(data['error'] ?? 'Login failed with code ${response.statusCode}');
+      }
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = 'Login Error: ${e.toString()}';
       _isLoading = false;
       notifyListeners();
       return false;
