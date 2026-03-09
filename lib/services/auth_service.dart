@@ -15,17 +15,9 @@ class AuthService extends ChangeNotifier {
   bool _isInitialized = false;
 
   AuthService() {
-    // Set demo user immediately - synchronously available
-    _token = 'demo_token_mobile';
-    _currentUser = User(
-      id: '123',
-      username: 'demo',
-      email: 'demo@zwesta.com',
-      firstName: 'Demo',
-      lastName: 'User',
-      profileImage: '',
-      accountType: 'Premium',
-    );
+    // Start with no user - show login page
+    _token = null;
+    _currentUser = null;
     
     // Initialize preferences asynchronously in background
     _initializePreferences();
@@ -61,33 +53,13 @@ class AuthService extends ChangeNotifier {
       if (tokenJson != null && userJson != null) {
         _token = tokenJson;
         _currentUser = User.fromJson(jsonDecode(userJson));
-      } else {
-        // For mobile demo, auto-login with mock user
-        _token = 'demo_token_mobile';
-        _currentUser = User(
-          id: '123',
-          username: 'demo',
-          email: 'demo@zwesta.com',
-          firstName: 'Demo',
-          lastName: 'User',
-          profileImage: '',
-          accountType: 'Premium',
-        );
       }
+      // If no saved token, stay logged out (show login page)
     } catch (e, stackTrace) {
-      // Log error but don't crash
+      // Log error but don't auto-login
       debugPrintStack(label: 'AuthService._loadFromStorage error: $e', stackTrace: stackTrace);
-      // Reset to demo user on error
-      _token = 'demo_token_mobile';
-      _currentUser = User(
-        id: '123',
-        username: 'demo',
-        email: 'demo@zwesta.com',
-        firstName: 'Demo',
-        lastName: 'User',
-        profileImage: '',
-        accountType: 'Premium',
-      );
+      _token = null;
+      _currentUser = null;
     }
     notifyListeners();
   }

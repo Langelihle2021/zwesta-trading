@@ -48,6 +48,9 @@ dependencies:
   
   # Environment configuration
   flutter_dotenv: ^6.0.0
+  
+  # Google Fonts
+  google_fonts: ^6.0.0
 
 dev_dependencies:
   flutter_test:

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'constants.dart';
 
 class AppTheme {
@@ -7,7 +8,7 @@ class AppTheme {
       useMaterial3: true,
       brightness: Brightness.light,
       primaryColor: AppColors.primaryColor,
-      scaffoldBackgroundColor: Colors.white,
+      scaffoldBackgroundColor: const Color(0xFFF5F7FA),
       colorScheme: ColorScheme.light(
         primary: AppColors.primaryColor,
         secondary: AppColors.accentColor,
@@ -52,32 +53,35 @@ class AppTheme {
           ),
         ),
       ),
-      textTheme: const TextTheme(
-        displayLarge: TextStyle(
+      textTheme: TextTheme(
+        displayLarge: GoogleFonts.poppins(
           fontSize: 32,
           fontWeight: FontWeight.bold,
           color: AppColors.dark,
+          letterSpacing: -0.5,
         ),
-        displayMedium: TextStyle(
+        displayMedium: GoogleFonts.poppins(
           fontSize: 28,
           fontWeight: FontWeight.bold,
           color: AppColors.dark,
+          letterSpacing: -0.3,
         ),
-        titleLarge: TextStyle(
+        titleLarge: GoogleFonts.poppins(
           fontSize: 20,
           fontWeight: FontWeight.bold,
           color: AppColors.dark,
+          letterSpacing: 0,
         ),
-        titleMedium: TextStyle(
+        titleMedium: GoogleFonts.poppins(
           fontSize: 16,
           fontWeight: FontWeight.w600,
           color: AppColors.dark,
         ),
-        bodyLarge: TextStyle(
+        bodyLarge: GoogleFonts.roboto(
           fontSize: 16,
           color: AppColors.darkGrey,
         ),
-        bodyMedium: TextStyle(
+        bodyMedium: GoogleFonts.roboto(
           fontSize: 14,
           color: AppColors.grey,
         ),
