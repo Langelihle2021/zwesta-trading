@@ -58,7 +58,7 @@ if ENVIRONMENT == 'LIVE':
     }
     # Validate LIVE credentials
     if MT5_CONFIG['account'] == 0 or not MT5_CONFIG['password']:
-        logger.error("⚠️  LIVE MODE: Missing MT5 credentials in environment variables!")
+        logger.error("[ALERT] LIVE MODE: Missing MT5 credentials in environment variables!")
         logger.error("Set: MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER")
 
 # Withdrawal Configuration
@@ -70,11 +70,11 @@ WITHDRAWAL_CONFIG = {
     'test_mode_max': 50,  # For testing with small amounts
 }
 
-logger.info(f"🔧 Backend initialized in {ENVIRONMENT} mode")
+logger.info(f"[INIT] Backend initialized in {ENVIRONMENT} mode")
 if ENVIRONMENT == 'LIVE':
-    logger.warning(f"⚠️  LIVE TRADING MODE - Account: {MT5_CONFIG['account']}")
+    logger.warning(f"[ALERT] LIVE TRADING MODE - Account: {MT5_CONFIG['account']}")
 else:
-    logger.info(f"📚 DEMO MODE - Account: {MT5_CONFIG['account']}")
+    logger.info(f"[DEMO] DEMO MODE - Account: {MT5_CONFIG['account']}")
 
 # ==================== API AUTHENTICATION ====================
 def validate_api_key():
