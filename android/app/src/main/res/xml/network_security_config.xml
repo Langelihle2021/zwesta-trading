@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow HTTP for VPS IP during testing/development -->
+    <!-- For production, switch to HTTPS -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">38.247.146.198</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+    
+    <!-- Trust system certificates by default -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">*.example.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

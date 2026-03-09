@@ -14,16 +14,23 @@ import 'utils/environment_config.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Set environment based on app mode (safe)
+  // Set environment based on build mode
+  // Release/Production builds use VPS, Debug uses localhost
   try {
-    EnvironmentConfig.setEnvironment(
-      const String.fromEnvironment('ZWESTA_ENV', defaultValue: 'production') == 'production'
-          ? Environment.production
-          : const String.fromEnvironment('ZWESTA_ENV') == 'staging'
-              ? Environment.staging
-              : Environment.development,
-    );
+    if (kReleaseMode) {
+      // Production: Use VPS IP
+      EnvironmentConfig.setEnvironment(Environment.production);
+    } else {
+      // Debug: Check environment variable or default to development
+      const String envMode = String.fromEnvironment('ZWESTA_ENV', defaultValue: 'development');
+      EnvironmentConfig.setEnvironment(
+        envMode == 'staging'
+            ? Environment.staging
+            : Environment.development,
+      );
+    }
   } catch (_) {
+    // Fallback: Production mode
     EnvironmentConfig.setEnvironment(Environment.production);
   }
 
