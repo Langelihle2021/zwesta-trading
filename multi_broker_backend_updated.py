@@ -156,7 +156,7 @@ DATABASE_PATH = 'zwesta_trading.db'
 
 def init_database():
     """Initialize SQLite database with referral and commission tables"""
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10.0, check_same_thread=False)
     cursor = conn.cursor()
     
     # Users table
@@ -326,7 +326,7 @@ def init_database():
 
 def get_db_connection():
     """Get database connection"""
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
