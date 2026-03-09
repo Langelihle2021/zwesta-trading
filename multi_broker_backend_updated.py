@@ -1873,7 +1873,7 @@ if __name__ == '__main__':
     # Initialize demo bots on startup
     logger.info("Initializing demo trading bots...")
     initialize_demo_bots()
-    logger.info(f"✅ {len(active_bots)} demo bots initialized and ready")
+    logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
     
     try:
         # Try ports in order: 9000, 5000, 3000
