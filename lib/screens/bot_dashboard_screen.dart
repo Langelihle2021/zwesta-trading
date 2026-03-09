@@ -6,8 +6,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../services/bot_service.dart';
 import '../services/trading_service.dart';
-import '../widgets/custom_widgets.dart';
 import '../utils/constants.dart';
+import '../utils/environment_config.dart';
+import '../widgets/custom_widgets.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
 
@@ -46,7 +47,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     setState(() => _isLoading = true);
     try {
       final response = await http.get(
-        Uri.parse('http://localhost:9000/api/bot/status'),
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/status'),
       ).timeout(const Duration(seconds: 5));
       
       if (response.statusCode == 200) {
