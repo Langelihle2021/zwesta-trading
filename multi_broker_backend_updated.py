@@ -11,6 +11,7 @@ import time
 import sqlite3
 import uuid
 import hashlib
+import threading
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -173,6 +174,56 @@ def init_database():
             fee REAL DEFAULT 0,
             net_amount REAL,
             admin_notes TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # Bot monitoring table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_monitoring (
+            monitoring_id TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            last_heartbeat TEXT,
+            uptime_seconds INTEGER DEFAULT 0,
+            health_check_count INTEGER DEFAULT 0,
+            errors_count INTEGER DEFAULT 0,
+            last_error TEXT,
+            last_error_time TEXT,
+            auto_restart_count INTEGER DEFAULT 0,
+            created_at TEXT,
+            FOREIGN KEY (bot_id) REFERENCES active_bots(botId)
+        )
+    ''')
+    
+    # Auto-withdrawal settings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS auto_withdrawal_settings (
+            setting_id TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            target_profit REAL NOT NULL,
+            is_active BOOLEAN DEFAULT 1,
+            withdrawal_method TEXT DEFAULT 'auto',
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # Auto-withdrawal history table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS auto_withdrawal_history (
+            withdrawal_id TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            triggered_profit REAL NOT NULL,
+            withdrawal_amount REAL NOT NULL,
+            fee REAL DEFAULT 0,
+            net_amount REAL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT,
+            completed_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
@@ -2187,7 +2238,177 @@ def delete_bot(bot_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ==================== BOT MONITORING SYSTEM ====================
+@app.route('/api/bot/<bot_id>/health', methods=['GET'])
+@require_api_key
+def get_bot_health(bot_id):
+    """Get bot health and monitoring status"""
+    try:
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        bot_config = active_bots[bot_id]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get monitoring data
+        cursor.execute('''
+            SELECT status, last_heartbeat, uptime_seconds, health_check_count, 
+                   errors_count, last_error, auto_restart_count
+            FROM bot_monitoring WHERE bot_id = ?
+        ''', (bot_id,))
+        
+        monitoring = cursor.fetchone()
+        conn.close()
+        
+        health_status = {
+            'bot_id': bot_id,
+            'is_running': bot_config.get('enabled', False),
+            'strategy': bot_config.get('strategy', 'Unknown'),
+            'daily_profit': bot_config.get('dailyProfit', 0),
+            'total_profit': bot_config.get('totalProfit', 0),
+            'status': dict(monitoring)['status'] if monitoring else 'unknown',
+            'last_heartbeat': dict(monitoring)['last_heartbeat'] if monitoring else None,
+            'uptime_seconds': dict(monitoring)['uptime_seconds'] if monitoring else 0,
+            'health_checks': dict(monitoring)['health_check_count'] if monitoring else 0,
+            'error_count': dict(monitoring)['errors_count'] if monitoring else 0,
+            'last_error': dict(monitoring)['last_error'] if monitoring else None,
+            'auto_restarts': dict(monitoring)['auto_restart_count'] if monitoring else 0,
+        }
+        
+        return jsonify({
+            'success': True,
+            'health': health_status
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting bot health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== AUTO-WITHDRAWAL SYSTEM ====================
+@app.route('/api/bot/<bot_id>/auto-withdrawal', methods=['POST'])
+@require_api_key
+def set_auto_withdrawal(bot_id):
+    """Set profit target for automatic withdrawal"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        target_profit = data.get('target_profit')  # USD amount
+        
+        if not user_id or not target_profit:
+            return jsonify({'success': False, 'error': 'user_id and target_profit required'}), 400
+        
+        if target_profit < 10:
+            return jsonify({'success': False, 'error': 'Minimum profit target is $10'}), 400
+        
+        if target_profit > 50000:
+            return jsonify({'success': False, 'error': 'Maximum profit target is $50,000'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        setting_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO auto_withdrawal_settings 
+            (setting_id, bot_id, user_id, target_profit, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (setting_id, bot_id, user_id, target_profit, created_at, created_at))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Auto-withdrawal set for bot {bot_id}: ${target_profit} target")
+        
+        return jsonify({
+            'success': True,
+            'setting_id': setting_id,
+            'bot_id': bot_id,
+            'target_profit': target_profit,
+            'message': f'Auto-withdrawal will trigger when bot reaches ${target_profit} profit'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error setting auto-withdrawal: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/<bot_id>/auto-withdrawal-status', methods=['GET'])
+@require_api_key
+def get_auto_withdrawal_status(bot_id):
+    """Get auto-withdrawal settings and history for a bot"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get current settings
+        cursor.execute('''
+            SELECT setting_id, target_profit, is_active, created_at
+            FROM auto_withdrawal_settings WHERE bot_id = ? AND is_active = 1
+        ''', (bot_id,))
+        
+        settings = cursor.fetchone()
+        
+        # Get withdrawal history
+        cursor.execute('''
+            SELECT withdrawal_id, triggered_profit, withdrawal_amount, net_amount, 
+                   status, created_at, completed_at
+            FROM auto_withdrawal_history
+            WHERE bot_id = ?
+            ORDER BY created_at DESC
+            LIMIT 10
+        ''', (bot_id,))
+        
+        history = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'bot_id': bot_id,
+            'current_setting': dict(settings) if settings else None,
+            'history': history,
+            'total_auto_withdrawals': len(history),
+            'total_amount_withdrawn': sum([float(h['withdrawal_amount']) for h in history])
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting auto-withdrawal status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/<bot_id>/disable-auto-withdrawal', methods=['POST'])
+@require_api_key
+def disable_auto_withdrawal(bot_id):
+    """Disable auto-withdrawal for a bot"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE auto_withdrawal_settings
+            SET is_active = 0, updated_at = ?
+            WHERE bot_id = ?
+        ''', (datetime.now().isoformat(), bot_id))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Auto-withdrawal disabled for bot {bot_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Auto-withdrawal disabled for bot {bot_id}'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error disabling auto-withdrawal: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ==================== REFERRAL API ENDPOINTS ====================
+
 @app.route('/api/user/register', methods=['POST'])
 def register_user():
     """Register new user with optional referral code"""
@@ -2299,6 +2520,93 @@ def get_referral_link(referral_code):
     
     except Exception as e:
         logger.error(f"Error getting referral link: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/<user_id>/referral-code', methods=['GET'])
+@require_api_key
+def get_user_referral_code(user_id):
+    """Get user's referral code and details"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT user_id, name, referral_code, email, created_at FROM users WHERE user_id = ?', (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        user_dict = dict(user)
+        referral_link = f"https://zwesta.com/register?ref={user_dict['referral_code']}"
+        
+        # Get recruit count
+        cursor.execute('SELECT COUNT(*) as count FROM referrals WHERE referrer_id = ?', (user_id,))
+        recruit_data = cursor.fetchone()
+        recruit_count = dict(recruit_data)['count'] if recruit_data else 0
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_dict['user_id'],
+            'name': user_dict['name'],
+            'email': user_dict['email'],
+            'referral_code': user_dict['referral_code'],
+            'referral_link': referral_link,
+            'recruited_count': recruit_count,
+            'created_at': user_dict['created_at']
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting referral code: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/<user_id>/regenerate-referral-code', methods=['POST'])
+@require_api_key
+def regenerate_referral_code(user_id):
+    """Regenerate user's referral code"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if user exists
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        # Generate new referral code
+        new_code = ReferralSystem.generate_referral_code()
+        
+        # Check if code already exists (very rare)
+        while True:
+            cursor.execute('SELECT referral_code FROM users WHERE referral_code = ?', (new_code,))
+            if not cursor.fetchone():
+                break
+            new_code = ReferralSystem.generate_referral_code()
+        
+        # Update user's referral code
+        cursor.execute('UPDATE users SET referral_code = ? WHERE user_id = ?', (new_code, user_id))
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Regenerated referral code for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'new_referral_code': new_code,
+            'referral_link': f"https://zwesta.com/register?ref={new_code}",
+            'message': 'Referral code regenerated successfully'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error regenerating referral code: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2588,6 +2896,92 @@ COMMODITIES = {
     'NZD/USD': {'category': 'Forex', 'emoji': '📍'},
 }
 
+
+# ==================== AUTO-WITHDRAWAL MONITORING ====================
+monitoring_thread = None
+monitoring_running = False
+
+def auto_withdrawal_monitor():
+    """Background task to monitor bot profits and execute auto-withdrawals"""
+    global monitoring_running
+    monitoring_running = True
+    logger.info("Starting auto-withdrawal monitoring thread...")
+    
+    while monitoring_running:
+        try:
+            time.sleep(30)  # Check every 30 seconds
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get all active auto-withdrawal settings
+            cursor.execute('''
+                SELECT setting_id, bot_id, user_id, target_profit
+                FROM auto_withdrawal_settings
+                WHERE is_active = 1
+            ''')
+            
+            settings = cursor.fetchall()
+            
+            for setting in settings:
+                setting_id, bot_id, user_id, target_profit = setting
+                
+                # Get current bot profit
+                if bot_id in active_bots:
+                    bot_config = active_bots[bot_id]
+                    current_profit = bot_config.get('totalProfit', 0)
+                    
+                    # Check if profit target reached
+                    if current_profit >= target_profit:
+                        logger.info(f"Profit target reached for bot {bot_id}: ${current_profit} >= ${target_profit}")
+                        
+                        # Check if withdrawal already triggered for this cycle
+                        cursor.execute('''
+                            SELECT COUNT(*) FROM auto_withdrawal_history
+                            WHERE bot_id = ? AND status = 'completed'
+                            AND created_at > datetime('now', '-24 hours')
+                        ''', (bot_id,))
+                        
+                        recent_count = cursor.fetchone()[0]
+                        
+                        if recent_count == 0:  # Only one withdrawal per 24 hours
+                            # Create withdrawal record
+                            withdrawal_id = str(uuid.uuid4())
+                            created_at = datetime.now().isoformat()
+                            fee = current_profit * 0.02  # 2% fee
+                            net_amount = current_profit - fee
+                            
+                            cursor.execute('''
+                                INSERT INTO auto_withdrawal_history
+                                (withdrawal_id, bot_id, user_id, triggered_profit, 
+                                 withdrawal_amount, fee, net_amount, status, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (withdrawal_id, bot_id, user_id, current_profit,
+                                  current_profit, fee, net_amount, 'pending', created_at))
+                            
+                            # Update bot profit to reset
+                            active_bots[bot_id]['totalProfit'] = 0
+                            active_bots[bot_id]['dailyProfit'] = 0
+                            
+                            # Mark as completed
+                            cursor.execute('''
+                                UPDATE auto_withdrawal_history
+                                SET status = 'completed', completed_at = ?
+                                WHERE withdrawal_id = ?
+                            ''', (datetime.now().isoformat(), withdrawal_id))
+                            
+                            logger.info(f"Auto-withdrawal executed: {withdrawal_id} for bot {bot_id}, amount: ${net_amount}")
+        
+        except Exception as e:
+            logger.error(f"Error in auto-withdrawal monitor: {e}")
+        
+        finally:
+            if conn:
+                conn.close()
+    
+    logger.info("Auto-withdrawal monitoring thread stopped")
+
+
 if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
     logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
@@ -2597,6 +2991,11 @@ if __name__ == '__main__':
     logger.info("Initializing demo trading bots...")
     initialize_demo_bots()
     logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
+    
+    # Start auto-withdrawal monitoring thread
+    monitoring_thread = threading.Thread(target=auto_withdrawal_monitor, daemon=True)
+    monitoring_thread.start()
+    logger.info("Auto-withdrawal monitoring thread started")
     
     try:
         # Try ports in order: 9000, 5000, 3000
@@ -2616,4 +3015,11 @@ if __name__ == '__main__':
             logger.error("Failed to start server on any port")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+    finally:
+        # Stop monitoring thread on shutdown
+        monitoring_running = False
+        if monitoring_thread:
+            monitoring_thread.join(timeout=5)
+        logger.info("Backend shutdown complete")
+
 
