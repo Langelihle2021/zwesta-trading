@@ -114,9 +114,9 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Or share code: $_referralCode',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
               ),
             ],
           ),

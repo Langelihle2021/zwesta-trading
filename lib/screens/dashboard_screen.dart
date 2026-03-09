@@ -955,10 +955,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             subtitle: const Text('Invite friends & earn 5%'),
             onTap: () {
               Navigator.pop(context);
+              final userId = context.read<AuthService>().currentUser?.id ?? '0';
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const ReferralDashboardScreen(),
+                  builder: (context) => ReferralDashboardScreen(userId: userId),
                 ),
               );
             },
@@ -977,7 +978,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
             },
           ),
-          const Divider(),"
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Logout'),

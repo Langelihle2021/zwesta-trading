@@ -169,7 +169,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         const Divider(),
                         const SizedBox(height: 12),
                         const Text(
-                          'Revenue Model: $100 profit → $25 to platform, $5 to referrer, $70 to client',
+                          'Revenue Model: \$100 profit → \$25 to platform, \$5 to referrer, \$70 to client',
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey,
