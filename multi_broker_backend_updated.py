@@ -97,6 +97,48 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def require_session(f):
+    """Decorator to require valid session token and extract user_id"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get session token from header
+        session_token = request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'error': 'Missing session token in X-Session-Token header'}), 401
+        
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Query user_sessions table
+            cursor.execute('''
+                SELECT user_id, expires_at, is_active 
+                FROM user_sessions 
+                WHERE token = ? AND is_active = 1
+            ''', (session_token,))
+            
+            session = cursor.fetchone()
+            conn.close()
+            
+            if not session:
+                return jsonify({'success': False, 'error': 'Invalid or inactive session token'}), 401
+            
+            # Check expiration
+            expires_at = datetime.fromisoformat(session['expires_at'])
+            if expires_at < datetime.now():
+                return jsonify({'success': False, 'error': 'Session token expired'}), 401
+            
+            # Attach user_id to request for use in the route handler
+            request.user_id = session['user_id']
+            return f(*args, **kwargs)
+        
+        except Exception as e:
+            logger.error(f"Error validating session: {e}")
+            return jsonify({'success': False, 'error': 'Session validation error'}), 500
+    
+    return decorated_function
+
 class BrokerType(Enum):
     """Supported broker types"""
     METATRADER5 = "mt5"
@@ -224,6 +266,56 @@ def init_database():
             status TEXT DEFAULT 'pending',
             created_at TEXT,
             completed_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # User bots table - stores user-specific bots
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_bots (
+            bot_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            strategy TEXT,
+            status TEXT DEFAULT 'active',
+            enabled BOOLEAN DEFAULT 1,
+            daily_profit REAL DEFAULT 0,
+            total_profit REAL DEFAULT 0,
+            broker_account_id TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # Broker credentials table - stores user's broker connections
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS broker_credentials (
+            credential_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            broker_name TEXT NOT NULL,
+            account_number TEXT NOT NULL,
+            password TEXT NOT NULL,
+            server TEXT,
+            is_live BOOLEAN DEFAULT 0,
+            is_active BOOLEAN DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # User sessions table - for authentication
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token TEXT UNIQUE,
+            created_at TEXT,
+            expires_at TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            is_active BOOLEAN DEFAULT 1,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
@@ -1905,37 +1997,55 @@ commodity_market_data = {
 active_bots = {}
 
 @app.route('/api/bot/create', methods=['POST'])
-@require_api_key
+@require_session
 def create_bot():
-    """Create and start a new trading bot"""
+    """Create and start a new trading bot for a user"""
     try:
         data = request.json
         if not data:
             return jsonify({'success': False, 'error': 'No configuration provided'}), 400
         
-        bot_id = data.get('botId') or f"bot_{datetime.now().timestamp()}"
+        user_id = data.get('user_id') or request.user_id  # Get from request body or session
+        if not user_id:
+            return jsonify({'success': False, 'error': 'user_id required'}), 400
+        
+        # Verify user exists
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        bot_id = data.get('botId') or f"bot_{user_id}_{int(datetime.now().timestamp())}"
         account_id = data.get('accountId', 'Default MT5')
-        symbols = data.get('symbols', ['EURUSD'])  # List of symbols to trade
+        symbols = data.get('symbols', ['EURUSD'])
         strategy = data.get('strategy', 'Trend Following')
         risk_per_trade = float(data.get('riskPerTrade', 100))
         max_daily_loss = float(data.get('maxDailyLoss', 500))
         trading_enabled = data.get('enabled', True)
         
-        # Store bot configuration with enhanced tracking
-        now = datetime.now()
-        auto_switch = data.get('autoSwitch', True)  # Enable intelligent strategy switching
-        dynamic_sizing = data.get('dynamicSizing', True)  # Enable position sizing
+        # Store bot in database
+        created_at = datetime.now().isoformat()
+        cursor.execute('''
+            INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, created_at, created_at))
         
+        conn.commit()
+        conn.close()
+        
+        # Also store in active_bots for real-time trading
+        now = datetime.now()
         active_bots[bot_id] = {
             'botId': bot_id,
+            'user_id': user_id,
             'accountId': account_id,
             'symbols': symbols,
             'strategy': strategy,
             'riskPerTrade': risk_per_trade,
             'maxDailyLoss': max_daily_loss,
             'enabled': trading_enabled,
-            'autoSwitch': auto_switch,  # Intelligent strategy switching
-            'dynamicSizing': dynamic_sizing,  # Dynamic position sizing
             'basePositionSize': data.get('basePositionSize', 1.0),
             'totalTrades': 0,
             'winningTrades': 0,
@@ -1944,22 +2054,21 @@ def create_bot():
             'totalInvestment': 0,
             'createdAt': now.isoformat(),
             'startTime': now.isoformat(),
-            'profitHistory': [],  # List of {timestamp, profit} for charting
-            'tradeHistory': [],  # Detailed trade log
-            'dailyProfits': {},  # Date -> daily profit
+            'profitHistory': [],
+            'tradeHistory': [],
+            'dailyProfits': {},
+            'dailyProfit': 0,
             'maxDrawdown': 0,
             'peakProfit': 0,
-            'strategyHistory': [],  # Track strategy changes over time
-            'lastStrategySwitch': now.isoformat(),
-            'volatilityLevel': 'Medium',  # Current market volatility
         }
         
-        logger.info(f"Created bot {bot_id}: {strategy} on symbols {symbols}")
+        logger.info(f"Created bot {bot_id} for user {user_id}: {strategy}")
         
         return jsonify({
             'success': True,
             'botId': bot_id,
-            'message': f'Bot {bot_id} created and running',
+            'user_id': user_id,
+            'message': f'Bot {bot_id} created successfully',
             'config': active_bots[bot_id]
         }), 200
     
@@ -1969,14 +2078,34 @@ def create_bot():
 
 
 @app.route('/api/bot/start', methods=['POST'])
+@require_session
 def start_bot():
     """Start automatic trading for a bot with intelligent strategy switching"""
     try:
         data = request.json
         bot_id = data.get('botId')
+        user_id = data.get('user_id') or request.user_id  # Get from request or session
+        
+        if not user_id:
+            return jsonify({'success': False, 'error': 'user_id required'}), 400
         
         if bot_id not in active_bots:
             return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        # Verify bot belongs to user
+        bot = active_bots[bot_id]
+        if bot.get('user_id') != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+        
+        # Also verify in database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        db_bot = cursor.fetchone()
+        conn.close()
+        
+        if not db_bot or db_bot['user_id'] != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
         
         import random
         bot_config = active_bots[bot_id]
@@ -2131,10 +2260,16 @@ def get_commodity_market_data():
 
 @app.route('/api/bot/status', methods=['GET'])
 def bot_status():
-    """Get status of all active bots with enhanced metrics"""
+    """Get status of all active bots (supports user_id filter)"""
     try:
+        user_id = request.args.get('user_id')
+        
         bots_list = []
         for bot in active_bots.values():
+            # Filter by user_id if provided
+            if user_id and bot.get('user_id') != user_id:
+                continue
+            
             # Calculate runtime
             created = datetime.fromisoformat(bot['createdAt'])
             runtime_seconds = (datetime.now() - created).total_seconds()
@@ -2143,7 +2278,7 @@ def bot_status():
             
             # Calculate daily profit
             today = datetime.now().strftime('%Y-%m-%d')
-            daily_profit = bot['dailyProfits'].get(today, 0)
+            daily_profit = bot['dailyProfits'].get(today, bot.get('dailyProfit', 0))
             
             # Calculate ROI
             investment = bot['totalInvestment']
@@ -2183,13 +2318,34 @@ def bot_status():
 
 
 @app.route('/api/bot/stop/<bot_id>', methods=['POST'])
+@require_session
 def stop_bot(bot_id):
     """Stop a trading bot"""
     try:
+        data = request.json or {}
+        user_id = data.get('user_id') or request.user_id  # Get from request or session
+        
+        if not user_id:
+            return jsonify({'success': False, 'error': 'user_id required'}), 400
+        
         if bot_id not in active_bots:
             return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
         
+        # Verify bot belongs to user
         bot_config = active_bots[bot_id]
+        if bot_config.get('user_id') != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+        
+        # Also verify in database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        db_bot = cursor.fetchone()
+        conn.close()
+        
+        if not db_bot or db_bot['user_id'] != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+        
         bot_config['enabled'] = False
         
         logger.info(f"Stopped bot {bot_id}")
@@ -2210,12 +2366,38 @@ def stop_bot(bot_id):
 
 
 @app.route('/api/bot/delete/<bot_id>', methods=['DELETE', 'POST'])
-@require_api_key
+@require_session
 def delete_bot(bot_id):
     """Delete a trading bot permanently"""
     try:
+        data = request.json or {}
+        user_id = data.get('user_id') or request.user_id  # Get from request or session
+        
+        if not user_id:
+            return jsonify({'success': False, 'error': 'user_id required'}), 400
+        
         if bot_id not in active_bots:
             return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        # Verify bot belongs to user
+        bot_config = active_bots[bot_id]
+        if bot_config.get('user_id') != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+        
+        # Also verify in database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        db_bot = cursor.fetchone()
+        
+        if not db_bot or db_bot['user_id'] != user_id:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+        
+        # Delete from database
+        cursor.execute('DELETE FROM user_bots WHERE bot_id = ?', (bot_id,))
+        conn.commit()
+        conn.close()
         
         bot_config = active_bots[bot_id]
         # Stop bot first if running
@@ -2426,6 +2608,250 @@ def register_user():
     
     except Exception as e:
         logger.error(f"Error in register_user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/login', methods=['POST'])
+def login_user():
+    """Login user by email - creates session"""
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({'success': False, 'error': 'Email required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Find user by email
+        cursor.execute('SELECT user_id, name, email, referral_code FROM users WHERE email = ?', (email,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        user_dict = dict(user)
+        user_id = user_dict['user_id']
+        
+        # Create session token
+        session_id = str(uuid.uuid4())
+        token = hashlib.sha256(f"{user_id}{datetime.now().isoformat()}".encode()).hexdigest()
+        expires_at = (datetime.now() + timedelta(days=30)).isoformat()
+        
+        cursor.execute('''
+            INSERT INTO user_sessions (session_id, user_id, token, created_at, expires_at, is_active)
+            VALUES (?, ?, ?, ?, ?, 1)
+        ''', (session_id, user_id, token, datetime.now().isoformat(), expires_at))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"User logged in: {email}")
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'name': user_dict['name'],
+            'email': user_dict['email'],
+            'referral_code': user_dict['referral_code'],
+            'session_token': token,
+            'message': 'Login successful'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error in login_user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/profile/<user_id>', methods=['GET'])
+@require_session
+def get_user_profile(user_id):
+    """Get user profile and their associated data"""
+    # Verify user is accessing only their own profile
+    if request.user_id != user_id:
+        return jsonify({'success': False, 'error': 'Unauthorized: Cannot access other user profiles'}), 403
+    """Get user profile and their associated data"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get user info
+        cursor.execute('''
+            SELECT user_id, name, email, referral_code, total_commission, created_at
+            FROM users WHERE user_id = ?
+        ''', (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        user_dict = dict(user)
+        
+        # Get user's bots
+        cursor.execute('''
+            SELECT bot_id, name, strategy, status, enabled, daily_profit, total_profit, created_at
+            FROM user_bots WHERE user_id = ? ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        bots = [dict(row) for row in cursor.fetchall()]
+        
+        # Get user's broker credentials
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, is_live, is_active
+            FROM broker_credentials WHERE user_id = ? ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        brokers = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'user': user_dict,
+            'bots': bots,
+            'total_bots': len(bots),
+            'brokers': brokers,
+            'total_brokers': len(brokers)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/<user_id>/broker-credentials', methods=['POST'])
+@require_session
+def add_broker_credentials(user_id):
+    """Add broker credentials for a user"""
+    # Verify user is adding credentials for themselves
+    if request.user_id != user_id:
+        return jsonify({'success': False, 'error': 'Unauthorized: Cannot add credentials for other users'}), 403
+    """Add broker credentials for a user"""
+    try:
+        data = request.get_json()
+        broker_name = data.get('broker_name')
+        account_number = data.get('account_number')
+        password = data.get('password')
+        server = data.get('server')
+        is_live = data.get('is_live', False)
+        
+        if not all([broker_name, account_number, password]):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify user exists
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        # Insert broker credentials
+        credential_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        
+        cursor.execute('''
+            INSERT INTO broker_credentials 
+            (credential_id, user_id, broker_name, account_number, password, server, is_live, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (credential_id, user_id, broker_name, account_number, password, server, is_live, created_at, created_at))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Broker credentials added for user {user_id}: {broker_name}")
+        
+        return jsonify({
+            'success': True,
+            'credential_id': credential_id,
+            'message': f'Broker credentials added for {broker_name}'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error adding broker credentials: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/<user_id>/broker-credentials', methods=['GET'])
+@require_session
+def get_broker_credentials(user_id):
+    """Get all broker credentials for a user"""
+    # Verify user is accessing only their own credentials
+    if request.user_id != user_id:
+        return jsonify({'success': False, 'error': 'Unauthorized: Cannot access other user credentials'}), 403
+    """Get all broker credentials for a user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, server, is_live, is_active, created_at
+            FROM broker_credentials WHERE user_id = ? ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        credentials = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'credentials': credentials,
+            'total': len(credentials)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting broker credentials: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/<user_id>/bots', methods=['GET'])
+@require_session
+def get_user_bots(user_id):
+    """Get all bots for a specific user"""
+    # Verify user is accessing only their own bots
+    if request.user_id != user_id:
+        return jsonify({'success': False, 'error': 'Unauthorized: Cannot access other user bots'}), 403
+    """Get all bots for a specific user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify user exists
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        # Get user's bots from database
+        cursor.execute('''
+            SELECT bot_id, name, strategy, status, enabled, daily_profit, total_profit, created_at
+            FROM user_bots WHERE user_id = ? ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        bots = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        # Calculate totals
+        total_daily = sum([float(bot.get('daily_profit', 0)) for bot in bots])
+        total_profit = sum([float(bot.get('total_profit', 0)) for bot in bots])
+        active_count = sum([1 for bot in bots if bot.get('enabled')])
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'bots': bots,
+            'total_bots': len(bots),
+            'active_bots': active_count,
+            'total_daily_profit': total_daily,
+            'total_profit': total_profit
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting user bots: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
