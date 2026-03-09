@@ -12,9 +12,9 @@ class EnvironmentConfig {
   static const String _stagingApiUrl = 'http://38.247.146.198:9000';
   static const String _prodApiUrl = 'http://38.247.146.198:9000';
 
-  static const String _devApiKey = 'dev_key_12345';
-  static const String _stagingApiKey = 'staging_key_12345';
-  static const String _prodApiKey = 'prod_key_12345';
+  static const String _devApiKey = 'your_generated_api_key_here_dev';
+  static const String _stagingApiKey = 'your_generated_api_key_here_staging';
+  static const String _prodApiKey = 'your_generated_api_key_here_prod';
 
   static const bool _devDebugMode = true;
   static const bool _stagingDebugMode = true;

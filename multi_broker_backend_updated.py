@@ -33,13 +33,68 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================== CONFIGURATION ====================
-# MT5 Demo Credentials
+# Environment Configuration (DEMO or LIVE)
+ENVIRONMENT = os.getenv('TRADING_ENV', 'DEMO')  # Set TRADING_ENV=LIVE in production
+
+# API Security Configuration
+API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production')
+
+# MT5 Credentials - DEMO (default)
 MT5_CONFIG = {
     'account': 104017418,
     'password': '*6RjhRvH',
     'server': 'MetaQuotes-Demo',
     'path': 'C:\\Program Files\\XM Global MT5'
 }
+
+# MT5 Credentials - LIVE (override with environment variables)
+if ENVIRONMENT == 'LIVE':
+    MT5_CONFIG = {
+        'account': int(os.getenv('MT5_ACCOUNT', '0')),
+        'password': os.getenv('MT5_PASSWORD', ''),
+        'server': os.getenv('MT5_SERVER', ''),
+        'path': os.getenv('MT5_PATH', 'C:\\Program Files\\XM Global MT5')
+    }
+    # Validate LIVE credentials
+    if MT5_CONFIG['account'] == 0 or not MT5_CONFIG['password']:
+        logger.error("⚠️  LIVE MODE: Missing MT5 credentials in environment variables!")
+        logger.error("Set: MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER")
+
+# Withdrawal Configuration
+WITHDRAWAL_CONFIG = {
+    'min_amount': 10,
+    'max_amount': 50000,
+    'processing_fee_percent': 1.0,  # 1% fee
+    'processing_days': 3,  # 2-3 business days
+    'test_mode_max': 50,  # For testing with small amounts
+}
+
+logger.info(f"🔧 Backend initialized in {ENVIRONMENT} mode")
+if ENVIRONMENT == 'LIVE':
+    logger.warning(f"⚠️  LIVE TRADING MODE - Account: {MT5_CONFIG['account']}")
+else:
+    logger.info(f"📚 DEMO MODE - Account: {MT5_CONFIG['account']}")
+
+# ==================== API AUTHENTICATION ====================
+def validate_api_key():
+    """Validate API key from request headers"""
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not api_key:
+        return False, "Missing API key in Authorization header"
+    if api_key != API_KEY:
+        return False, "Invalid API key"
+    return True, "Valid"
+
+def require_api_key(f):
+    """Decorator to require API key authentication"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        valid, message = validate_api_key()
+        if not valid:
+            return jsonify({'success': False, 'error': message}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 class BrokerType(Enum):
     """Supported broker types"""
@@ -1799,6 +1854,7 @@ commodity_market_data = {
 active_bots = {}
 
 @app.route('/api/bot/create', methods=['POST'])
+@require_api_key
 def create_bot():
     """Create and start a new trading bot"""
     try:
@@ -2103,6 +2159,7 @@ def stop_bot(bot_id):
 
 
 @app.route('/api/bot/delete/<bot_id>', methods=['DELETE', 'POST'])
+@require_api_key
 def delete_bot(bot_id):
     """Delete a trading bot permanently"""
     try:
@@ -2246,6 +2303,7 @@ def get_referral_link(referral_code):
 
 
 @app.route('/api/admin/dashboard', methods=['GET'])
+@require_api_key
 def admin_dashboard():
     """Admin dashboard with all users, bots, and earnings"""
     try:
@@ -2323,6 +2381,7 @@ def admin_dashboard():
 
 # ==================== WITHDRAWAL SYSTEM ====================
 @app.route('/api/withdrawal/request', methods=['POST'])
+@require_api_key
 def request_withdrawal():
     """Request a withdrawal of earned commissions"""
     try:
@@ -2332,8 +2391,17 @@ def request_withdrawal():
         method = data.get('method')
         account_details = data.get('account_details')
         
-        if amount < 10:
-            return jsonify({'success': False, 'error': 'Minimum withdrawal is $10'}), 400
+        # Validate amount
+        if amount < WITHDRAWAL_CONFIG['min_amount']:
+            return jsonify({'success': False, 'error': f"Minimum withdrawal is ${WITHDRAWAL_CONFIG['min_amount']}"}), 400
+        
+        if amount > WITHDRAWAL_CONFIG['max_amount']:
+            return jsonify({'success': False, 'error': f"Maximum withdrawal is ${WITHDRAWAL_CONFIG['max_amount']}"}), 400
+        
+        # Test mode: limit to $50 for testing
+        if ENVIRONMENT == 'DEMO':
+            if amount > WITHDRAWAL_CONFIG['test_mode_max']:
+                return jsonify({'success': False, 'error': f"Test mode: maximum ${WITHDRAWAL_CONFIG['test_mode_max']} per withdrawal"}), 400
         
         # Check available balance
         conn = get_db_connection()
@@ -2363,7 +2431,7 @@ def request_withdrawal():
         
         # Create withdrawal request
         withdrawal_id = str(uuid.uuid4())
-        fee = amount * 0.01  # 1% fee
+        fee = amount * (WITHDRAWAL_CONFIG['processing_fee_percent'] / 100)
         net_amount = amount - fee
         created_at = datetime.now().isoformat()
         
@@ -2375,16 +2443,16 @@ def request_withdrawal():
         conn.commit()
         conn.close()
         
-        logger.info(f"Withdrawal request {withdrawal_id}: {user_id} - ${amount}")
+        logger.info(f"Withdrawal request {withdrawal_id}: {user_id} - ${amount} ({method})")
         
         return jsonify({
             'success': True,
             'withdrawal_id': withdrawal_id,
             'amount': amount,
-            'fee': fee,
-            'net_amount': net_amount,
+            'fee': round(fee, 2),
+            'net_amount': round(net_amount, 2),
             'status': 'pending',
-            'message': 'Withdrawal request submitted. Withdrawals are processed in 2-3 business days.'
+            'message': f'Withdrawal request submitted. Will receive ${round(net_amount, 2)} after {WITHDRAWAL_CONFIG["processing_fee_percent"]}% fee. Processing in {WITHDRAWAL_CONFIG["processing_days"]} business days.'
         }), 200
     
     except Exception as e:
@@ -2420,6 +2488,7 @@ def get_withdrawal_history(user_id):
 
 
 @app.route('/api/admin/withdrawals', methods=['GET'])
+@require_api_key
 def admin_withdrawals():
     """Admin endpoint to view all pending withdrawals"""
     try:
@@ -2451,6 +2520,7 @@ def admin_withdrawals():
 
 
 @app.route('/api/admin/withdrawal/<withdrawal_id>/approve', methods=['POST'])
+@require_api_key
 def approve_withdrawal(withdrawal_id):
     """Admin endpoint to approve withdrawal"""
     try:
