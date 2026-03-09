@@ -159,12 +159,19 @@ class BotService extends ChangeNotifier {
       final sessionToken = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
 
+      print('🔐 DEBUG: CreateBot - Token check:');
+      print('  sessionToken: ${sessionToken?.substring(0, 10) ?? 'NULL'}...');
+      print('  userId: $userId');
+      print('  isDemoMode: ${sessionToken?.isEmpty ?? true}');
+
       if (sessionToken == null || sessionToken.isEmpty) {
         _errorMessage = 'Session expired. Please login again.';
         _isLoading = false;
         notifyListeners();
         return false;
       }
+
+      print('📤 Sending bot creation request with token...');
 
       final response = await http.post(
         Uri.parse('$_apiUrl/api/bot/create'),
@@ -195,9 +202,17 @@ class BotService extends ChangeNotifier {
           return true;
         }
       } else if (response.statusCode == 401) {
-        _errorMessage = 'Session expired. Please login again.';
+        _errorMessage = 'Session expired or invalid token. Please login again.';
+        print('❌ BOT CREATION 401 ERROR:');
+        print('  Status: ${response.statusCode}');
+        print('  Response: ${response.body}');
+        print('  Token was: ${sessionToken?.substring(0, 20)}...');
       } else {
-        _errorMessage = jsonDecode(response.body)['error'] ?? 'Failed to create bot';
+        final responseData = jsonDecode(response.body);
+        _errorMessage = responseData['error'] ?? 'Failed to create bot';
+        print('❌ BOT CREATION ERROR (${response.statusCode}):');
+        print('  Error: ${_errorMessage}');
+        print('  Full response: ${response.body}');
       }
       return false;
     } catch (e) {

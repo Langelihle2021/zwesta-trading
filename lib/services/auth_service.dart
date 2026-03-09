@@ -105,6 +105,12 @@ class AuthService extends ChangeNotifier {
           await _prefs.setString('user_id', data['user_id'] ?? '');
           await _prefs.setString('current_user', jsonEncode(_currentUser!.toJson()));
 
+          // DEBUG: Verify what was saved
+          print('✅ LOGIN SUCCESSFUL - Token saved to SharedPreferences:');
+          print('  auth_token: ${_prefs.getString('auth_token')?.substring(0, 10)}...');
+          print('  user_id: ${_prefs.getString('user_id')}');
+          print('  Session valid for 30 days');
+
           _isLoading = false;
           notifyListeners();
           return true;
