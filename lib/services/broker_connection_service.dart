@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../models/broker_connection_model.dart';
+import '../utils/environment_config.dart';
 import 'connection_analytics_service.dart';
 
 class BrokerConnectionService {
@@ -56,7 +59,7 @@ class BrokerConnectionService {
   static final Map<String, BrokerAccount> _accountCache = {};
   static final Map<String, StreamController<ConnectionMetric>> _monitoringStreams = {};
 
-  /// Test connection with real broker API simulation
+  /// Test connection with REAL backend broker API
   static Future<Map<String, dynamic>> testConnection({
     required String broker,
     required String accountNumber,
@@ -64,61 +67,91 @@ class BrokerConnectionService {
     required String server,
   }) async {
     try {
-      final random = Random();
-      final latency = 50 + random.nextInt(100);
-      await Future.delayed(Duration(milliseconds: latency));
+      print('🔌 Testing connection with backend: $broker | Account: $accountNumber');
+      
+      // Call backend API
+      final response = await http.post(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'broker': broker,
+          'account_number': accountNumber,
+          'password': password,
+          'server': server,
+        }),
+      ).timeout(const Duration(seconds: 15));
 
-      if (!_validateCredentials(accountNumber, password)) {
+      print('📥 Backend response: ${response.statusCode}');
+      print('   Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        
+        if (data['success'] == true) {
+          // Backend confirmed connection
+          final isDemo = accountNumber == 'demo' || accountNumber == '136372035' || accountNumber == '104017418';
+          final balance = (data['balance'] ?? 10000.0).toDouble();
+
+          final account = BrokerAccount(
+            id: '${broker}_${accountNumber}_${DateTime.now().millisecondsSinceEpoch}',
+            brokerName: broker,
+            accountNumber: accountNumber,
+            server: server,
+            isDemo: isDemo,
+            accountBalance: balance,
+            leverage: 100,
+            spreadAverage: 1.5,
+            createdAt: DateTime.now(),
+            lastConnected: DateTime.now(),
+            isActive: true,
+            connectionStatus: 'CONNECTED',
+          );
+
+          _accountCache[account.id] = account;
+          print('✅ Connection successful! Balance: \$${balance.toStringAsFixed(2)}');
+
+          return {
+            'success': true,
+            'connected': true,
+            'account': account,
+            'message': data['message'] ?? 'Connection established',
+            'balance': balance,
+            'leverage': 100,
+            'accountType': isDemo ? 'Demo' : 'Live',
+          };
+        } else {
+          print('❌ Backend connection failed: ${data['error']}');
+          return {
+            'success': false,
+            'connected': false,
+            'message': data['error'] ?? 'Connection failed',
+            'errorCode': 'BACKEND_ERROR',
+          };
+        }
+      } else if (response.statusCode == 400) {
+        final data = jsonDecode(response.body);
+        print('❌ Bad request: ${data['error']}');
         return {
           'success': false,
           'connected': false,
-          'message': 'Invalid credentials',
-          'errorCode': 'AUTH_FAILED',
-          'latency': latency,
+          'message': data['error'] ?? 'Invalid request',
+          'errorCode': 'BAD_REQUEST',
+        };
+      } else {
+        print('❌ Backend error: ${response.statusCode}');
+        return {
+          'success': false,
+          'connected': false,
+          'message': 'Backend error: ${response.statusCode}',
+          'errorCode': 'BACKEND_ERROR',
         };
       }
-
-      final isDemo = accountNumber == 'demo' || accountNumber == '136372035';
-      final initialBalance = isDemo ? 100000.0 : 50000.0;
-
-      final account = BrokerAccount(
-        id: '${broker}_${accountNumber}_${DateTime.now().millisecondsSinceEpoch}',
-        brokerName: broker,
-        accountNumber: accountNumber,
-        server: server,
-        isDemo: isDemo,
-        accountBalance: initialBalance,
-        leverage: 100,
-        spreadAverage: 1.5,
-        createdAt: DateTime.now(),
-        lastConnected: DateTime.now(),
-        isActive: true,
-        connectionStatus: 'CONNECTED',
-      );
-
-      _accountCache[account.id] = account;
-
-      if (!_connectionHistory.containsKey(account.id)) {
-        _connectionHistory[account.id] = [];
-      }
-
-      _recordMetric(account.id, initialBalance, true, 'CONNECTED', latency.toDouble());
-
-      return {
-        'success': true,
-        'connected': true,
-        'account': account,
-        'message': 'Connection established',
-        'latency': latency,
-        'balance': initialBalance,
-        'leverage': 100,
-        'accountType': isDemo ? 'Demo' : 'Live',
-      };
     } catch (e) {
+      print('❌ Connection error: $e');
       return {
         'success': false,
         'connected': false,
-        'message': 'Connection failed: $e',
+        'message': 'Connection error: $e',
         'errorCode': 'CONNECTION_ERROR',
       };
     }
