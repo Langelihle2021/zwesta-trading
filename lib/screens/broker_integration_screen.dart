@@ -524,7 +524,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           if (_isConnected)
             Row(
               children: [
@@ -542,7 +542,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                 ),
               ],
             ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -555,7 +555,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -579,7 +579,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             ),
           ),
           if (_savedAccounts.isNotEmpty) ...[
-            const SizedBox(height: 32),
+            const SizedBox(height: 16),
             const Text(
               'Saved Accounts',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
@@ -605,7 +605,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
               },
             ),
           ],
-          const SizedBox(height: 40),
+          const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
