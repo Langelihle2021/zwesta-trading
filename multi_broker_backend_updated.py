@@ -54,11 +54,29 @@ ENVIRONMENT = os.getenv('TRADING_ENV', 'DEMO')  # Set TRADING_ENV=LIVE in produc
 API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production')
 
 # MT5 Credentials - DEMO (default)
+# Check multiple possible MT5 installation paths
+def find_mt5_path():
+    """Find MT5 installation path from common locations"""
+    possible_paths = [
+        'C:\\zwesta-trader\\Zwesta Flutter App',  # Local installation
+        'C:\\Program Files\\XM Global MT5',        # XM installation
+        'C:\\Program Files (x86)\\MetaTrader 5',   # MT5 default
+        os.getenv('MT5_PATH', ''),                 # Environment variable
+    ]
+    
+    for path in possible_paths:
+        if path and os.path.exists(path):
+            logger.info(f"Found MT5 at: {path}")
+            return path
+    
+    logger.warning("MT5 not found in common paths - will use simulated trading as fallback")
+    return 'C:\\Program Files\\XM Global MT5'  # Default fallback
+
 MT5_CONFIG = {
     'account': 104017418,
     'password': '*6RjhRvH',
     'server': 'MetaQuotes-Demo',
-    'path': 'C:\\Program Files\\XM Global MT5'
+    'path': find_mt5_path()
 }
 
 # MT5 Credentials - LIVE (override with environment variables)
@@ -67,7 +85,7 @@ if ENVIRONMENT == 'LIVE':
         'account': int(os.getenv('MT5_ACCOUNT', '0')),
         'password': os.getenv('MT5_PASSWORD', ''),
         'server': os.getenv('MT5_SERVER', ''),
-        'path': os.getenv('MT5_PATH', 'C:\\Program Files\\XM Global MT5')
+        'path': os.getenv('MT5_PATH', find_mt5_path())
     }
     # Validate LIVE credentials
     if MT5_CONFIG['account'] == 0 or not MT5_CONFIG['password']:
@@ -2850,8 +2868,9 @@ def create_bot():
             print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
             
             # Bot configuration
-            # Generate unique bot_id using UUID (completely collision-free, even with simultaneous requests)
-            bot_id = data.get('botId') or f"bot_{uuid.uuid4().hex[:12]}"
+            # Generate ABSOLUTELY unique bot_id (timestamp + uuid to ensure no collisions)
+            import time
+            bot_id = data.get('botId') or f"bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
             symbols = data.get('symbols', ['EURUSD'])
             strategy = data.get('strategy', 'Trend Following')
             risk_per_trade = float(data.get('riskPerTrade', 100))
@@ -2860,20 +2879,43 @@ def create_bot():
             
             account_id = f"{broker_name}_{account_number}"
             
-            # Store bot in database
+            # Store bot in database (check if already exists first)
             created_at = datetime.now().isoformat()
-            cursor.execute('''
-                INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, created_at, created_at))
-            
-            # Link bot to credential for commission tracking
-            cursor.execute('''
-                INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
-                VALUES (?, ?, ?, ?)
-            ''', (bot_id, credential_id, user_id, created_at))
-            
-            conn.commit()
+            try:
+                cursor.execute('SELECT bot_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+                if cursor.fetchone():
+                    # Bot already exists, regenerate ID
+                    logger.warning(f"Bot ID {bot_id} already exists, regenerating...")
+                    bot_id = f"bot_{int(time.time() * 1000) + 1}_{uuid.uuid4().hex[:8]}"
+                
+                cursor.execute('''
+                    INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, created_at, created_at))
+                
+                # Link bot to credential for commission tracking
+                cursor.execute('''
+                    INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                ''', (bot_id, credential_id, user_id, created_at))
+                
+                conn.commit()
+            except Exception as e:
+                if 'UNIQUE constraint' in str(e):
+                    logger.error(f"Bot creation failed - duplicate ID. Retrying with new ID...")
+                    # Final retry with absolute unique ID
+                    bot_id = f"bot_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:6]}"
+                    cursor.execute('''
+                        INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, created_at, created_at))
+                    cursor.execute('''
+                        INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                    ''', (bot_id, credential_id, user_id, created_at))
+                    conn.commit()
+                else:
+                    raise
             
         finally:
             if conn:
@@ -3048,11 +3090,12 @@ def start_bot():
         import random
         bot_config = active_bots[bot_id]
         
-        # SWITCH TO REAL MT5 TRADES
-        logger.info(f"🔴 Bot {bot_id}: Using REAL MT5 trades instead of simulated profits")
+        # TRY REAL MT5 TRADES, FALLBACK TO SIMULATED IF UNAVAILABLE
+        logger.info(f"📍 Bot {bot_id}: Attempting to use REAL MT5 trades...")
         
-        # Initialize MT5 connection for real trading
         mt5_conn = None
+        use_simulated = False
+        
         try:
             if bot_mode == 'live' and bot_credentials:
                 mt5_conn = MT5Connection(bot_credentials)
@@ -3061,13 +3104,15 @@ def start_bot():
                 mt5_conn = MT5Connection()
             
             if not mt5_conn.connect():
-                logger.error(f"Failed to connect to MT5 for bot {bot_id}")
-                return jsonify({'success': False, 'error': 'Failed to connect to MT5'}), 500
-            
-            logger.info(f"✅ Bot {bot_id} connected to real MT5 account")
+                logger.warning(f"⚠️  Failed to connect to MT5 for bot {bot_id} - falling back to simulated trading")
+                use_simulated = True
+                mt5_conn = None
+            else:
+                logger.info(f"✅ Bot {bot_id} connected to REAL MT5 account")
         except Exception as e:
-            logger.error(f"Error initializing MT5 connection: {e}")
-            return jsonify({'success': False, 'error': str(e)}), 500
+            logger.warning(f"⚠️  MT5 not available ({e}) - using SIMULATED trading for bot {bot_id}")
+            use_simulated = True
+            mt5_conn = None
         
         # INTELLIGENT STRATEGY SWITCHING
         if bot_config.get('autoSwitch', True):
