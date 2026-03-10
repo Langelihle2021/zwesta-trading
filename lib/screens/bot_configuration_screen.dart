@@ -206,7 +206,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         }),
       ).timeout(const Duration(seconds: 10));
 
-      if (createResponse.statusCode != 200) {
+      if (createResponse.statusCode != 200 && createResponse.statusCode != 201) {
         final errorData = jsonDecode(createResponse.body);
         throw Exception(errorData['error'] ?? 'Failed to create bot: ${createResponse.statusCode}');
       }
