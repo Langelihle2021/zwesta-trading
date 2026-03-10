@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/environment_config.dart';
+import '../services/broker_credentials_service.dart';
+import '../services/commission_service.dart';
 import 'bot_dashboard_screen.dart';
+import 'broker_integration_screen.dart';
 
 class BotConfigurationScreen extends StatefulWidget {
   const BotConfigurationScreen({Key? key}) : super(key: key);
@@ -22,6 +26,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   bool _isLoadingData = true;
   String? _successMessage;
   String? _errorMessage;
+  
+  // NEW: Broker integration
+  late BrokerCredentialsService _brokerService;
+  late CommissionService _commissionService;
   
   Map<String, dynamic> commodityMarketData = {};
 
@@ -72,7 +80,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     );
     _riskPerTradeController = TextEditingController(text: '100');
     _maxDailyLossController = TextEditingController(text: '500');
+    
+    // Initialize services
+    _brokerService = BrokerCredentialsService();
+    _commissionService = CommissionService();
+    
     _fetchCommodityData();
+    _brokerService.fetchCredentials(); // Load broker credentials on startup
+    _commissionService.fetchCommissions(); // Load commission data
   }
 
   Future<void> _fetchCommodityData() async {
@@ -106,6 +121,50 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   }
 
   Future<void> _createAndStartBot() async {
+    // STEP 1: Check if broker is integrated
+    if (!_brokerService.hasCredentials) {
+      _showError('Please setup broker integration first!');
+      
+      // Show dialog with option to setup broker
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('⚠️ Broker Setup Required'),
+            content: const Text(
+              'You need to integrate your broker account before creating a bot. '
+              'This ensures your bot can trade with verified credentials.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Navigate to broker integration screen
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => BrokerIntegrationScreen(
+                        onBackPressed: () {
+                          Navigator.pop(context);
+                          // Refresh credentials after setup
+                          _brokerService.fetchCredentials();
+                        },
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Setup Broker'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
     if (_selectedSymbols.isEmpty) {
       _showError('Please select at least one trading symbol');
       return;
@@ -118,13 +177,27 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     });
 
     try {
-      // Create bot
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      
+      if (sessionToken == null) {
+        throw Exception('Session expired. Please login again.');
+      }
+
+      print('🤖 Creating bot with broker credential: ${_brokerService.activeCredential?.credentialId}');
+      print('   Broker: ${_brokerService.activeCredential?.broker}');
+      print('   Account: ${_brokerService.activeCredential?.accountNumber}');
+
+      // STEP 2: Create bot with credential_id
       final createResponse = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/create'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
         body: jsonEncode({
           'botId': _botIdController.text,
-          'accountId': 'Default MT5',
+          'credentialId': _brokerService.activeCredential!.credentialId, // ✅ Link to broker credential
           'symbols': _selectedSymbols,
           'strategy': _selectedStrategy,
           'riskPerTrade': double.parse(_riskPerTradeController.text),
@@ -134,26 +207,44 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       ).timeout(const Duration(seconds: 10));
 
       if (createResponse.statusCode != 200) {
-        throw Exception('Failed to create bot: ${createResponse.statusCode}');
+        final errorData = jsonDecode(createResponse.body);
+        throw Exception(errorData['error'] ?? 'Failed to create bot: ${createResponse.statusCode}');
       }
 
-      // Start bot
+      print('✅ Bot created successfully');
+
+      // STEP 3: Start bot
       final startResponse = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/start'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
         body: jsonEncode({'botId': _botIdController.text}),
       ).timeout(const Duration(seconds: 10));
 
       if (startResponse.statusCode == 200) {
         final data = jsonDecode(startResponse.body);
+        
+        print('✅ Bot started, trades placed: ${data['tradesPlaced']}');
+        print('💰 Commission tracking enabled for this bot');
+
         setState(() {
-          _successMessage =
-              'Bot created and started! Trades placed: ${data['tradesPlaced']}';
+          _successMessage = 
+            'Bot created and started! 🎉\n'
+            'Broker: ${_brokerService.activeCredential?.broker}\n'
+            'Account: ${_brokerService.activeCredential?.accountNumber}\n'
+            'Trades placed: ${data['tradesPlaced']}\n\n'
+            '💰 Commissions will be tracked on every trade.\n'
+            '📊 Earnings appear in your Commission Dashboard.';
           _isCreating = false;
         });
         
-        // Auto-navigate to dashboard after 2 seconds
-        Future.delayed(const Duration(seconds: 2), () {
+        // Refresh commission data
+        _commissionService.fetchCommissions();
+        
+        // Auto-navigate to dashboard after 3 seconds
+        Future.delayed(const Duration(seconds: 3), () {
           if (mounted) {
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (context) => const BotDashboardScreen()),
@@ -162,7 +253,15 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           }
         });
       } else {
-        throw Exception('Failed to start bot: ${startResponse.statusCode}');
+        final errorData = jsonDecode(startResponse.body);
+        throw Exception(errorData['error'] ?? 'Failed to start bot: ${startResponse.statusCode}');
+      }
+    } catch (e) {
+      _showError('Error: ${e.toString()}');
+    } finally {
+      setState(() => _isCreating = false);
+    }
+  }
       }
     } catch (e) {
       _showError('Error: ${e.toString()}');

@@ -311,6 +311,33 @@ def init_database():
         )
     ''')
     
+    # Bot-Credential linking table - links bots to their broker credentials
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_credentials (
+            bot_id TEXT NOT NULL,
+            credential_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            created_at TEXT,
+            PRIMARY KEY (bot_id, credential_id),
+            FOREIGN KEY (bot_id) REFERENCES user_bots(bot_id),
+            FOREIGN KEY (credential_id) REFERENCES broker_credentials(credential_id),
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # Commission withdrawals table - tracks withdrawal requests
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commission_withdrawals (
+            withdrawal_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            amount REAL NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT,
+            processed_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
     # User sessions table - for authentication
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_sessions (
@@ -2002,28 +2029,367 @@ commodity_market_data = {
 # Store active bots configuration
 active_bots = {}
 
+# ==================== BROKER CREDENTIAL MANAGEMENT ====================
+
+@app.route('/api/broker/credentials', methods=['GET'])
+@require_session
+def get_broker_credentials():
+    """Get all broker credentials for authenticated user"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, server, is_live, is_active, created_at
+            FROM broker_credentials
+            WHERE user_id = ? AND is_active = 1
+            ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        credentials = []
+        for row in rows:
+            credentials.append({
+                'credential_id': row[0],
+                'broker': row[1],
+                'account_number': row[2],
+                'server': row[3],
+                'is_live': bool(row[4]),
+                'is_active': bool(row[5]),
+                'created_at': row[6],
+            })
+        
+        logger.info(f"✅ Retrieved {len(credentials)} broker credentials for user {user_id}")
+        return jsonify({
+            'success': True,
+            'credentials': credentials,
+            'count': len(credentials)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching credentials: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/credentials', methods=['POST'])
+@require_session
+def save_broker_credentials():
+    """Save new broker credentials for user"""
+    try:
+        user_id = request.user_id
+        data = request.json
+        
+        required_fields = ['broker', 'account_number', 'password', 'server']
+        if not all(field in data for field in required_fields):
+            return jsonify({
+                'success': False,
+                'error': f'Missing required fields: {required_fields}'
+            }), 400
+        
+        credential_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        is_live = data.get('is_live', False)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO broker_credentials
+            (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ''', (
+            credential_id,
+            user_id,
+            data['broker'],
+            data['account_number'],
+            data['password'],
+            data['server'],
+            1 if is_live else 0,
+            created_at,
+            created_at
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Saved broker credential for user {user_id}: {data['broker']} | Account: {data['account_number']}")
+        
+        return jsonify({
+            'success': True,
+            'credential': {
+                'credential_id': credential_id,
+                'broker': data['broker'],
+                'account_number': data['account_number'],
+                'server': data['server'],
+                'is_live': is_live,
+                'is_active': True,
+                'created_at': created_at,
+            }
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving credentials: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/credentials/<credential_id>', methods=['DELETE'])
+@require_session
+def delete_broker_credentials(credential_id):
+    """Delete broker credential"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify credential belongs to user
+        cursor.execute('''
+            SELECT user_id FROM broker_credentials WHERE credential_id = ?
+        ''', (credential_id,))
+        
+        row = cursor.fetchone()
+        if not row or row[0] != user_id:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Credential not found or does not belong to user'}), 404
+        
+        # Delete credential
+        cursor.execute('''
+            DELETE FROM broker_credentials WHERE credential_id = ?
+        ''', (credential_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Deleted broker credential {credential_id} for user {user_id}")
+        return jsonify({'success': True, 'message': 'Credential deleted'}), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error deleting credential: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/test-connection', methods=['POST'])
+def test_broker_connection():
+    """Test broker connection with provided credentials"""
+    try:
+        data = request.json
+        broker = data.get('broker', '')
+        account = data.get('account_number', '')
+        
+        # Simulate connection test
+        if not broker or not account:
+            return jsonify({
+                'success': False,
+                'error': 'Broker and account_number required'
+            }), 400
+        
+        # In production, you would connect to actual broker MT5 API
+        # For now, simulate successful connection
+        logger.info(f"🔌 Testing broker connection: {broker} | Account: {account}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully connected to {broker} account {account}',
+            'broker': broker,
+            'account_number': account,
+            'balance': 10000.00,  # Placeholder
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Connection test failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== COMMISSION MANAGEMENT ====================
+
+@app.route('/api/user/commissions', methods=['GET'])
+@require_session
+def get_user_commissions():
+    """Get commission history and stats for user"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all commissions as earner
+        cursor.execute('''
+            SELECT commission_id, bot_id, profit_amount, commission_rate, commission_amount, created_at
+            FROM commissions
+            WHERE earner_id = ?
+            ORDER BY created_at DESC
+            LIMIT 100
+        ''', (user_id,))
+        
+        commission_rows = cursor.fetchall()
+        
+        # Get commission stats
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_count,
+                SUM(commission_amount) as total_earned,
+                SUM(CASE WHEN created_at > datetime('now', '-30 days') THEN commission_amount ELSE 0 END) as pending,
+                SUM(CASE WHEN bot_id IN (SELECT bot_id FROM user_bots WHERE status='completed') THEN commission_amount ELSE 0 END) as withdrawn
+            FROM commissions
+            WHERE earner_id = ?
+        ''', (user_id,))
+        
+        stats_row = cursor.fetchone()
+        
+        commissions = []
+        for row in commission_rows:
+            commissions.append({
+                'commission_id': row[0],
+                'bot_id': row[1],
+                'profit_amount': row[2],
+                'commission_rate': row[3],
+                'amount': row[4],
+                'source': 'trade',
+                'status': 'completed',
+                'created_at': row[5],
+            })
+        
+        conn.close()
+        
+        stats = {
+            'total_earned': stats_row[1] or 0,
+            'total_pending': stats_row[2] or 0,
+            'total_withdrawn': stats_row[3] or 0,
+            'trade_commissions': stats_row[0] or 0,
+            'referral_commissions': 0,
+        }
+        
+        logger.info(f"✅ Retrieved commissions for user {user_id}: ${stats['total_earned']:.2f} earned")
+        
+        return jsonify({
+            'success': True,
+            'commissions': commissions,
+            'stats': stats
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching commissions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/referral-commissions', methods=['GET'])
+@require_session
+def get_referral_commissions():
+    """Get referral commission earnings"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get referrals and their commissions
+        cursor.execute('''
+            SELECT COUNT(*) as active_referrals
+            FROM referrals
+            WHERE referrer_id = ? AND status = 'active'
+        ''', (user_id,))
+        
+        referral_count = cursor.fetchone()[0]
+        
+        # Get total referral commissions
+        cursor.execute('''
+            SELECT SUM(c.commission_amount) as total_referral_commission
+            FROM commissions c
+            INNER JOIN referrals r ON c.client_id = r.referred_user_id
+            WHERE r.referrer_id = ? AND c.earner_id = ?
+        ''', (user_id, user_id))
+        
+        referral_total = cursor.fetchone()[0] or 0
+        conn.close()
+        
+        logger.info(f"✅ Retrieved referral commissions for user {user_id}: {referral_count} referrals, ${referral_total:.2f}")
+        
+        return jsonify({
+            'success': True,
+            'active_referrals': referral_count,
+            'total_referral_commission': referral_total,
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching referral commissions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/commission-withdrawal', methods=['POST'])
+@require_session
+def request_commission_withdrawal():
+    """Request withdrawal of earned commissions"""
+    try:
+        user_id = request.user_id
+        data = request.json
+        amount = data.get('amount', 0)
+        
+        if amount <= 0:
+            return jsonify({'success': False, 'error': 'Amount must be greater than 0'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check available balance
+        cursor.execute('''
+            SELECT SUM(commission_amount) as total FROM commissions WHERE earner_id = ?
+        ''', (user_id,))
+        
+        total = cursor.fetchone()[0] or 0
+        
+        if amount > total:
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'Insufficient balance. Available: ${total:.2f}, Requested: ${amount:.2f}'
+            }), 400
+        
+        # Create withdrawal request
+        withdrawal_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        
+        cursor.execute('''
+            INSERT INTO commission_withdrawals (withdrawal_id, user_id, amount, status, created_at)
+            VALUES (?, ?, ?, 'pending', ?)
+        ''', (withdrawal_id, user_id, amount, created_at))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Withdrawal request created: {withdrawal_id} | User: {user_id} | Amount: ${amount:.2f}")
+        
+        return jsonify({
+            'success': True,
+            'withdrawal_id': withdrawal_id,
+            'amount': amount,
+            'status': 'pending',
+            'message': 'Withdrawal request submitted. Processing usually takes 3-5 business days.'
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating withdrawal: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/bot/create', methods=['POST'])
 @require_session
 def create_bot():
     """Create and start a new trading bot for a user
     
-    Supports HYBRID MODE:
-    - DEMO: No MT5 credentials required, uses shared demo account
-    - LIVE: User provides MT5 credentials, bot uses their account
+    PROPER FLOW:
+    1. User integrates broker account (broker_credentials table)
+    2. User creates bot linked to that credential_id
+    3. Bot trades using verified broker account
     
     Request body:
     {
         "botId": "optional_bot_name",
+        "credentialId": "credential_uuid",  // ✅ REQUIRED - from broker integration
         "symbols": ["EURUSD", "XAUUSD"],
         "strategy": "Trend Following",
         "riskPerTrade": 100,
-        "maxDailyLoss": 500,
-        "mode": "demo" or "live",  // optional, defaults to "demo"
-        "mt5_credentials": {  // optional, only for live mode
-            "account_number": "104017418",
-            "password": "*6RjhRvH",
-            "server": "MetaQuotes-Demo"
-        }
+        "maxDailyLoss": 500
     }
     """
     try:
@@ -2031,9 +2397,14 @@ def create_bot():
         if not data:
             return jsonify({'success': False, 'error': 'No configuration provided'}), 400
         
-        user_id = data.get('user_id') or request.user_id  # Get from request body or session
+        user_id = request.user_id  # From @require_session decorator
         if not user_id:
-            return jsonify({'success': False, 'error': 'user_id required'}), 400
+            return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+        
+        # Get credential_id from request - REQUIRED
+        credential_id = data.get('credentialId')
+        if not credential_id:
+            return jsonify({'success': False, 'error': 'credentialId required - must setup broker integration first'}), 400
         
         # Verify user exists
         conn = get_db_connection()
@@ -2043,6 +2414,26 @@ def create_bot():
             conn.close()
             return jsonify({'success': False, 'error': 'User not found'}), 404
         
+        # Verify credential exists AND belongs to this user
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, is_live 
+            FROM broker_credentials 
+            WHERE credential_id = ? AND user_id = ?
+        ''', (credential_id, user_id))
+        
+        credential_row = cursor.fetchone()
+        if not credential_row:
+            conn.close()
+            return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
+        
+        credential_data = dict(credential_row)
+        broker_name = credential_data['broker_name']
+        account_number = credential_data['account_number']
+        is_live = credential_data['is_live']
+        mode = 'live' if is_live else 'demo'
+        
+        print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
+        
         # Bot configuration
         bot_id = data.get('botId') or f"bot_{user_id}_{int(datetime.now().timestamp())}"
         symbols = data.get('symbols', ['EURUSD'])
@@ -2050,47 +2441,8 @@ def create_bot():
         risk_per_trade = float(data.get('riskPerTrade', 100))
         max_daily_loss = float(data.get('maxDailyLoss', 500))
         trading_enabled = data.get('enabled', True)
-        mode = data.get('mode', 'demo').lower()  # 'demo' or 'live'
         
-        # HYBRID MODE LOGIC
-        credential_id = None
-        account_id = None
-        broker_name = 'MT5'
-        
-        if mode == 'live':
-            # LIVE MODE: User provides their MT5 credentials
-            mt5_creds = data.get('mt5_credentials')
-            
-            if not mt5_creds:
-                conn.close()
-                return jsonify({'success': False, 'error': 'Live mode requires mt5_credentials'}), 400
-            
-            account_number = mt5_creds.get('account_number')
-            password = mt5_creds.get('password')
-            server = mt5_creds.get('server')
-            
-            if not all([account_number, password, server]):
-                conn.close()
-                return jsonify({'success': False, 'error': 'Missing MT5 credentials (account_number, password, server)'}), 400
-            
-            # Store credentials in broker_credentials table
-            credential_id = str(uuid.uuid4())
-            created_at = datetime.now().isoformat()
-            
-            cursor.execute('''
-                INSERT INTO broker_credentials 
-                (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-            ''', (credential_id, user_id, broker_name, account_number, password, server, 1, created_at, created_at))
-            
-            account_id = f"User_{user_id}_{account_number}"
-            logger.info(f"Bot {bot_id}: LIVE MODE - Using user's MT5 account {account_number}")
-        
-        else:
-            # DEMO MODE: Use shared demo MT5 account (no credentials needed)
-            account_id = 'Demo MT5 - XM Global'  # Shared demo account
-            mode = 'demo'
-            logger.info(f"Bot {bot_id}: DEMO MODE - Using shared demo account {MT5_CONFIG['account']}")
+        account_id = f"{broker_name}_{account_number}"
         
         # Store bot in database
         created_at = datetime.now().isoformat()
@@ -2098,6 +2450,12 @@ def create_bot():
             INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, created_at, created_at))
+        
+        # Link bot to credential for commission tracking
+        cursor.execute('''
+            INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
+            VALUES (?, ?, ?, ?)
+        ''', (bot_id, credential_id, user_id, created_at))
         
         conn.commit()
         conn.close()
@@ -2110,7 +2468,7 @@ def create_bot():
             'accountId': account_id,
             'brokerName': broker_name,
             'mode': mode,  # 'demo' or 'live'
-            'credentialId': credential_id,  # None for demo, UUID for live
+            'credentialId': credential_id,
             'symbols': symbols,
             'strategy': strategy,
             'riskPerTrade': risk_per_trade,
@@ -2132,22 +2490,20 @@ def create_bot():
             'peakProfit': 0,
         }
         
-        logger.info(f"Created bot {bot_id} for user {user_id}: {strategy} ({mode} mode)")
+        logger.info(f"✅ Created bot {bot_id} for user {user_id}")
+        logger.info(f"   Broker: {broker_name} | Account: {account_number} | Mode: {mode}")
         
         return jsonify({
             'success': True,
             'botId': bot_id,
             'user_id': user_id,
-            'mode': mode,
             'credentialId': credential_id,
             'accountId': account_id,
-            'message': f'Bot {bot_id} created successfully in {mode.upper()} mode',
-            'config': {
-                'botId': bot_id,
-                'mode': mode,
-                'accountId': account_id,
-                'symbols': symbols,
-                'strategy': strategy,
+            'broker': broker_name,
+            'account_number': account_number,
+            'mode': mode,
+            'message': f'Bot {bot_id} created successfully'
+        }), 201
             }
         }), 200
     
