@@ -206,10 +206,11 @@ class BotService extends ChangeNotifier {
       ).timeout(const Duration(seconds: 10));
 
       print('📥 Response: ${response.statusCode}');
-      print('  Body: ${response.body}')
-          await fetchActiveBots();
-          return true;
-        }
+      print('  Body: ${response.body}');
+      
+      if (response.statusCode == 200) {
+        await fetchActiveBots();
+        return true;
       } else if (response.statusCode == 401) {
         _errorMessage = 'Session expired or invalid token. Please login again.';
         print('❌ BOT CREATION 401 ERROR:');
