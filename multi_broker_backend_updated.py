@@ -3048,9 +3048,29 @@ def start_bot():
         import random
         bot_config = active_bots[bot_id]
         
+        # SWITCH TO REAL MT5 TRADES
+        logger.info(f"🔴 Bot {bot_id}: Using REAL MT5 trades instead of simulated profits")
+        
+        # Initialize MT5 connection for real trading
+        mt5_conn = None
+        try:
+            if bot_mode == 'live' and bot_credentials:
+                mt5_conn = MT5Connection(bot_credentials)
+            else:
+                # Use default demo account
+                mt5_conn = MT5Connection()
+            
+            if not mt5_conn.connect():
+                logger.error(f"Failed to connect to MT5 for bot {bot_id}")
+                return jsonify({'success': False, 'error': 'Failed to connect to MT5'}), 500
+            
+            logger.info(f"✅ Bot {bot_id} connected to real MT5 account")
+        except Exception as e:
+            logger.error(f"Error initializing MT5 connection: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+        
         # INTELLIGENT STRATEGY SWITCHING
         if bot_config.get('autoSwitch', True):
-            # Check if we should switch strategies (every 10 trades)
             if bot_config['totalTrades'] > 0 and bot_config['totalTrades'] % 10 == 0:
                 best_strategy = strategy_tracker.get_best_strategy()
                 if best_strategy != bot_config['strategy']:
@@ -3066,98 +3086,134 @@ def start_bot():
                     })
                     logger.info(f"Bot {bot_id} switched from {old_strategy} to {best_strategy}")
         
-        # Get strategy function
+        # Place REAL trades on MT5
         strategy_name = bot_config['strategy']
         strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
         
-        # Simulate bot placing trades on configured symbols
         trades_placed = []
         for symbol in bot_config['symbols'][:3]:  # Limit to 3 trades per cycle
-            # DYNAMIC POSITION SIZING
-            if bot_config.get('dynamicSizing', True):
-                position_size = position_sizer.calculate_position_size(
-                    bot_config, 
-                    volatility_level=bot_config.get('volatilityLevel', 'Medium')
+            try:
+                # DYNAMIC POSITION SIZING
+                if bot_config.get('dynamicSizing', True):
+                    position_size = position_sizer.calculate_position_size(
+                        bot_config, 
+                        volatility_level=bot_config.get('volatilityLevel', 'Medium')
+                    )
+                else:
+                    position_size = bot_config.get('basePositionSize', 1.0)
+                
+                # Get trade direction from strategy
+                trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'])
+                adjusted_volume = trade_params['volume'] * position_size
+                order_type = trade_params['type']
+                
+                # PLACE REAL ORDER ON MT5
+                logger.info(f"📍 Placing REAL {order_type} order on {symbol} | Volume: {adjusted_volume:.2f}")
+                
+                order_result = mt5_conn.place_order(
+                    symbol=symbol,
+                    order_type=order_type,
+                    volume=round(adjusted_volume, 2),
+                    comment=f'Zwesta Bot {bot_id} - {strategy_name}'
                 )
-            else:
-                position_size = bot_config.get('basePositionSize', 1.0)
-            
-            # Call strategy function to determine trade parameters
-            trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'])
-            
-            # Apply dynamic position sizing to the volume
-            adjusted_volume = trade_params['volume'] * position_size
-            
-            entry_price = random.uniform(1, 2000)
-            exit_price = entry_price + random.uniform(-50, 50)  # Exit price varies from entry
-            
-            trade = {
-                'ticket': random.randint(1000000, 9999999),
-                'symbol': trade_params['symbol'],
-                'type': trade_params['type'],
-                'volume': round(adjusted_volume, 2),
-                'baseVolume': trade_params['volume'],
-                'positionSize': position_size,
-                'entryPrice': entry_price,
-                'exitPrice': exit_price,
-                'profit': trade_params['profit'],
-                'time': datetime.now().isoformat(),
-                'timestamp': int(datetime.now().timestamp() * 1000),  # milliseconds for charting
-                'botId': bot_id,
-                'strategy': strategy_name,
-                'isWinning': trade_params['profit'] > 0,
-            }
-            
-            # Store trade
-            if bot_config['accountId'] not in demo_trades_storage:
-                demo_trades_storage[bot_config['accountId']] = []
-            demo_trades_storage[bot_config['accountId']].append(trade)
-            
-            # Record strategy performance
-            strategy_tracker.record_trade(strategy_name, trade['profit'], symbol)
-            
-            # ✅ LOG TRADE DETAILS
-            trade_result = "✅ WIN" if trade['profit'] > 0 else "❌ LOSS"
-            logger.info(f"\n📊 {trade_result}: {symbol} | P&L: ${trade['profit']:.2f}")
-            
-            # Safe access to exit price (use entry price as fallback if not set)
-            exit_price = trade.get('exitPrice', trade.get('entryPrice', 0))
-            logger.info(f"   Entry: ${trade.get('entryPrice', 0):.2f} → Exit: ${exit_price:.2f} | Volume: {trade.get('volume', 0)}")
-            
-            # Update bot stats
-            bot_config['totalTrades'] += 1
-            bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
-            
-            if trade['profit'] > 0:
-                bot_config['winningTrades'] += 1
-            else:
-                bot_config['totalLosses'] += abs(trade['profit'])
-            
-            bot_config['totalProfit'] += trade['profit']
-            
-            # Update peak and drawdown
-            if bot_config['totalProfit'] > bot_config['peakProfit']:
-                bot_config['peakProfit'] = bot_config['totalProfit']
-            
-            drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
-            if drawdown > bot_config['maxDrawdown']:
-                bot_config['maxDrawdown'] = drawdown
-            
-            # Track profit history for charting
-            bot_config['profitHistory'].append({
-                'timestamp': trade['timestamp'],
-                'profit': round(bot_config['totalProfit'], 2),
-                'trades': bot_config['totalTrades'],
-            })
-            
-            # Track daily profit
-            today = datetime.now().strftime('%Y-%m-%d')
-            if today not in bot_config['dailyProfits']:
-                bot_config['dailyProfits'][today] = 0
-            bot_config['dailyProfits'][today] += trade['profit']
-            
-            # Add to trade history
-            bot_config['tradeHistory'].append(trade)
+                
+                if not order_result.get('success', False):
+                    logger.warning(f"⚠️  Failed to place order on {symbol}: {order_result.get('error')}")
+                    continue
+                
+                # Get current position info after placing trade
+                positions = mt5_conn.get_positions()
+                if positions:
+                    # Find the position we just created
+                    real_position = None
+                    for pos in positions:
+                        if pos['symbol'] == symbol and pos['type'] == order_type:
+                            real_position = pos
+                            break
+                    
+                    if real_position:
+                        # Use REAL data from MT5
+                        trade = {
+                            'ticket': real_position['ticket'],
+                            'symbol': real_position['symbol'],
+                            'type': real_position['type'],
+                            'volume': real_position['volume'],
+                            'baseVolume': trade_params['volume'],
+                            'positionSize': position_size,
+                            'entryPrice': real_position['openPrice'],
+                            'exitPrice': real_position['currentPrice'],
+                            'profit': real_position['pnl'],
+                            'time': datetime.now().isoformat(),
+                            'timestamp': int(datetime.now().timestamp() * 1000),
+                            'botId': bot_id,
+                            'strategy': strategy_name,
+                            'isWinning': real_position['pnl'] > 0,
+                            'source': 'REAL_MT5',
+                        }
+                        
+                        logger.info(f"✅ REAL TRADE EXECUTED: {symbol} | P&L: ${real_position['pnl']:.2f}")
+                        logger.info(f"   Entry: ${real_position['openPrice']:.5f} | Current: ${real_position['currentPrice']:.5f} | Ticket: {real_position['ticket']}")
+                        
+                        # Store trade
+                        if bot_config['accountId'] not in demo_trades_storage:
+                            demo_trades_storage[bot_config['accountId']] = []
+                        demo_trades_storage[bot_config['accountId']].append(trade)
+                        
+                        # Record strategy performance
+                        strategy_tracker.record_trade(strategy_name, trade['profit'], symbol)
+                        
+                        # Update bot stats
+                        bot_config['totalTrades'] += 1
+                        bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
+                        
+                        if trade['profit'] > 0:
+                            bot_config['winningTrades'] += 1
+                        else:
+                            bot_config['totalLosses'] += abs(trade['profit'])
+                        
+                        bot_config['totalProfit'] += trade['profit']
+                        
+                        # Update peak and drawdown
+                        if bot_config['totalProfit'] > bot_config['peakProfit']:
+                            bot_config['peakProfit'] = bot_config['totalProfit']
+                        
+                        drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
+                        if drawdown > bot_config['maxDrawdown']:
+                            bot_config['maxDrawdown'] = drawdown
+                        
+                        # Track profit history
+                        bot_config['profitHistory'].append({
+                            'timestamp': trade['timestamp'],
+                            'profit': round(bot_config['totalProfit'], 2),
+                            'trades': bot_config['totalTrades'],
+                        })
+                        
+                        # Track daily profit
+                        today = datetime.now().strftime('%Y-%m-%d')
+                        if today not in bot_config['dailyProfits']:
+                            bot_config['dailyProfits'][today] = 0
+                        bot_config['dailyProfits'][today] += trade['profit']
+                        
+                        # Add to trade history
+                        bot_config['tradeHistory'].append(trade)
+                        trades_placed.append(trade)
+                    else:
+                        logger.warning(f"Position data not found after placing order on {symbol}")
+                else:
+                    logger.warning(f"Could not fetch positions after order for {symbol}")
+                    
+            except Exception as e:
+                logger.error(f"Error placing trade on {symbol}: {e}")
+                continue
+        
+        # Get updated account info from MT5
+        try:
+            account_info = mt5_conn.get_account_info()
+            if account_info:
+                bot_config['accountBalance'] = account_info.get('balance', 0)
+                logger.info(f"📊 Account Balance (from MT5): ${account_info.get('balance', 0):.2f}")
+        except Exception as e:
+            logger.warning(f"Could not update account info: {e}")
             
             # ✅ COMMISSION CALCULATION - Only for profitable trades
             if trade['profit'] > 0:
