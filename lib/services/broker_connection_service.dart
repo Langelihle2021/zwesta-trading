@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/broker_connection_model.dart';
 import '../utils/environment_config.dart';
@@ -69,10 +70,27 @@ class BrokerConnectionService {
     try {
       print('🔌 Testing connection with backend: $broker | Account: $accountNumber');
       
-      // Call backend API
+      // Get session token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      
+      if (sessionToken == null || sessionToken.isEmpty) {
+        print('❌ No session token found');
+        return {
+          'success': false,
+          'connected': false,
+          'message': 'Session expired. Please login again.',
+          'errorCode': 'SESSION_EXPIRED',
+        };
+      }
+      
+      // Call backend API with session token
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
         body: jsonEncode({
           'broker': broker,
           'account_number': accountNumber,
@@ -128,6 +146,14 @@ class BrokerConnectionService {
             'errorCode': 'BACKEND_ERROR',
           };
         }
+      } else if (response.statusCode == 401) {
+        print('❌ Unauthorized: Session token invalid');
+        return {
+          'success': false,
+          'connected': false,
+          'message': 'Session expired. Please login again.',
+          'errorCode': 'UNAUTHORIZED',
+        };
       } else if (response.statusCode == 400) {
         final data = jsonDecode(response.body);
         print('❌ Bad request: ${data['error']}');
