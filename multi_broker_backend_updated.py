@@ -2554,24 +2554,30 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
     """
     Distribute commissions for profitable trades
     
+    IMPORTANT: Commission is ONLY earned from YOUR DOWNLINERS (referrals)
+    NOT from your own trades!
+    
     Flow:
-    1. Calculate 5% commission from profit
-    2. Check if user has referrer
-    3. If YES: Split 50/50 between user and referrer
-    4. If NO: User gets full commission
-    5. Create commission records in database
+    1. Check if THIS USER (bot_id owner) has a REFERRER (upline)
+    2. If YES: Referrer gets 5% commission from this user's bot profit
+    3. If NO: No commission (only own downliners would pay you commission)
+    4. Separately: Check how many downliners THIS USER has and they will get commissions
     """
     try:
         if profit_amount <= 0:
             return  # Only commission on profits
         
-        COMMISSION_RATE = 0.05  # 5%
+        COMMISSION_RATE = 0.05  # 5% commission rate
         commission_amount = profit_amount * COMMISSION_RATE
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Check if this user has a referrer
+        # ✅ CORRECTED LOGIC:
+        # The bot_owner (user_id) should NOT earn commission from their own trades
+        # The bot_owner's REFERRER (upline) earns commission from this user's bot profit
+        
+        # Check if bot owner has a referrer (upline)
         cursor.execute('''
             SELECT referrer_id FROM referrals
             WHERE referred_user_id = ? AND status = 'active'
@@ -2581,61 +2587,17 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
         has_referrer = referrer_row is not None
         referrer_id = referrer_row[0] if has_referrer else None
         
-        # Create commission record for bot owner
-        commission_id_1 = str(uuid.uuid4())
-        
         if has_referrer:
-            # Split commission 50/50
-            user_commission = commission_amount * 0.5
-            referrer_commission = commission_amount * 0.5
-            
-            # Commission for user
+            # Referrer earns commission from this user's bot profit
+            commission_id = str(uuid.uuid4())
             cursor.execute('''
                 INSERT INTO commissions
                 (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                commission_id_1,
-                user_id,              # User earns commission
-                user_id,              # From their bot's profit
-                bot_id,
-                profit_amount,
-                COMMISSION_RATE,
-                user_commission,
-                datetime.now().isoformat()
-            ))
-            
-            # Commission for referrer
-            commission_id_2 = str(uuid.uuid4())
-            cursor.execute('''
-                INSERT INTO commissions
-                (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                commission_id_2,
-                referrer_id,           # Referrer earns commission
-                user_id,               # From referred user's bot
-                bot_id,
-                profit_amount,
-                COMMISSION_RATE,
-                referrer_commission,
-                datetime.now().isoformat()
-            ))
-            
-            logger.info(f"💰 Commission distributed for bot {bot_id}:")
-            logger.info(f"   User {user_id}: ${user_commission:.2f} (50%)")
-            logger.info(f"   Referrer {referrer_id}: ${referrer_commission:.2f} (50%)")
-            
-        else:
-            # No referrer - user gets full commission
-            cursor.execute('''
-                INSERT INTO commissions
-                (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                commission_id_1,
-                user_id,
-                user_id,
+                commission_id,
+                referrer_id,           # Referrer (upline) earns commission
+                user_id,               # From this referred user's bot
                 bot_id,
                 profit_amount,
                 COMMISSION_RATE,
@@ -2643,7 +2605,14 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
                 datetime.now().isoformat()
             ))
             
-            logger.info(f"💰 Commission created for bot {bot_id}: ${commission_amount:.2f} (no referrer)")
+            logger.info(f"💰 Commission earned by referrer {referrer_id}:")
+            logger.info(f"   From downliner {user_id}'s bot {bot_id}")
+            logger.info(f"   Amount: ${commission_amount:.2f} (5% of ${profit_amount:.2f})")
+        else:
+            # No referrer - this user has no upline earning from them
+            # Only their own downliners would pay them commission later
+            logger.info(f"ℹ️  No commission for bot {bot_id} (no upline referrer)")
+            logger.info(f"   [User {user_id} will earn commission from their own downliners' trades]")
         
         conn.commit()
         conn.close()
@@ -3142,6 +3111,11 @@ def start_bot():
             
             # Record strategy performance
             strategy_tracker.record_trade(strategy_name, trade['profit'], symbol)
+            
+            # ✅ LOG TRADE DETAILS
+            trade_result = "✅ WIN" if trade['profit'] > 0 else "❌ LOSS"
+            logger.info(f"\n📊 {trade_result}: {symbol} | P&L: ${trade['profit']:.2f}")
+            logger.info(f"   Entry: ${trade['entryPrice']:.2f} → Exit: ${trade['exitPrice']:.2f} | Volume: {trade['volume']}")
             
             # Update bot stats
             bot_config['totalTrades'] += 1
