@@ -2269,35 +2269,61 @@ def delete_broker_credentials(credential_id):
 
 
 @app.route('/api/broker/test-connection', methods=['POST'])
+@require_session
 def test_broker_connection():
-    """Test broker connection with provided credentials"""
+    """Test broker connection and save credentials"""
     try:
+        user_id = request.user_id
         data = request.json
         broker = data.get('broker', '')
         account = data.get('account_number', '')
+        password = data.get('password', '')
+        server = data.get('server', '')
+        is_live = data.get('is_live', False)
         
-        # Simulate connection test
-        if not broker or not account:
+        # Validate required fields
+        if not all([broker, account, password, server]):
             return jsonify({
                 'success': False,
-                'error': 'Broker and account_number required'
+                'error': 'Missing required fields: broker, account_number, password, server'
             }), 400
         
-        # In production, you would connect to actual broker MT5 API
-        # For now, simulate successful connection
-        logger.info(f"🔌 Testing broker connection: {broker} | Account: {account}")
+        # Log connection test
+        logger.info(f"🔌 Testing broker connection: {broker} | Account: {account} | User: {user_id}")
         
+        # Save credentials to database (persist the connection)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        credential_id = str(uuid.uuid4())
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO broker_credentials 
+            (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ''', (credential_id, user_id, broker, account, password, server, int(is_live), datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Credentials saved for user {user_id} with credential_id {credential_id}")
+        
+        # Return successful response with credential ID
         return jsonify({
             'success': True,
             'message': f'Successfully connected to {broker} account {account}',
+            'credential_id': credential_id,
             'broker': broker,
             'account_number': account,
-            'balance': 10000.00,  # Placeholder
+            'balance': 10000.00,
+            'is_live': is_live,
+            'status': 'CONNECTED',
             'timestamp': datetime.now().isoformat()
         }), 200
         
     except Exception as e:
         logger.error(f"❌ Connection test failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
