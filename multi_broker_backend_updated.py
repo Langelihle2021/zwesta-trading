@@ -171,8 +171,13 @@ DATABASE_PATH = 'zwesta_trading.db'
 
 def init_database():
     """Initialize SQLite database with referral and commission tables"""
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10.0, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=30.0, check_same_thread=False)
     cursor = conn.cursor()
+    
+    # Enable WAL mode for better concurrency
+    cursor.execute('PRAGMA journal_mode=WAL')
+    cursor.execute('PRAGMA synchronous=NORMAL')
+    cursor.execute('PRAGMA cache_size=-64000')  # 64MB cache
     
     # Users table
     cursor.execute('''
@@ -367,9 +372,12 @@ def init_database():
     logger.info("Database initialized")
 
 def get_db_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10.0, check_same_thread=False)
+    """Get database connection with WAL mode for concurrent writes"""
+    conn = sqlite3.connect(DATABASE_PATH, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for concurrent access
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
     return conn
 
 # Initialize database on startup
@@ -2644,60 +2652,63 @@ def create_bot():
         if not credential_id:
             return jsonify({'success': False, 'error': 'credentialId required - must setup broker integration first'}), 400
         
-        # Verify user exists
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
-        if not cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'error': 'User not found'}), 404
-        
-        # Verify credential exists AND belongs to this user
-        cursor.execute('''
-            SELECT credential_id, broker_name, account_number, is_live 
-            FROM broker_credentials 
-            WHERE credential_id = ? AND user_id = ?
-        ''', (credential_id, user_id))
-        
-        credential_row = cursor.fetchone()
-        if not credential_row:
-            conn.close()
-            return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
-        
-        credential_data = dict(credential_row)
-        broker_name = credential_data['broker_name']
-        account_number = credential_data['account_number']
-        is_live = credential_data['is_live']
-        mode = 'live' if is_live else 'demo'
-        
-        print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
-        
-        # Bot configuration
-        # Generate unique bot_id using milliseconds (not just seconds) to allow multiple bots in same second
-        bot_id = data.get('botId') or f"bot_{int(datetime.now().timestamp() * 1000)}"
-        symbols = data.get('symbols', ['EURUSD'])
-        strategy = data.get('strategy', 'Trend Following')
-        risk_per_trade = float(data.get('riskPerTrade', 100))
-        max_daily_loss = float(data.get('maxDailyLoss', 500))
-        trading_enabled = data.get('enabled', True)
-        
-        account_id = f"{broker_name}_{account_number}"
-        
-        # Store bot in database
-        created_at = datetime.now().isoformat()
-        cursor.execute('''
-            INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, created_at, created_at))
-        
-        # Link bot to credential for commission tracking
-        cursor.execute('''
-            INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
-            VALUES (?, ?, ?, ?)
-        ''', (bot_id, credential_id, user_id, created_at))
-        
-        conn.commit()
-        conn.close()
+        # Verify user exists and credential belongs to user
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'User not found'}), 404
+            
+            # Verify credential exists AND belongs to this user
+            cursor.execute('''
+                SELECT credential_id, broker_name, account_number, is_live 
+                FROM broker_credentials 
+                WHERE credential_id = ? AND user_id = ?
+            ''', (credential_id, user_id))
+            
+            credential_row = cursor.fetchone()
+            if not credential_row:
+                return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
+            
+            credential_data = dict(credential_row)
+            broker_name = credential_data['broker_name']
+            account_number = credential_data['account_number']
+            is_live = credential_data['is_live']
+            mode = 'live' if is_live else 'demo'
+            
+            print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
+            
+            # Bot configuration
+            # Generate unique bot_id using milliseconds (not just seconds) to allow multiple bots in same second
+            bot_id = data.get('botId') or f"bot_{int(datetime.now().timestamp() * 1000)}"
+            symbols = data.get('symbols', ['EURUSD'])
+            strategy = data.get('strategy', 'Trend Following')
+            risk_per_trade = float(data.get('riskPerTrade', 100))
+            max_daily_loss = float(data.get('maxDailyLoss', 500))
+            trading_enabled = data.get('enabled', True)
+            
+            account_id = f"{broker_name}_{account_number}"
+            
+            # Store bot in database
+            created_at = datetime.now().isoformat()
+            cursor.execute('''
+                INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, created_at, created_at))
+            
+            # Link bot to credential for commission tracking
+            cursor.execute('''
+                INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (bot_id, credential_id, user_id, created_at))
+            
+            conn.commit()
+            
+        finally:
+            if conn:
+                conn.close()
         
         # Also store in active_bots for real-time trading
         now = datetime.now()
