@@ -3088,6 +3088,9 @@ def start_bot():
             # Apply dynamic position sizing to the volume
             adjusted_volume = trade_params['volume'] * position_size
             
+            entry_price = random.uniform(1, 2000)
+            exit_price = entry_price + random.uniform(-50, 50)  # Exit price varies from entry
+            
             trade = {
                 'ticket': random.randint(1000000, 9999999),
                 'symbol': trade_params['symbol'],
@@ -3095,7 +3098,8 @@ def start_bot():
                 'volume': round(adjusted_volume, 2),
                 'baseVolume': trade_params['volume'],
                 'positionSize': position_size,
-                'entryPrice': random.uniform(1, 2000),
+                'entryPrice': entry_price,
+                'exitPrice': exit_price,
                 'profit': trade_params['profit'],
                 'time': datetime.now().isoformat(),
                 'timestamp': int(datetime.now().timestamp() * 1000),  # milliseconds for charting
@@ -3115,7 +3119,10 @@ def start_bot():
             # ✅ LOG TRADE DETAILS
             trade_result = "✅ WIN" if trade['profit'] > 0 else "❌ LOSS"
             logger.info(f"\n📊 {trade_result}: {symbol} | P&L: ${trade['profit']:.2f}")
-            logger.info(f"   Entry: ${trade['entryPrice']:.2f} → Exit: ${trade['exitPrice']:.2f} | Volume: {trade['volume']}")
+            
+            # Safe access to exit price (use entry price as fallback if not set)
+            exit_price = trade.get('exitPrice', trade.get('entryPrice', 0))
+            logger.info(f"   Entry: ${trade.get('entryPrice', 0):.2f} → Exit: ${exit_price:.2f} | Volume: {trade.get('volume', 0)}")
             
             # Update bot stats
             bot_config['totalTrades'] += 1
