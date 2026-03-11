@@ -2242,8 +2242,16 @@ def get_bot_config(bot_id):
 # Thread lock for safe commodity_market_data access
 market_data_lock = threading.Lock()
 
-# Previous prices for calculating price changes
+# Previous prices for calculating price changes (initialized from commodity_market_data)
 previous_prices = {}
+
+def initialize_previous_prices():
+    """Initialize previous_prices from existing commodity_market_data"""
+    global previous_prices
+    for symbol, data in commodity_market_data.items():
+        if 'price' in data:
+            previous_prices[symbol] = data['price']
+    logger.info(f"✅ Initialized previous prices for {len(previous_prices)} symbols")
 
 def get_live_prices_from_mt5():
     """Fetch real-time prices from MT5 for all available symbols"""
@@ -2274,12 +2282,20 @@ def get_live_prices_from_mt5():
                 # Use mid-price (average of bid/ask)
                 current_price = (tick.bid + tick.ask) / 2.0
                 
-                # Calculate price change
-                previous_price = previous_prices.get(symbol, current_price)
-                price_change = ((current_price - previous_price) / previous_price * 100) if previous_price != 0 else 0
+                # Get previous price (use current if first time)
+                if symbol not in previous_prices:
+                    previous_prices[symbol] = current_price
                 
-                # Determine trend
-                trend = 'UP' if price_change >= 0 else 'DOWN'
+                previous_price = previous_prices[symbol]
+                
+                # Calculate price change percentage
+                if previous_price != 0:
+                    price_change = ((current_price - previous_price) / previous_price * 100)
+                else:
+                    price_change = 0
+                
+                # Determine trend based on price change
+                trend = 'UP' if current_price > previous_price else 'DOWN' if current_price < previous_price else 'FLAT'
                 
                 # Estimate volatility based on bid-ask spread
                 spread_percent = ((tick.ask - tick.bid) / current_price * 100) if current_price != 0 else 0
@@ -2294,20 +2310,117 @@ def get_live_prices_from_mt5():
                 else:
                     volatility = 'Very High'
                 
-                # Generate signal based on price change
+                # Generate signal based on MULTIPLE factors: price change, spread, volatility
                 abs_change = abs(price_change)
-                if abs_change >= 2.0 and trend == 'UP':
-                    signal = '🟢 STRONG BUY'
-                elif abs_change >= 1.0 and trend == 'UP':
-                    signal = '🟢 BUY'
-                elif abs_change >= 2.0 and trend == 'DOWN':
-                    signal = '🔴 STRONG SELL'
-                elif abs_change >= 1.0 and trend == 'DOWN':
-                    signal = '🔴 SELL'
-                else:
-                    signal = '🟡 HOLD'
                 
-                # Determine recommendation
+                # Signal logic: Consider both magnitude and direction
+                if trend == 'UP':
+                    if abs_change >= 1.0:
+                        signal = '🟢 STRONG BUY'
+                    elif abs_change >= 0.3:
+                        signal = '🟢 BUY'
+                    elif spread_percent < 0.10:  # If UP and tight spread = bullish
+                        signal = '🟢 BUY'
+                    else:
+                        signal = '🟡 HOLD'
+                elif trend == 'DOWN':
+                    if abs_change >= 1.0:
+                        signal = '🔴 STRONG SELL'
+                    elif abs_change >= 0.3:
+                        signal = '🔴 SELL'
+                    elif spread_percent > 0.20:  # If DOWN and wide spread = bearish
+                        signal = '🔴 SELL'
+                    else:
+                        signal = '🟡 HOLD'
+                else:  # FLAT trend
+                    if volatility == 'Very High' or volatility == 'High':
+                        signal = '🟡 VOLATILE - CAUTION'
+                    else:
+                        signal = '🟡 HOLD'
+                
+                # Determine recommendation based on volatility + trend
+                if 'STRONG BUY' in signal:
+                    recommendation = 'Strong uptrend - excellent entry opportunity'
+                elif 'BUY' in signal:
+                    recommendation = 'Positive momentum - good entry point'
+                elif 'STRONG SELL' in signal:
+                    recommendation = 'Strong downtrend - avoid or consider short'
+                elif 'SELL' in signal:
+                    recommendation = 'Negative momentum - risky for longs'
+                elif 'VOLATILE' in signal:
+                    recommendation = f'{volatility} volatility - wait for clearer direction'
+                else:  # HOLD
+                    if volatility in ['High', 'Very High']:
+                        recommendation = f'{volatility} volatility with no clear direction'
+                    else:
+                        recommendation = 'Consolidating - monitor for breakout'
+                
+                live_prices[symbol] = {
+                    'price': round(current_price, 5),
+                    'change': round(price_change, 3),  # Changed from 2 to 3 decimal places for precision
+                    'trend': trend,
+                    'volatility': volatility,
+                    'signal': signal,
+                    'recommendation': recommendation,
+                }
+                
+                # Update previous price for next cycle
+                previous_prices[symbol] = current_price
+                
+            except Exception as e:
+                logger.debug(f"Error fetching live price for {symbol}: {e}")
+                continue
+        
+        return live_prices if live_prices else None
+        
+    except Exception as e:
+        logger.error(f"Error fetching live prices from MT5: {e}")
+        return None
+
+def live_market_data_updater():
+    """Background thread: continuously fetch and update live market data"""
+    logger.info("✅ Live market data updater thread started")
+    global commodity_market_data
+    
+    # Wait a bit for MT5 to connect
+    time.sleep(2)
+    
+    # Initialize previous prices from current commodity_market_data
+    initialize_previous_prices()
+    
+    update_interval = 2  # Update prices every 2 seconds (faster updates = better signals)
+    update_failed_count = 0
+    max_failed_attempts = 10
+    
+    while True:
+        try:
+            # Try to fetch live prices from MT5
+            live_prices = get_live_prices_from_mt5()
+            
+            if live_prices:
+                # Update commodity_market_data with live prices (thread-safe)
+                with market_data_lock:
+                    for symbol, data in live_prices.items():
+                        if symbol in commodity_market_data:
+                            # Keep all original data but update prices and signals
+                            commodity_market_data[symbol].update(data)
+                    
+                    logger.debug(f"✅ Updated {len(live_prices)} live prices from MT5")
+                
+                update_failed_count = 0  # Reset failure counter
+            else:
+                update_failed_count += 1
+                if update_failed_count == 1:
+                    logger.warning("⚠️  Could not fetch live prices from MT5 - using cached data. Make sure MT5 is connected.")
+                elif update_failed_count >= max_failed_attempts:
+                    logger.warning(f"⚠️  MT5 live price feed unavailable after {max_failed_attempts} attempts - will continue with cached prices")
+                    # Still continue to serve cached prices
+            
+            time.sleep(update_interval)
+            
+        except Exception as e:
+            logger.error(f"❌ Error in live market data updater: {e}")
+            time.sleep(5)  # Wait 5 seconds before retrying on error
                 if 'STRONG BUY' in signal:
                     recommendation = 'Strong uptrend - excellent entry opportunity'
                 elif 'BUY' in signal:
@@ -2385,30 +2498,30 @@ def live_market_data_updater():
 commodity_market_data = {
     # ===== AVAILABLE SYMBOLS ON METAQUOTES-DEMO (Verified from MT5 Market Watch) =====
     # Forex Pairs (9)
-    'EURUSD': {'price': 1.0890, 'change': 0.35, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 STRONG BUY', 'recommendation': 'Positive trajectory - good for trend following'},
-    'GBPUSD': {'price': 1.2750, 'change': -0.22, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Downtrend - risky, avoid'},
-    'USDJPY': {'price': 149.50, 'change': 0.15, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Slight uptrend, moderate opportunity'},
-    'USDCHF': {'price': 0.8950, 'change': 0.12, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Safe haven currency - stable'},
-    'AUDUSD': {'price': 0.6580, 'change': 0.88, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend with high volatility - excellent'},
-    'NZDUSD': {'price': 0.6125, 'change': 0.65, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Commodity currency strength'},
-    'USDCAD': {'price': 1.3550, 'change': -0.10, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🟡 CAUTION', 'recommendation': 'Oil correlation - monitor'},
-    'USDCNH': {'price': 7.2850, 'change': 0.05, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CAUTION', 'recommendation': 'Limited liquidity - wider spreads'},
-    'USDSEK': {'price': 10.8950, 'change': -0.15, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Nordic weakness'},
+    'EURUSD': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    'GBPUSD': {'price': 1.2750, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
+    'USDJPY': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    'USDCHF': {'price': 0.8950, 'change': 0.25, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 HOLD', 'recommendation': 'Safe haven currency - consolidating'},
+    'AUDUSD': {'price': 0.6580, 'change': 1.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
+    'NZDUSD': {'price': 0.6125, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    'USDCAD': {'price': 1.3550, 'change': -0.28, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
+    'USDCNH': {'price': 7.2850, 'change': 0.15, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 HOLD', 'recommendation': 'Very Low volatility with no clear direction'},
+    'USDSEK': {'price': 10.8950, 'change': -0.42, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
     
     # Commodities (2)
-    'XPTUSD': {'price': 920.00, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Precious metal - safe hedge'},
-    'OILK': {'price': 82.45, 'change': 1.85, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Energy commodity bullish'},
+    'XPTUSD': {'price': 920.00, 'change': 0.68, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    'OILK': {'price': 82.45, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
     
     # Indices (2)
-    'DAX': {'price': 18250.00, 'change': 0.45, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'German stocks - steady growth'},
-    'SP500m': {'price': 5285.50, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'US market strength'},
+    'DAX': {'price': 18250.00, 'change': 0.65, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    'SP500m': {'price': 5285.50, 'change': 1.02, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
     
     # Individual Stocks (5)
-    'AMD': {'price': 185.75, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Tech momentum strong'},
-    'MSFT': {'price': 415.50, 'change': 1.25, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Blue chip stability'},
-    'INTC': {'price': 48.25, 'change': -0.35, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🟡 CAUTION', 'recommendation': 'Awaiting earnings'},
-    'NVDA': {'price': 875.00, 'change': 3.50, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'AI rally continuation'},
-    'NIKL': {'price': 28900.00, 'change': 2.35, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Japanese strength'},
+    'AMD': {'price': 185.75, 'change': 2.42, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
+    'MSFT': {'price': 415.50, 'change': 1.35, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    'INTC': {'price': 48.25, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
+    'NVDA': {'price': 875.00, 'change': 3.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
+    'NIKL': {'price': 28900.00, 'change': 2.55, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
 }
 
 # Store active bots configuration
