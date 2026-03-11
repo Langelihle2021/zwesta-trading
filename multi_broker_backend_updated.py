@@ -59,9 +59,9 @@ API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production
 def find_mt5_path():
     """Find MT5 installation path from common locations - returns path to terminal.exe or terminal64.exe"""
     possible_paths = [
-        'C:\\Program Files\\XM Global MT5',        # XM installation (PRIMARY)
-        'C:\\Program Files (x86)\\MetaTrader 5',   # MT5 default
-        'C:\\Program Files\\MetaTrader 5',         # Alternative MT5
+        'C:\\Program Files\\MetaTrader 5',         # MetaQuotes MT5 (PRIMARY)
+        'C:\\Program Files (x86)\\MetaTrader 5',   # MT5 alternative
+        'C:\\Program Files\\XM Global MT5',        # XM installation
         os.getenv('MT5_PATH', ''),                 # Environment variable
     ]
     
@@ -83,9 +83,9 @@ def find_mt5_path():
     return None  # Return None instead of default fallback
 
 MT5_CONFIG = {
-    'account': 103376464,
+    'account': 104017418,
     'password': '*6RjhRvH',
-    'server': 'XMGlobal-MT5 2',
+    'server': 'MetaQuotes-Demo',
     'path': find_mt5_path()
 }
 
