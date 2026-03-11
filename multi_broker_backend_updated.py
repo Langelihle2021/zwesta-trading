@@ -702,14 +702,29 @@ class MT5Connection(BrokerConnection):
             password = self.credentials.get('password') or MT5_CONFIG['password']
             server = self.credentials.get('server') or MT5_CONFIG['server']
 
-            if not self.mt5.login(account, password=password, server=server):
-                logger.error(f"MT5 login failed: {self.mt5.last_error()}")
-                return False
-
-            self.connected = True
-            self.get_account_info()
-            logger.info(f"Connected to MT5 account {account}")
-            return True
+            # Try login with provided password
+            logger.info(f"Attempting MT5 login: Account={account}, Server={server}")
+            login_result = self.mt5.login(account, password=password, server=server)
+            
+            if login_result:
+                self.connected = True
+                self.get_account_info()
+                logger.info(f"✅ Connected to MT5 account {account}")
+                return True
+            
+            # If password login fails, try without password (for demo accounts)
+            login_error = self.mt5.last_error()
+            logger.warning(f"MT5 password login failed: {login_error} - trying guest login")
+            
+            login_result = self.mt5.login(account, server=server)
+            if login_result:
+                self.connected = True
+                self.get_account_info()
+                logger.info(f"✅ Connected to MT5 account {account} (guest mode)")
+                return True
+            
+            logger.error(f"MT5 guest login also failed: {self.mt5.last_error()}")
+            return False
         except Exception as e:
             logger.error(f"MT5 connection error: {e}")
             return False
@@ -4544,23 +4559,22 @@ if __name__ == '__main__':
             password = MT5_CONFIG.get('password', '*6RjhRvH')
             server = MT5_CONFIG.get('server', 'MetaQuotes-Demo')
             
-            # Launch MT5 with auto-login parameters
-            # Format: terminal64.exe /profile:profile_name /login:account /password:password /server:server
             logger.info(f"Starting: {mt5_path}")
             logger.info(f"   Account: {account}")
             logger.info(f"   Server: {server}")
             
-            # Launch with minimized window and auto-login
+            # Method 1: Launch MT5 normally (without command-line args - they don't work reliably)
+            # MT5 will attempt to use previously saved credentials or accept guest connections
             subprocess.Popen(
-                [mt5_path, f'/login:{account}', f'/password:{password}', f'/server:{server}'],
+                [mt5_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
             
-            logger.info("⏳ MT5 initializing with auto-login... (waiting 8 seconds)")
-            time.sleep(8)  # Give MT5 extra time to login
-            logger.info("✅ MT5 should be ready now")
+            logger.info("⏳ MT5 terminal launching... (waiting 10 seconds for full initialization)")
+            time.sleep(10)  # Give MT5 more time to fully start
+            logger.info("✅ MT5 terminal should be initialized now")
         except Exception as e:
             logger.warning(f"⚠️  Could not launch MT5: {e}")
     else:
