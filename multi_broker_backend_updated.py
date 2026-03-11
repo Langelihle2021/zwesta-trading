@@ -3276,6 +3276,28 @@ def start_bot():
         import random
         bot_config = active_bots[bot_id]
         
+        # ✅ VALIDATE & CORRECT BOT SYMBOLS IMMEDIATELY (in case they're old/unavailable)
+        # This prevents users from being shown old symbols and ensures trades use valid ones
+        original_symbols = bot_config.get('symbols', ['EURUSD'])
+        corrected_symbols = validate_and_correct_symbols(original_symbols)
+        if corrected_symbols != original_symbols:
+            logger.info(f"📝 Bot {bot_id} symbols corrected: {original_symbols} → {corrected_symbols}")
+            bot_config['symbols'] = corrected_symbols
+            # Update in-memory and database
+            active_bots[bot_id]['symbols'] = corrected_symbols
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE user_bots 
+                    SET config = json_replace(config, '$.symbols', ?)
+                    WHERE bot_id = ?
+                ''', (json.dumps(corrected_symbols), bot_id))
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.warning(f"Could not update bot symbols in DB: {e}")
+        
         # TRY REAL MT5 TRADES, FALLBACK TO SIMULATED IF UNAVAILABLE
         logger.info(f"📍 Bot {bot_id}: Attempting to use REAL MT5 trades...")
         
