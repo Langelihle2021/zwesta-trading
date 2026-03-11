@@ -863,6 +863,9 @@ class MT5Connection(BrokerConnection):
 
             result = self.mt5.order_send(request_dict)
 
+            if result is None:
+                return {'success': False, 'error': 'MT5 order_send failed - terminal may have disconnected'}
+            
             if result.retcode != self.mt5.TRADE_RETCODE_DONE:
                 return {'success': False, 'error': f'MT5 error: {result.comment}'}
 
@@ -902,6 +905,9 @@ class MT5Connection(BrokerConnection):
             }
 
             result = self.mt5.order_send(request_dict)
+            
+            if result is None:
+                return {'success': False, 'error': 'MT5 order_send failed - terminal may have disconnected'}
             
             if result.retcode != self.mt5.TRADE_RETCODE_DONE:
                 return {'success': False, 'error': f'MT5 error: {result.comment}'}
