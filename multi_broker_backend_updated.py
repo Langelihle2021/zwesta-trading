@@ -2454,44 +2454,6 @@ def live_market_data_updater():
         logger.error(f"Error fetching live prices from MT5: {e}")
         return None
 
-def live_market_data_updater():
-    """Background thread: continuously fetch and update live market data"""
-    logger.info("✅ Live market data updater thread started")
-    global commodity_market_data
-    
-    update_interval = 3  # Update prices every 3 seconds
-    update_failed_count = 0
-    max_failed_attempts = 5
-    
-    while True:
-        try:
-            # Try to fetch live prices from MT5
-            live_prices = get_live_prices_from_mt5()
-            
-            if live_prices:
-                # Update commodity_market_data with live prices (thread-safe)
-                with market_data_lock:
-                    for symbol, data in live_prices.items():
-                        if symbol in commodity_market_data:
-                            # Keep all original data but update prices
-                            commodity_market_data[symbol].update(data)
-                    
-                    logger.debug(f"✅ Updated {len(live_prices)} live prices from MT5")
-                
-                update_failed_count = 0  # Reset failure counter
-            else:
-                update_failed_count += 1
-                if update_failed_count == 1:
-                    logger.warning("⚠️  Could not fetch live prices from MT5 - using cached data. Make sure MT5 is connected.")
-                elif update_failed_count >= max_failed_attempts:
-                    logger.warning(f"⚠️  MT5 live price feed unavailable after {max_failed_attempts} attempts - using cached prices")
-                    # Still continue to serve cached prices
-            
-            time.sleep(update_interval)
-            
-        except Exception as e:
-            logger.error(f"❌ Error in live market data updater: {e}")
-            time.sleep(5)  # Wait 5 seconds before retrying on error
 
 # Commodity Market Sentiment Data
 # Tracks price trends, volatility, and trading signals
