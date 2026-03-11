@@ -3271,6 +3271,19 @@ def start_bot():
                             comment=f'Zwesta Bot {bot_id} - {strategy_name}'
                         )
                         
+                        # If symbol not found, try fallback to EURUSD (default available symbol)
+                        if not order_result.get('success', False) and 'not found' in order_result.get('error', '').lower():
+                            logger.warning(f"Symbol {symbol} not found on MetaQuotes-Demo - retrying with EURUSD")
+                            fallback_symbol = 'EURUSD'
+                            order_result = mt5_conn.place_order(
+                                symbol=fallback_symbol,
+                                order_type=order_type,
+                                volume=round(adjusted_volume, 2),
+                                comment=f'Zwesta Bot {bot_id} - {strategy_name} (fallback)'
+                            )
+                            if order_result.get('success', False):
+                                symbol = fallback_symbol  # Update symbol for further processing
+                        
                         if order_result.get('success', False):
                             # Get current position info after placing trade
                             positions = mt5_conn.get_positions()
