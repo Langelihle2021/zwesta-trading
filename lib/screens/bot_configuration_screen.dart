@@ -32,6 +32,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   late CommissionService _commissionService;
   
   Map<String, dynamic> commodityMarketData = {};
+  List<Map<String, String>> tradingSymbols = [];  // Will be populated from API
 
   final List<String> strategies = [
     'Trend Following',
@@ -40,36 +41,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     'Mean Reversion',
     'Range Trading',
     'Breakout Trading',
-  ];
-
-  final List<Map<String, String>> tradingSymbols = [
-    // Forex
-    {'symbol': 'EURUSD', 'name': '💱 EURO/USD', 'category': 'Forex'},
-    {'symbol': 'GBPUSD', 'name': '💷 GBP/USD', 'category': 'Forex'},
-    {'symbol': 'USDJPY', 'name': '¥ USD/JPY', 'category': 'Forex'},
-    {'symbol': 'AUDUSD', 'name': '🦘 AUD/USD', 'category': 'Forex'},
-    {'symbol': 'NZDUSD', 'name': '🏔️ NZD/USD', 'category': 'Forex'},
-    // Metals
-    {'symbol': 'XAUUSD', 'name': '💎 GOLD - Per troy ounce', 'category': 'Metals'},
-    {'symbol': 'XAGUSD', 'name': '⚪ SILVER - Per troy ounce', 'category': 'Metals'},
-    {'symbol': 'XPTUSD', 'name': '💍 PLATINUM - Per troy ounce', 'category': 'Metals'},
-    {'symbol': 'XPDUSD', 'name': '💎 PALLADIUM - Per troy ounce', 'category': 'Metals'},
-    // Energy
-    {'symbol': 'WTIUSD', 'name': '⚡ CRUDE OIL (WTI)', 'category': 'Energy'},
-    {'symbol': 'BRENTUSD', 'name': '⚡ BRENT CRUDE', 'category': 'Energy'},
-    {'symbol': 'NATGASUS', 'name': '🔥 NATURAL GAS', 'category': 'Energy'},
-    // Agriculture
-    {'symbol': 'CORNUSD', 'name': '🌽 CORN', 'category': 'Agriculture'},
-    {'symbol': 'WHEATUSD', 'name': '🌾 WHEAT', 'category': 'Agriculture'},
-    {'symbol': 'SOYBEANSUSD', 'name': '🫘 SOYBEANS', 'category': 'Agriculture'},
-    {'symbol': 'COFFEEUSD', 'name': '☕ COFFEE', 'category': 'Agriculture'},
-    {'symbol': 'COCOAUSD', 'name': '🍫 COCOA', 'category': 'Agriculture'},
-    {'symbol': 'SUGARUSD', 'name': '🍬 SUGAR', 'category': 'Agriculture'},
-    // Indices
-    {'symbol': 'SPX500', 'name': '📈 S&P 500', 'category': 'Indices'},
-    {'symbol': 'DAX40', 'name': '📊 DAX 40', 'category': 'Indices'},
-    {'symbol': 'FTSE100', 'name': '📋 FTSE 100', 'category': 'Indices'},
-    {'symbol': 'NIKKEI225', 'name': '🗾 NIKKEI 225', 'category': 'Indices'},
   ];
 
   @override
@@ -93,7 +64,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   Future<void> _fetchCommodityData() async {
     try {
       final response = await http.get(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/market/commodities'),
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/commodities/list'),
       ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
@@ -102,6 +73,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         
         setState(() {
           commodityMarketData = commodities.cast<String, dynamic>();
+          // Convert API data to UI format
+          tradingSymbols = _buildSymbolsFromApiData(commodities);
           _isLoadingData = false;
         });
       }
@@ -110,6 +83,44 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       // Use default market data if API fails
       setState(() => _isLoadingData = false);
     }
+  }
+
+  /// Convert API response format to UI format
+  List<Map<String, String>> _buildSymbolsFromApiData(Map apiData) {
+    List<Map<String, String>> symbols = [];
+    
+    final categoryEmojis = {
+      'forex': '💱',
+      'commodities': '⚡',
+      'indices': '📊',
+      'stocks': '📈',
+    };
+    
+    apiData.forEach((category, items) {
+      if (items is List) {
+        String categoryName = category;
+        // Convert snake_case to Title Case
+        categoryName = category.split('_').map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
+        
+        final emoji = categoryEmojis[category] ?? '•';
+        
+        for (var item in items) {
+          if (item is Map) {
+            final symbol = item['symbol'] ?? '';
+            final name = item['name'] ?? '';
+            if (symbol.isNotEmpty && name.isNotEmpty) {
+              symbols.add({
+                'symbol': symbol,
+                'name': '$emoji $name',
+                'category': categoryName,
+              });
+            }
+          }
+        }
+      }
+    });
+    
+    return symbols;
   }
 
   @override
@@ -594,26 +605,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   final symbol = tradingSymbols[index];
                                   final symbolCode = symbol['symbol']!;
                                   
-                                  // Map symbol code to commodity market data key
-                                  String marketDataKey = symbolCode;
-                                  if (symbolCode == 'XAUUSD') marketDataKey = 'GOLD';
-                                  if (symbolCode == 'XAGUSD') marketDataKey = 'SILVER';
-                                  if (symbolCode == 'XPTUSD') marketDataKey = 'PLATINUM';
-                                  if (symbolCode == 'XPDUSD') marketDataKey = 'PALLADIUM';
-                                  if (symbolCode == 'WTIUSD') marketDataKey = 'CRUDE_OIL';
-                                  if (symbolCode == 'NATGASUS') marketDataKey = 'NATURAL_GAS';
-                                  if (symbolCode == 'COFFEEUSD') marketDataKey = 'COFFEE';
-                                  if (symbolCode == 'COCOAUSD') marketDataKey = 'COCOA';
-                                  if (symbolCode == 'SUGARUSD') marketDataKey = 'SUGAR';
-                                  if (symbolCode == 'WHEATUSD') marketDataKey = 'WHEAT';
-                                  if (symbolCode == 'CORNUSD') marketDataKey = 'CORN';
-                                  if (symbolCode == 'SOYBEANSUSD') marketDataKey = 'SOYBEAN';
-                                  if (symbolCode == 'DAX40') marketDataKey = 'DAX';
-                                  if (symbolCode == 'FTSE100') marketDataKey = 'FTSE';
-                                  if (symbolCode == 'SPX500') marketDataKey = 'SPX500';
-                                  if (symbolCode == 'NIKKEI225') marketDataKey = 'NIKKEI';
-                                  
-                                  final marketData = commodityMarketData[marketDataKey] ?? {};
+                                  // Get market data for this symbol directly (API now uses correct keys)
+                                  final marketData = commodityMarketData[symbolCode] ?? {};
                                   final trend = marketData['trend'] ?? 'NEUTRAL';
                                   final isBullish = trend == 'UP';
                                   final change = (marketData['change'] ?? 0).toDouble();

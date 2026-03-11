@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../services/trading_service.dart';
 import '../models/trade.dart';
 import '../utils/constants.dart';
+import '../utils/environment_config.dart';
 import '../widgets/custom_widgets.dart';
 
 class TradesScreen extends StatefulWidget {
@@ -192,6 +195,51 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
+  /// Fetch trading symbols from the backend API
+  Future<List<Map<String, String>>> _fetchTradingSymbolsForDialog() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/commodities/list'),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final commodities = data['commodities'] as Map;
+        
+        List<Map<String, String>> symbols = [];
+        
+        commodities.forEach((category, items) {
+          if (items is List) {
+            for (var item in items) {
+              if (item is Map) {
+                final symbol = item['symbol'] ?? '';
+                final name = item['name'] ?? '';
+                if (symbol.isNotEmpty && name.isNotEmpty) {
+                  symbols.add({
+                    'symbol': symbol,
+                    'name': name,
+                  });
+                }
+              }
+            }
+          }
+        });
+        
+        return symbols;
+      }
+    } catch (e) {
+      print('Error fetching trading symbols: $e');
+    }
+    
+    // Fallback to minimal list if API fails
+    return [
+      {'symbol': 'EURUSD', 'name': 'EUR/USD'},
+      {'symbol': 'GBPUSD', 'name': 'GBP/USD'},
+      {'symbol': 'XPTUSD', 'name': 'Platinum'},
+      {'symbol': 'OILK', 'name': 'Crude Oil'},
+    ];
+  }
+
   void _showOpenTradeDialog(BuildContext context) {
     final quantityController = TextEditingController();
     final entryPriceController = TextEditingController();
@@ -200,40 +248,14 @@ class _TradesScreenState extends State<TradesScreen> {
     String selectedType = 'buy';
     String selectedSymbol = 'EURUSD';
 
-    // Available trading symbols/commodities
-    final List<Map<String, String>> tradingSymbols = [
-      // Forex
-      {'symbol': 'EURUSD', 'name': 'EUR/USD - Euro vs US Dollar'},
-      {'symbol': 'GBPUSD', 'name': 'GBP/USD - British Pound vs US Dollar'},
-      {'symbol': 'USDJPY', 'name': 'USD/JPY - US Dollar vs Japanese Yen'},
-      {'symbol': 'AUDUSD', 'name': 'AUD/USD - Australian Dollar vs US Dollar'},
-      {'symbol': 'NZDUSD', 'name': 'NZD/USD - New Zealand Dollar vs US Dollar'},
-      
-      // Precious Metals (💎 High Profit)
-      {'symbol': 'XAUUSD', 'name': '💎 GOLD - Per troy ounce'},
-      {'symbol': 'XAGUSD', 'name': '💎 SILVER - Per troy ounce'},
-      {'symbol': 'XPTUSD', 'name': '💎 PLATINUM - Per troy ounce'},
-      {'symbol': 'XPDUSD', 'name': '💎 PALLADIUM - Per troy ounce'},
-      
-      // Energy (⚡ Volatile)
-      {'symbol': 'WTIUSD', 'name': '⚡ CRUDE OIL WTI - Per barrel'},
-      {'symbol': 'BRENTUSD', 'name': '⚡ BRENT CRUDE - Per barrel'},
-      {'symbol': 'NATGASUS', 'name': '⚡ NATURAL GAS - Per MMBtu'},
-      
-      // Agriculture (🌾 Diverse)
-      {'symbol': 'CORNUSD', 'name': '🌾 CORN - Per bushel'},
-      {'symbol': 'WHEATUSD', 'name': '🌾 WHEAT - Per bushel'},
-      {'symbol': 'SOYBEANSUSD', 'name': '🌾 SOYBEANS - Per bushel'},
-      {'symbol': 'COFFEEUSD', 'name': '☕ COFFEE - Per lb'},
-      {'symbol': 'COCOAUSD', 'name': '🍫 COCOA - Per metric ton'},
-      {'symbol': 'SUGARUSD', 'name': '🍬 SUGAR - Per lb'},
-      
-      // Indices (📊)
-      {'symbol': 'SPX500', 'name': '📊 S&P 500 - Stock Index'},
-      {'symbol': 'DAX40', 'name': '📊 DAX 40 - German Index'},
-      {'symbol': 'FTSE100', 'name': '📊 FTSE 100 - UK Index'},
-      {'symbol': 'NIKKEI225', 'name': '📊 NIKKEI 225 - Japan Index'},
-    ];
+    // Initialize with empty list, will be populated from API
+    List<Map<String, String>> tradingSymbols = [];
+
+    // Fetch trading symbols from backend API
+    _fetchTradingSymbolsForDialog().then((symbols) {
+      // This is used in the showDialog below
+      tradingSymbols = symbols;
+    });
 
     showDialog(
       context: context,
