@@ -4540,10 +4540,26 @@ if __name__ == '__main__':
     mt5_path = MT5_CONFIG.get('path')
     if mt5_path and os.path.exists(mt5_path):
         try:
+            account = MT5_CONFIG.get('account', '104017418')
+            password = MT5_CONFIG.get('password', '*6RjhRvH')
+            server = MT5_CONFIG.get('server', 'MetaQuotes-Demo')
+            
+            # Launch MT5 with auto-login parameters
+            # Format: terminal64.exe /profile:profile_name /login:account /password:password /server:server
             logger.info(f"Starting: {mt5_path}")
-            subprocess.Popen([mt5_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logger.info("⏳ MT5 initializing... (waiting 5 seconds)")
-            time.sleep(5)
+            logger.info(f"   Account: {account}")
+            logger.info(f"   Server: {server}")
+            
+            # Launch with minimized window and auto-login
+            subprocess.Popen(
+                [mt5_path, f'/login:{account}', f'/password:{password}', f'/server:{server}'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            
+            logger.info("⏳ MT5 initializing with auto-login... (waiting 8 seconds)")
+            time.sleep(8)  # Give MT5 extra time to login
             logger.info("✅ MT5 should be ready now")
         except Exception as e:
             logger.warning(f"⚠️  Could not launch MT5: {e}")
