@@ -2454,10 +2454,12 @@ def test_broker_connection():
         # Log connection test
         logger.info(f"🔌 Testing broker connection: {broker} | Account: {account} | User: {user_id}")
         
-        # Fix server name for MetaQuotes - use configured server if not specified
-        if broker.lower() == 'metaquotes' and (not server or server != MT5_CONFIG['server']):
-            server = MT5_CONFIG['server']
-            logger.info(f"   Corrected server to: {server}")
+        # Fix server name for MT5 brokers - use configured MetaQuotes server
+        # All MT5-based brokers (MetaQuotes, XM, etc.) should use the configured server
+        if broker.lower() in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5']:
+            if not server or server != MT5_CONFIG['server']:
+                server = MT5_CONFIG['server']
+                logger.info(f"   Corrected server to: {server}")
         
         # Save credentials to database (persist the connection)
         conn = get_db_connection()
@@ -3166,10 +3168,16 @@ def start_bot():
                 
                 cred_row = cursor.fetchone()
                 if cred_row:
+                    # Auto-correct server name for MT5 brokers
+                    server_name = cred_row['server']
+                    broker_name = cred_row['broker_name']
+                    if broker_name.lower() in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5']:
+                        server_name = MT5_CONFIG['server']
+                    
                     bot_credentials = {
                         'account_number': cred_row['account_number'],
                         'password': cred_row['password'],
-                        'server': cred_row['server'],
+                        'server': server_name,
                         'is_live': cred_row['is_live']
                     }
                     logger.info(f"Bot {bot_id}: LIVE MODE - Using user's MT5 account {bot_credentials['account_number']}")
