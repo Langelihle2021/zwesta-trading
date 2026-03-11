@@ -1523,36 +1523,30 @@ def list_commodities():
     """Get list of available trading symbols/commodities"""
     commodities = {
         'forex': [
-            {'symbol': 'EURUSD', 'name': 'Euro vs US Dollar', 'type': 'Forex', 'min_price': 0.95, 'max_price': 1.15},
-            {'symbol': 'GBPUSD', 'name': 'British Pound vs US Dollar', 'type': 'Forex', 'min_price': 1.15, 'max_price': 1.45},
-            {'symbol': 'USDJPY', 'name': 'US Dollar vs Japanese Yen', 'type': 'Forex', 'min_price': 100, 'max_price': 160},
-            {'symbol': 'AUDUSD', 'name': 'Australian Dollar vs US Dollar', 'type': 'Forex', 'min_price': 0.60, 'max_price': 0.80},
-            {'symbol': 'NZDUSD', 'name': 'New Zealand Dollar vs US Dollar', 'type': 'Forex', 'min_price': 0.55, 'max_price': 0.75},
+            {'symbol': 'EURUSD', 'name': 'Euro vs US Dollar', 'type': 'Forex', 'min_price': 1.08, 'max_price': 1.10},
+            {'symbol': 'GBPUSD', 'name': 'British Pound vs US Dollar', 'type': 'Forex', 'min_price': 1.27, 'max_price': 1.29},
+            {'symbol': 'USDCHF', 'name': 'US Dollar vs Swiss Franc', 'type': 'Forex', 'min_price': 0.89, 'max_price': 0.91},
+            {'symbol': 'USDJPY', 'name': 'US Dollar vs Japanese Yen', 'type': 'Forex', 'min_price': 149.0, 'max_price': 151.0},
+            {'symbol': 'USDCNH', 'name': 'US Dollar vs Chinese Yuan', 'type': 'Forex', 'min_price': 7.28, 'max_price': 7.30},
+            {'symbol': 'AUDUSD', 'name': 'Australian Dollar vs US Dollar', 'type': 'Forex', 'min_price': 0.65, 'max_price': 0.67},
+            {'symbol': 'NZDUSD', 'name': 'New Zealand Dollar vs US Dollar', 'type': 'Forex', 'min_price': 0.61, 'max_price': 0.63},
+            {'symbol': 'USDCAD', 'name': 'US Dollar vs Canadian Dollar', 'type': 'Forex', 'min_price': 1.35, 'max_price': 1.37},
+            {'symbol': 'USDSEK', 'name': 'US Dollar vs Swedish Krona', 'type': 'Forex', 'min_price': 10.88, 'max_price': 10.92},
         ],
-        'metals': [
-            {'symbol': 'XAUUSD', 'name': 'Gold (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 1800, 'max_price': 2100},
-            {'symbol': 'XAGUSD', 'name': 'Silver (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 20, 'max_price': 35},
-            {'symbol': 'XPTUSD', 'name': 'Platinum (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 800, 'max_price': 1200},
-            {'symbol': 'XPDUSD', 'name': 'Palladium (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 800, 'max_price': 1500},
-        ],
-        'energy': [
-            {'symbol': 'WTIUSD', 'name': 'Crude Oil WTI (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 40, 'max_price': 140},
-            {'symbol': 'BRENTUSD', 'name': 'Brent Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 40, 'max_price': 150},
-            {'symbol': 'NATGASUS', 'name': 'Natural Gas (per MMBtu)', 'type': 'Energy', 'min_price': 1.5, 'max_price': 8.0},
-        ],
-        'agriculture': [
-            {'symbol': 'CORNUSD', 'name': 'Corn (per bushel)', 'type': 'Agricultural', 'min_price': 3.0, 'max_price': 8.0},
-            {'symbol': 'WHEATUSD', 'name': 'Wheat (per bushel)', 'type': 'Agricultural', 'min_price': 5.0, 'max_price': 13.0},
-            {'symbol': 'SOYBEANSUSD', 'name': 'Soybeans (per bushel)', 'type': 'Agricultural', 'min_price': 8.0, 'max_price': 18.0},
-            {'symbol': 'COFFEEUSD', 'name': 'Coffee Arabica (per lb)', 'type': 'Agricultural', 'min_price': 1.3, 'max_price': 3.0},
-            {'symbol': 'COCOAUSD', 'name': 'Cocoa (per metric ton)', 'type': 'Agricultural', 'min_price': 2000, 'max_price': 4000},
-            {'symbol': 'SUGARUSD', 'name': 'Sugar (per lb)', 'type': 'Agricultural', 'min_price': 15, 'max_price': 25},
+        'commodities': [
+            {'symbol': 'XPTUSD', 'name': 'Platinum (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 915, 'max_price': 925},
+            {'symbol': 'OILK', 'name': 'Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 81, 'max_price': 84},
         ],
         'indices': [
-            {'symbol': 'SPX500', 'name': 'S&P 500 Index', 'type': 'Index', 'min_price': 3500, 'max_price': 5000},
-            {'symbol': 'DAX40', 'name': 'DAX 40 (Germany)', 'type': 'Index', 'min_price': 12000, 'max_price': 18000},
-            {'symbol': 'FTSE100', 'name': 'FTSE 100 (UK)', 'type': 'Index', 'min_price': 6500, 'max_price': 8500},
-            {'symbol': 'NIKKEI225', 'name': 'Nikkei 225 (Japan)', 'type': 'Index', 'min_price': 25000, 'max_price': 35000},
+            {'symbol': 'SP500m', 'name': 'S&P 500 Index', 'type': 'Index', 'min_price': 5280, 'max_price': 5290},
+            {'symbol': 'DAX', 'name': 'DAX 40 (Germany)', 'type': 'Index', 'min_price': 18240, 'max_price': 18260},
+        ],
+        'stocks': [
+            {'symbol': 'AMD', 'name': 'Advanced Micro Devices Inc.', 'type': 'Stock', 'min_price': 185, 'max_price': 187},
+            {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'type': 'Stock', 'min_price': 414, 'max_price': 417},
+            {'symbol': 'INTC', 'name': 'Intel Corporation', 'type': 'Stock', 'min_price': 47.5, 'max_price': 49.0},
+            {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'type': 'Stock', 'min_price': 872, 'max_price': 878},
+            {'symbol': 'NIKL', 'name': 'Nikkei 225 Index', 'type': 'Index', 'min_price': 28850, 'max_price': 28950},
         ]
     }
     
@@ -1576,39 +1570,33 @@ def generate_demo_trades():
         
         demo_trades = []
         
-        # Define trading symbols with realistic price ranges
+        # Define trading symbols with realistic price ranges (ONLY METAQUOTES-DEMO AVAILABLE SYMBOLS)
         commodity_data = {
-            # Forex pairs
-            'EURUSD': {'min_price': 0.95, 'max_price': 1.15, 'volume_range': (0.1, 5.0)},
-            'GBPUSD': {'min_price': 1.15, 'max_price': 1.45, 'volume_range': (0.1, 5.0)},
-            'USDJPY': {'min_price': 100, 'max_price': 160, 'volume_range': (0.1, 5.0)},
-            'AUDUSD': {'min_price': 0.60, 'max_price': 0.80, 'volume_range': (0.1, 5.0)},
-            'NZDUSD': {'min_price': 0.55, 'max_price': 0.75, 'volume_range': (0.1, 5.0)},
+            # ===== FOREX (9) - All available on MetaQuotes-Demo =====
+            'EURUSD': {'min_price': 1.08, 'max_price': 1.10, 'volume_range': (0.1, 5.0)},
+            'GBPUSD': {'min_price': 1.27, 'max_price': 1.29, 'volume_range': (0.1, 5.0)},
+            'USDCHF': {'min_price': 0.89, 'max_price': 0.91, 'volume_range': (0.1, 5.0)},
+            'USDJPY': {'min_price': 149.0, 'max_price': 151.0, 'volume_range': (0.1, 5.0)},
+            'USDCNH': {'min_price': 7.28, 'max_price': 7.30, 'volume_range': (0.1, 5.0)},
+            'AUDUSD': {'min_price': 0.65, 'max_price': 0.67, 'volume_range': (0.1, 5.0)},
+            'NZDUSD': {'min_price': 0.61, 'max_price': 0.63, 'volume_range': (0.1, 5.0)},
+            'USDCAD': {'min_price': 1.35, 'max_price': 1.37, 'volume_range': (0.1, 5.0)},
+            'USDSEK': {'min_price': 10.88, 'max_price': 10.92, 'volume_range': (0.1, 5.0)},
             
-            # Precious Metals (HIGH PROFIT POTENTIAL)
-            'XAUUSD': {'min_price': 1800, 'max_price': 2100, 'volume_range': (0.01, 2.0)},  # GOLD
-            'XAGUSD': {'min_price': 20, 'max_price': 35, 'volume_range': (0.1, 5.0)},  # SILVER
-            'XPTUSD': {'min_price': 800, 'max_price': 1200, 'volume_range': (0.01, 1.0)},  # PLATINUM
-            'XPDUSD': {'min_price': 800, 'max_price': 1500, 'volume_range': (0.01, 1.0)},  # PALLADIUM
+            # ===== COMMODITIES (2) - Available on MetaQuotes-Demo =====
+            'XPTUSD': {'min_price': 915, 'max_price': 925, 'volume_range': (0.01, 1.0)},  # PLATINUM
+            'OILK': {'min_price': 81, 'max_price': 84, 'volume_range': (1, 100)},  # CRUDE OIL
             
-            # Energy commodities
-            'WTIUSD': {'min_price': 40, 'max_price': 140, 'volume_range': (1, 100)},  # CRUDE OIL WTI
-            'BRENTUSD': {'min_price': 40, 'max_price': 150, 'volume_range': (1, 100)},  # BRENT CRUDE
-            'NATGASUS': {'min_price': 1.5, 'max_price': 8.0, 'volume_range': (10, 200)},  # NATURAL GAS
+            # ===== INDICES (2) - Available on MetaQuotes-Demo =====
+            'SP500m': {'min_price': 5280, 'max_price': 5290, 'volume_range': (0.1, 5.0)},  # S&P 500
+            'DAX': {'min_price': 18240, 'max_price': 18260, 'volume_range': (0.1, 5.0)},  # DAX
             
-            # Agricultural commodities
-            'CORNUSD': {'min_price': 3.0, 'max_price': 8.0, 'volume_range': (1, 50)},  # CORN
-            'WHEATUSD': {'min_price': 5.0, 'max_price': 13.0, 'volume_range': (1, 50)},  # WHEAT
-            'SOYBEANSUSD': {'min_price': 8.0, 'max_price': 18.0, 'volume_range': (1, 50)},  # SOYBEANS
-            'COFFEEUSD': {'min_price': 1.3, 'max_price': 3.0, 'volume_range': (10, 200)},  # COFFEE
-            'COCOAUSD': {'min_price': 2000, 'max_price': 4000, 'volume_range': (1, 50)},  # COCOA
-            'SUGARUSD': {'min_price': 15, 'max_price': 25, 'volume_range': (10, 200)},  # SUGAR
-            
-            # Indices
-            'SPX500': {'min_price': 3500, 'max_price': 5000, 'volume_range': (0.1, 5.0)},  # S&P 500
-            'DAX40': {'min_price': 12000, 'max_price': 18000, 'volume_range': (0.1, 5.0)},  # DAX
-            'FTSE100': {'min_price': 6500, 'max_price': 8500, 'volume_range': (0.1, 5.0)},  # FTSE 100
-            'NIKKEI225': {'min_price': 25000, 'max_price': 35000, 'volume_range': (0.01, 2.0)},  # Nikkei
+            # ===== STOCKS (5) - Available on MetaQuotes-Demo =====
+            'AMD': {'min_price': 185, 'max_price': 187, 'volume_range': (0.1, 5.0)},  # AMD
+            'MSFT': {'min_price': 414, 'max_price': 417, 'volume_range': (0.1, 5.0)},  # Microsoft
+            'INTC': {'min_price': 47.5, 'max_price': 49.0, 'volume_range': (0.1, 5.0)},  # Intel
+            'NVDA': {'min_price': 872, 'max_price': 878, 'volume_range': (0.1, 5.0)},  # NVIDIA
+            'NIKL': {'min_price': 28850, 'max_price': 28950, 'volume_range': (0.01, 2.0)},  # Nikkei
         }
         
         symbols = list(commodity_data.keys())
@@ -1617,8 +1605,8 @@ def generate_demo_trades():
             symbol = random.choice(symbols)
             symbol_data = commodity_data[symbol]
             
-            # Higher profit potential for commodities
-            profit = random.uniform(-1000, 5000) if 'XAU' in symbol or 'WTI' in symbol else random.uniform(-500, 2500)
+            # Higher profit potential for commodities and oil
+            profit = random.uniform(-1000, 5000) if 'XPTUSD' in symbol or 'OILK' in symbol else random.uniform(-500, 2500)
             
             demo_trades.append({
                 'ticket': 1000000 + i,
@@ -4636,37 +4624,31 @@ def approve_withdrawal(withdrawal_id):
 import random as rand
 
 COMMODITIES = {
-    # Forex
+    # ===== FOREX (9) - MetaQuotes-Demo Available =====
     'EURUSD': {'category': 'Forex', 'emoji': '📍'},
     'GBPUSD': {'category': 'Forex', 'emoji': '🇬🇧'},
     'USDJPY': {'category': 'Forex', 'emoji': '🇯🇵'},
+    'USDCHF': {'category': 'Forex', 'emoji': '🇨🇭'},
     'AUDUSD': {'category': 'Forex', 'emoji': '🦘'},
+    'NZDUSD': {'category': 'Forex', 'emoji': '🥝'},
     'USDCAD': {'category': 'Forex', 'emoji': '🍁'},
+    'USDSEK': {'category': 'Forex', 'emoji': '🇸🇪'},
+    'USDCNH': {'category': 'Forex', 'emoji': '🇨🇳'},
     
-    # Metals
-    'GOLD': {'category': 'Metals', 'emoji': '💎'},
-    'SILVER': {'category': 'Metals', 'emoji': '🔗'},
-    'PLATINUM': {'category': 'Metals', 'emoji': '⚙️'},
-    'PALLADIUM': {'category': 'Metals', 'emoji': '🔌'},
-    'COPPER': {'category': 'Metals', 'emoji': '🔴'},
+    # ===== COMMODITIES (2) - MetaQuotes-Demo Available =====
+    'XPTUSD': {'category': 'Metals', 'emoji': '💍'},   # PLATINUM
+    'OILK': {'category': 'Energy', 'emoji': '🛢️'},     # CRUDE OIL
     
-    # Energies
-    'CRUDE_OIL': {'category': 'Energy', 'emoji': '🛢️'},
-    'NATURAL_GAS': {'category': 'Energy', 'emoji': '💨'},
-    'BRENT_OIL': {'category': 'Energy', 'emoji': '⛽'},
+    # ===== INDICES (2) - MetaQuotes-Demo Available =====
+    'SP500m': {'category': 'Indices', 'emoji': '📊'},   # S&P 500
+    'DAX': {'category': 'Indices', 'emoji': '📈'},      # DAX
     
-    # Agricom
-    'WHEAT': {'category': 'Agriculture', 'emoji': '🌾'},
-    'CORN': {'category': 'Agriculture', 'emoji': '🌽'},
-    'SOYBEANS': {'category': 'Agriculture', 'emoji': '🫘'},
-    'COFFEE': {'category': 'Agriculture', 'emoji': '☕'},
-    'SUGAR': {'category': 'Agriculture', 'emoji': '🍯'},
-    'COCOA': {'category': 'Agriculture', 'emoji': '🍫'},
-    
-    # Indices
-    'SP500': {'category': 'Indices', 'emoji': '📊'},
-    'DAX': {'category': 'Indices', 'emoji': '📈'},
-    'NZD/USD': {'category': 'Forex', 'emoji': '📍'},
+    # ===== STOCKS (5) - MetaQuotes-Demo Available =====
+    'AMD': {'category': 'Tech Stock', 'emoji': '💻'},
+    'MSFT': {'category': 'Tech Stock', 'emoji': '🪟'},
+    'INTC': {'category': 'Tech Stock', 'emoji': '⚡'},
+    'NVDA': {'category': 'Tech Stock', 'emoji': '🎮'},
+    'NIKL': {'category': 'Indices', 'emoji': '🗾'},     # Nikkei
 }
 
 
