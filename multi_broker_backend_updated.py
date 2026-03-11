@@ -83,9 +83,9 @@ def find_mt5_path():
     return None  # Return None instead of default fallback
 
 MT5_CONFIG = {
-    'account': 103376464,
+    'account': 168073503,
     'password': '*6RjhRvH',
-    'server': 'XMGlobal MTS 2',
+    'server': 'XMGlobal-MT5 2',
     'path': find_mt5_path()
 }
 
