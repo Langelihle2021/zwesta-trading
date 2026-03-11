@@ -1718,6 +1718,89 @@ def get_account_info_alias():
     })
 
 
+# ==================== SYMBOL VALIDATION & CORRECTION ====================
+# Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
+VALID_SYMBOLS = {
+    # Forex (9)
+    'EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCNH', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDSEK',
+    # Commodities (2)
+    'XPTUSD', 'OILK',
+    # Indices (2)
+    'SP500m', 'DAX',
+    # Stocks (5)
+    'AMD', 'MSFT', 'INTC', 'NVDA', 'NIKL'
+}
+
+SYMBOL_MAPPING = {
+    # OLD -> NEW SYMBOL CORRECTIONS
+    # Metals
+    'GOLD': 'XPTUSD', 'XAUUSD': 'XPTUSD',
+    'SILVER': 'XPTUSD', 'XAGUSD': 'XPTUSD',
+    'PLATINUM': 'XPTUSD',
+    'PALLADIUM': 'XPTUSD', 'XPDUSD': 'XPTUSD',
+    'COPPER': 'XPTUSD',
+    
+    # Energy
+    'WTIUSD': 'OILK', 'CRUDE_OIL': 'OILK',
+    'BRENTUSD': 'OILK',
+    'NATGASUS': 'OILK', 'NATURAL_GAS': 'OILK',
+    
+    # Agriculture
+    'CORNUSD': 'EURUSD', 'CORN': 'EURUSD',
+    'WHEATUSD': 'EURUSD', 'WHEAT': 'EURUSD',
+    'SOYBEANSUSD': 'EURUSD', 'SOYBEANS': 'EURUSD',
+    'COFFEEUSD': 'EURUSD', 'COFFEE': 'EURUSD',
+    'COCOAUSD': 'EURUSD', 'COCOA': 'EURUSD',
+    'SUGARUSD': 'EURUSD', 'SUGAR': 'EURUSD',
+    
+    # Indices
+    'SPX500': 'SP500m', 'S&P500': 'SP500m', 'SP500': 'SP500m',
+    'DAX40': 'DAX', 'GDAX': 'DAX',
+    'FTSE100': 'GBPUSD', 'FTSE': 'GBPUSD',
+    'CAC40': 'EURUSD',
+    'NIKKEI225': 'NIKL', 'NIKKEI': 'NIKL',
+    
+    # Crypto (not available)
+    'BITCOIN': 'MSFT', 'BTC': 'MSFT',
+    'ETHEREUM': 'MSFT', 'ETH': 'MSFT',
+}
+
+def validate_and_correct_symbols(symbols):
+    """Validate symbols and correct old/unavailable ones to valid MetaQuotes-Demo symbols"""
+    if not symbols:
+        return ['EURUSD']  # Default fallback
+    
+    corrected = []
+    for symbol in symbols:
+        if symbol in VALID_SYMBOLS:
+            # Symbol is valid - keep it
+            corrected.append(symbol)
+        elif symbol in SYMBOL_MAPPING:
+            # Symbol is old - map to new one
+            new_symbol = SYMBOL_MAPPING[symbol]
+            logger.warning(f"🔄 Auto-correcting symbol {symbol} -> {new_symbol} (not available on MetaQuotes-Demo)")
+            if new_symbol not in corrected:
+                corrected.append(new_symbol)
+        else:
+            # Unknown symbol - use fallback
+            logger.warning(f"⚠️  Unknown symbol {symbol} - using EURUSD fallback")
+            if 'EURUSD' not in corrected:
+                corrected.append('EURUSD')
+    
+    # Ensure we have at least one symbol
+    if not corrected:
+        corrected = ['EURUSD']
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    final = []
+    for s in corrected:
+        if s not in seen:
+            final.append(s)
+            seen.add(s)
+    
+    return final[:5]  # Limit to 5 symbols max
+
 # ==================== BOT TRADING STRATEGY IMPLEMENTATIONS ====================
 
 def scalping_strategy(symbol, account_id, risk_amount):
@@ -2967,7 +3050,8 @@ def create_bot():
             # Generate ABSOLUTELY unique bot_id (timestamp + uuid to ensure no collisions)
             import time
             bot_id = data.get('botId') or f"bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-            symbols = data.get('symbols', ['EURUSD'])
+            raw_symbols = data.get('symbols', ['EURUSD'])
+            symbols = validate_and_correct_symbols(raw_symbols)  # ✅ AUTO-CORRECT OLD SYMBOLS
             strategy = data.get('strategy', 'Trend Following')
             risk_per_trade = float(data.get('riskPerTrade', 100))
             max_daily_loss = float(data.get('maxDailyLoss', 500))
@@ -3236,6 +3320,9 @@ def start_bot():
         # Place REAL trades on MT5
         strategy_name = bot_config['strategy']
         strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
+        
+        # ✅ VALIDATE & CORRECT BOT SYMBOLS (in case they're old/unavailable)
+        bot_config['symbols'] = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSD']))
         
         trades_placed = []
         for symbol in bot_config['symbols'][:3]:  # Limit to 3 trades per cycle
