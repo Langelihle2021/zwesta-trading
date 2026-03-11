@@ -2446,6 +2446,11 @@ def test_broker_connection():
         # Log connection test
         logger.info(f"🔌 Testing broker connection: {broker} | Account: {account} | User: {user_id}")
         
+        # Fix server name for MetaQuotes - use configured server if not specified
+        if broker.lower() == 'metaquotes' and (not server or server != MT5_CONFIG['server']):
+            server = MT5_CONFIG['server']
+            logger.info(f"   Corrected server to: {server}")
+        
         # Save credentials to database (persist the connection)
         conn = get_db_connection()
         cursor = conn.cursor()
