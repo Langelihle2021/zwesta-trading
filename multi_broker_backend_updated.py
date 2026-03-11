@@ -14,6 +14,7 @@ import hashlib
 import threading
 import random
 import smtplib
+import subprocess
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -4531,6 +4532,23 @@ if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
     logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
     logger.info(f"MT5 Server: {MT5_CONFIG['server']}")
+    
+    # LAUNCH MT5 PROCESS (required for IPC connections)
+    logger.info("="*60)
+    logger.info("🚀 LAUNCHING MT5 TERMINAL...")
+    logger.info("="*60)
+    mt5_path = MT5_CONFIG.get('path')
+    if mt5_path and os.path.exists(mt5_path):
+        try:
+            logger.info(f"Starting: {mt5_path}")
+            subprocess.Popen([mt5_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info("⏳ MT5 initializing... (waiting 5 seconds)")
+            time.sleep(5)
+            logger.info("✅ MT5 should be ready now")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not launch MT5: {e}")
+    else:
+        logger.warning("⚠️  MT5 path not found - will use simulated trading only")
     
     # AUTO-CONNECT to MT5 (so dashboard shows real account balance)
     auto_connect_mt5()
