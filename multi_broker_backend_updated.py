@@ -2238,6 +2238,148 @@ def get_bot_config(bot_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ==================== LIVE MARKET DATA MANAGEMENT ====================
+# Thread lock for safe commodity_market_data access
+market_data_lock = threading.Lock()
+
+# Previous prices for calculating price changes
+previous_prices = {}
+
+def get_live_prices_from_mt5():
+    """Fetch real-time prices from MT5 for all available symbols"""
+    global previous_prices
+    
+    try:
+        mt5_connection = broker_manager.connections.get('Default MT5')
+        if not mt5_connection or not mt5_connection.connected:
+            return None
+        
+        live_prices = {}
+        mt5 = mt5_connection.mt5
+        
+        # Fetch prices for all valid symbols
+        for symbol in VALID_SYMBOLS:
+            try:
+                # Ensure symbol is available in MT5
+                if not mt5.symbol_select(symbol, True):
+                    logger.debug(f"Symbol {symbol} not available in MT5")
+                    continue
+                
+                # Get current tick data (price)
+                tick = mt5.symbol_info_tick(symbol)
+                if tick is None:
+                    logger.debug(f"Could not get tick for {symbol}")
+                    continue
+                
+                # Use mid-price (average of bid/ask)
+                current_price = (tick.bid + tick.ask) / 2.0
+                
+                # Calculate price change
+                previous_price = previous_prices.get(symbol, current_price)
+                price_change = ((current_price - previous_price) / previous_price * 100) if previous_price != 0 else 0
+                
+                # Determine trend
+                trend = 'UP' if price_change >= 0 else 'DOWN'
+                
+                # Estimate volatility based on bid-ask spread
+                spread_percent = ((tick.ask - tick.bid) / current_price * 100) if current_price != 0 else 0
+                if spread_percent < 0.05:
+                    volatility = 'Very Low'
+                elif spread_percent < 0.10:
+                    volatility = 'Low'
+                elif spread_percent < 0.20:
+                    volatility = 'Medium'
+                elif spread_percent < 0.50:
+                    volatility = 'High'
+                else:
+                    volatility = 'Very High'
+                
+                # Generate signal based on price change
+                abs_change = abs(price_change)
+                if abs_change >= 2.0 and trend == 'UP':
+                    signal = '🟢 STRONG BUY'
+                elif abs_change >= 1.0 and trend == 'UP':
+                    signal = '🟢 BUY'
+                elif abs_change >= 2.0 and trend == 'DOWN':
+                    signal = '🔴 STRONG SELL'
+                elif abs_change >= 1.0 and trend == 'DOWN':
+                    signal = '🔴 SELL'
+                else:
+                    signal = '🟡 HOLD'
+                
+                # Determine recommendation
+                if 'STRONG BUY' in signal:
+                    recommendation = 'Strong uptrend - excellent entry opportunity'
+                elif 'BUY' in signal:
+                    recommendation = 'Positive momentum - good opportunity'
+                elif 'STRONG SELL' in signal:
+                    recommendation = 'Strong downtrend - avoid or consider short'
+                elif 'SELL' in signal:
+                    recommendation = 'Negative momentum - risky'
+                else:
+                    recommendation = f'{volatility} volatility - monitor before entering'
+                
+                live_prices[symbol] = {
+                    'price': round(current_price, 5),
+                    'change': round(price_change, 2),
+                    'trend': trend,
+                    'volatility': volatility,
+                    'signal': signal,
+                    'recommendation': recommendation,
+                }
+                
+                # Update previous price for next calculation
+                previous_prices[symbol] = current_price
+                
+            except Exception as e:
+                logger.debug(f"Error fetching live price for {symbol}: {e}")
+                continue
+        
+        return live_prices if live_prices else None
+        
+    except Exception as e:
+        logger.error(f"Error fetching live prices from MT5: {e}")
+        return None
+
+def live_market_data_updater():
+    """Background thread: continuously fetch and update live market data"""
+    logger.info("✅ Live market data updater thread started")
+    global commodity_market_data
+    
+    update_interval = 3  # Update prices every 3 seconds
+    update_failed_count = 0
+    max_failed_attempts = 5
+    
+    while True:
+        try:
+            # Try to fetch live prices from MT5
+            live_prices = get_live_prices_from_mt5()
+            
+            if live_prices:
+                # Update commodity_market_data with live prices (thread-safe)
+                with market_data_lock:
+                    for symbol, data in live_prices.items():
+                        if symbol in commodity_market_data:
+                            # Keep all original data but update prices
+                            commodity_market_data[symbol].update(data)
+                    
+                    logger.debug(f"✅ Updated {len(live_prices)} live prices from MT5")
+                
+                update_failed_count = 0  # Reset failure counter
+            else:
+                update_failed_count += 1
+                if update_failed_count == 1:
+                    logger.warning("⚠️  Could not fetch live prices from MT5 - using cached data. Make sure MT5 is connected.")
+                elif update_failed_count >= max_failed_attempts:
+                    logger.warning(f"⚠️  MT5 live price feed unavailable after {max_failed_attempts} attempts - using cached prices")
+                    # Still continue to serve cached prices
+            
+            time.sleep(update_interval)
+            
+        except Exception as e:
+            logger.error(f"❌ Error in live market data updater: {e}")
+            time.sleep(5)  # Wait 5 seconds before retrying on error
+
 # Commodity Market Sentiment Data
 # Tracks price trends, volatility, and trading signals
 commodity_market_data = {
@@ -3552,13 +3694,16 @@ def start_bot():
 
 @app.route('/api/market/commodities', methods=['GET'])
 def get_commodity_market_data():
-    """Get market sentiment and price data for all trading commodities"""
+    """Get market sentiment and price data for all trading commodities (with live prices from MT5)"""
     try:
-        return jsonify({
-            'success': True,
-            'commodities': commodity_market_data,
-            'timestamp': datetime.now().isoformat(),
-        }), 200
+        # Thread-safe access to commodity_market_data
+        with market_data_lock:
+            return jsonify({
+                'success': True,
+                'commodities': commodity_market_data.copy(),
+                'timestamp': datetime.now().isoformat(),
+                'note': 'Prices updated live from MT5 every 3 seconds',
+            }), 200
     except Exception as e:
         logger.error(f"Error getting market data: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -5011,6 +5156,11 @@ if __name__ == '__main__':
     logger.info("Initializing demo trading bots...")
     initialize_demo_bots()
     logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
+    
+    # Start live market data updater thread (fetches real prices from MT5)
+    market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
+    market_updater_thread.start()
+    logger.info("🔄 Live market data updater thread started")
     
     # Start auto-withdrawal monitoring thread
     monitoring_thread = threading.Thread(target=auto_withdrawal_monitor, daemon=True)
