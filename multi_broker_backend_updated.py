@@ -2292,6 +2292,77 @@ def initialize_demo_bots():
         }
         logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
 
+
+def load_user_bots_from_database():
+    """Load all user-created bots from database into active_bots memory"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all active bots from database
+        cursor.execute('''
+            SELECT bot_id, user_id, name, strategy, broker_account_id, symbols, enabled, created_at
+            FROM user_bots
+            WHERE status = 'active'
+        ''')
+        
+        bots_loaded = 0
+        for row in cursor.fetchall():
+            bot_id = row[0]
+            user_id = row[1]
+            name = row[2]
+            strategy = row[3]
+            account_id = row[4]
+            symbols_str = row[5]
+            enabled = row[6]
+            created_at = row[7]
+            
+            # Skip if already in active_bots (demo bots)
+            if bot_id in active_bots:
+                continue
+            
+            # Parse symbols
+            symbols = symbols_str.split(',') if symbols_str else ['EURUSD']
+            
+            # Add to active_bots with default values for trading metrics
+            now = datetime.now()
+            active_bots[bot_id] = {
+                'botId': bot_id,
+                'user_id': user_id,
+                'name': name,
+                'accountId': account_id,
+                'symbols': symbols,
+                'strategy': strategy,
+                'enabled': bool(enabled),
+                'totalTrades': 0,
+                'winningTrades': 0,
+                'totalProfit': 0,
+                'totalLosses': 0,
+                'totalInvestment': 0,
+                'createdAt': created_at,
+                'startTime': created_at,
+                'profitHistory': [],
+                'tradeHistory': [],
+                'dailyProfits': {},
+                'maxDrawdown': 0,
+                'peakProfit': 0,
+                'strategyHistory': [],
+                'lastStrategySwitch': created_at,
+                'volatilityLevel': 'Medium',
+            }
+            bots_loaded += 1
+        
+        conn.close()
+        
+        if bots_loaded > 0:
+            logger.info(f"✅ Loaded {bots_loaded} user-created bots from database")
+        
+        return bots_loaded
+    
+    except Exception as e:
+        logger.error(f"❌ Error loading user bots from database: {e}")
+        return 0
+
 # ==================== BOT TRADING ENDPOINTS ====================
 
 
@@ -6067,6 +6138,12 @@ if __name__ == '__main__':
     logger.info("Initializing demo trading bots...")
     initialize_demo_bots()
     logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
+    
+    # Load user-created bots from database
+    logger.info("Loading user-created bots from database...")
+    user_bots_count = load_user_bots_from_database()
+    logger.info(f"[OK] Loaded {user_bots_count} user bots from database")
+    logger.info(f"[OK] Total bots ready: {len(active_bots)}")
     
     # Start live market data updater thread (fetches real prices from MT5)
     market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
