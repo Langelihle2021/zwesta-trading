@@ -8,3 +8,5 @@ export 'bot_configuration_screen.dart';
 export 'financials_screen.dart';
 export 'multi_account_management_screen.dart';
 export 'consolidated_reports_screen.dart';
+export 'multi_broker_management_screen.dart';
+export 'enhanced_dashboard_screen.dart';

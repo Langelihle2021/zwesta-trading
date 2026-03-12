@@ -24,6 +24,8 @@ import 'multi_account_management_screen.dart';
 import 'consolidated_reports_screen.dart';
 import 'referral_dashboard_screen.dart';
 import 'admin_dashboard_screen.dart';
+import 'multi_broker_management_screen.dart';
+import 'enhanced_dashboard_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -974,6 +976,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const AdminDashboardScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.analytics),
+            title: const Text('Trading Dashboard'),
+            subtitle: const Text('Your stats & performance'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const EnhancedDashboardScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.business),
+            title: const Text('Multi-Broker Management'),
+            subtitle: const Text('Add/remove broker credentials'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const MultiBrokerManagementScreen(),
                 ),
               );
             },
