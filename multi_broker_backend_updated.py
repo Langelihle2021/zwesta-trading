@@ -2449,7 +2449,8 @@ def get_best_trading_assets(limit=5):
         sorted_assets = sorted(asset_scores.items(), key=lambda x: x[1]['score'], reverse=True)
         top_assets = [symbol for symbol, data in sorted_assets[:limit]]
         
-        logger.info(f"[INTELLIGENT TRADING] Top {limit} assets for trading: {', '.join([f'{s}({asset_scores[s][\"score\"]:.2f})' for s in top_assets])}")
+        asset_strings = [f"{s}({asset_scores[s]['score']:.2f})" for s in top_assets]
+        logger.info(f"[INTELLIGENT TRADING] Top {limit} assets for trading: {', '.join(asset_strings)}")
         
         return top_assets
 
@@ -3871,6 +3872,9 @@ def start_bot():
                             logger.error(f"   Request was: {order_result.get('request')}")
                             # Trade not placed - will be skipped (not double-counted in stats)
                             trade = None
+                    except Exception as e:
+                        logger.error(f"❌ Exception placing REAL order on {symbol}: {e}")
+                        trade = None
                 
                 # Store trade ONCE to database (consolidating multiple save points)
                 if trade:
@@ -4535,26 +4539,6 @@ def disable_auto_withdrawal(bot_id):
 
 
 # ==================== REFERRAL API ENDPOINTS ====================
-
-@app.route('/api/user/register', methods=['POST'])
-def register_user():
-    """Register new user with optional referral code"""
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        name = data.get('name')
-        referral_code = data.get('referral_code')  # Optional
-        
-        if not email or not name:
-            return jsonify({'success': False, 'error': 'Email and name required'}), 400
-        
-        result = ReferralSystem.register_user(email, name, referral_code)
-        return jsonify(result), 200 if result['success'] else 400
-    
-    except Exception as e:
-        logger.error(f"Error in register_user: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 
 @app.route('/api/user/login', methods=['POST'])
 def login_user():
