@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
@@ -53,8 +54,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _botsError = null;
       });
 
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      
+      // Use public endpoint for bot status (no auth required)
       final response = await http
-          .get(Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/status'))
+          .get(
+            Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/status-public'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (sessionToken != null && sessionToken.isNotEmpty)
+                'X-Session-Token': sessionToken,
+            },
+          )
           .timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {

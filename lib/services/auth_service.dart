@@ -205,8 +205,16 @@ class AuthService extends ChangeNotifier {
   Future<void> logout() async {
     _token = null;
     _currentUser = null;
+    // Clear all session-related keys
     await _prefs.remove('auth_token');
     await _prefs.remove('current_user');
+    await _prefs.remove('user_id');
+    await _prefs.remove('mt5_account');
+    await _prefs.remove('mt5_server');
+    // Clear any cached bot data
+    await _prefs.remove('active_bots');
+    await _prefs.remove('last_bot_sync');
+    print('✅ Session cleared - all saved login and bot data removed');
     notifyListeners();
   }
 

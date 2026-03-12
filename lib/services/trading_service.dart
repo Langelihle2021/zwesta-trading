@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/trade.dart';
 import '../models/account.dart';
@@ -172,8 +173,17 @@ class TradingService extends ChangeNotifier {
   Future<void> fetchTrades() async {
     if (_useApi && _isConnected) {
       try {
+        final prefs = await SharedPreferences.getInstance();
+        final sessionToken = prefs.getString('auth_token');
+        
+        // Use public endpoint for trades (no auth required)
         final response = await http.get(
-          Uri.parse('$_apiUrl/api/trades'),
+          Uri.parse('$_apiUrl/api/trades-public'),
+          headers: {
+            'Content-Type': 'application/json',
+            if (sessionToken != null && sessionToken.isNotEmpty)
+              'X-Session-Token': sessionToken,
+          },
         ).timeout(const Duration(seconds: 10));
 
         if (response.statusCode == 200) {
@@ -217,8 +227,17 @@ class TradingService extends ChangeNotifier {
   Future<void> fetchAccounts() async {
     if (_useApi && _isConnected) {
       try {
+        final prefs = await SharedPreferences.getInstance();
+        final sessionToken = prefs.getString('auth_token');
+        
+        // Use public endpoint for account info
         final response = await http.get(
           Uri.parse('$_apiUrl/api/account/info'),
+          headers: {
+            'Content-Type': 'application/json',
+            if (sessionToken != null && sessionToken.isNotEmpty)
+              'X-Session-Token': sessionToken,
+          },
         ).timeout(const Duration(seconds: 10));
 
         if (response.statusCode == 200) {

@@ -363,7 +363,8 @@ def init_database():
             is_active BOOLEAN DEFAULT 1,
             created_at TEXT,
             updated_at TEXT,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            UNIQUE(user_id, broker_name, account_number)
         )
     ''')
     
@@ -2897,7 +2898,7 @@ def get_broker_credentials():
 @app.route('/api/broker/credentials', methods=['POST'])
 @require_session
 def save_broker_credentials():
-    """Save new broker credentials for user"""
+    """Save new broker credentials for user (prevents duplicates)"""
     try:
         user_id = request.user_id
         data = request.json
@@ -2909,33 +2910,57 @@ def save_broker_credentials():
                 'error': f'Missing required fields: {required_fields}'
             }), 400
         
-        credential_id = str(uuid.uuid4())
         created_at = datetime.now().isoformat()
         is_live = data.get('is_live', False)
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Check if credential already exists for this user, broker, and account
         cursor.execute('''
-            INSERT INTO broker_credentials
-            (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-        ''', (
-            credential_id,
-            user_id,
-            data['broker'],
-            data['account_number'],
-            data['password'],
-            data['server'],
-            1 if is_live else 0,
-            created_at,
-            created_at
-        ))
+            SELECT credential_id FROM broker_credentials
+            WHERE user_id = ? AND broker_name = ? AND account_number = ?
+        ''', (user_id, data['broker'], data['account_number']))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing credential instead of creating duplicate
+            credential_id = existing[0]
+            cursor.execute('''
+                UPDATE broker_credentials
+                SET password = ?, server = ?, is_live = ?, updated_at = ?
+                WHERE credential_id = ?
+            ''', (
+                data['password'],
+                data['server'],
+                1 if is_live else 0,
+                created_at,
+                credential_id
+            ))
+            logger.info(f"ℹ️ Updated existing broker credential for user {user_id}: {data['broker']} | Account: {data['account_number']}")
+        else:
+            # Create new credential
+            credential_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO broker_credentials
+                (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ''', (
+                credential_id,
+                user_id,
+                data['broker'],
+                data['account_number'],
+                data['password'],
+                data['server'],
+                1 if is_live else 0,
+                created_at,
+                created_at
+            ))
+            logger.info(f"✅ Created new broker credential for user {user_id}: {data['broker']} | Account: {data['account_number']}")
         
         conn.commit()
         conn.close()
-        
-        logger.info(f"✅ Saved broker credential for user {user_id}: {data['broker']} | Account: {data['account_number']}")
         
         return jsonify({
             'success': True,

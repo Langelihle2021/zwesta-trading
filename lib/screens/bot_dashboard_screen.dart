@@ -46,8 +46,17 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      
+      // Use public endpoint for bot status (no auth required)
       final response = await http.get(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/status'),
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/status-public'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (sessionToken != null && sessionToken.isNotEmpty)
+            'X-Session-Token': sessionToken,
+        },
       ).timeout(const Duration(seconds: 5));
       
       if (response.statusCode == 200) {
