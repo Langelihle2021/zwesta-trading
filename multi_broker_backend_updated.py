@@ -1553,20 +1553,28 @@ def list_commodities():
                     {'symbol': 'USDCAD', 'name': 'US Dollar vs Canadian Dollar', 'min_price': 1.35, 'max_price': 1.37},
                     {'symbol': 'USDSEK', 'name': 'US Dollar vs Swedish Krona', 'min_price': 10.88, 'max_price': 10.92},
                 ],
-                'commodities': [
-                    {'symbol': 'XPTUSD', 'name': 'Platinum (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 915, 'max_price': 925},
-                    {'symbol': 'OILK', 'name': 'Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 81, 'max_price': 84},
+                'precious_metals': [
+                    {'symbol': 'XAUUSD', 'name': '🥇 Gold (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 2100},
+                    {'symbol': 'XAGUSD', 'name': '⚪ Silver (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 28, 'max_price': 35},
+                    {'symbol': 'XPTUSD', 'name': 'Platinum (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 900, 'max_price': 950},
+                    {'symbol': 'XPDUSD', 'name': 'Palladium (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 1100, 'max_price': 1200},
+                ],
+                'energy': [
+                    {'symbol': 'OILK', 'name': '🛢️ Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 70, 'max_price': 90},
+                    {'symbol': 'NATGASUS', 'name': 'Natural Gas (per MMBtu)', 'type': 'Energy', 'lucrative': True, 'min_price': 2.0, 'max_price': 4.0},
                 ],
                 'indices': [
-                    {'symbol': 'SP500m', 'name': 'S&P 500 Index', 'min_price': 5280, 'max_price': 5290},
-                    {'symbol': 'DAX', 'name': 'DAX 40 (Germany)', 'min_price': 18240, 'max_price': 18260},
+                    {'symbol': 'SP500m', 'name': 'S&P 500 Index', 'min_price': 5000, 'max_price': 5500},
+                    {'symbol': 'DAX', 'name': 'DAX 40 (Germany)', 'min_price': 18000, 'max_price': 18500},
+                    {'symbol': 'US300', 'name': 'US 300 Index', 'min_price': 15000, 'max_price': 16000},
+                    {'symbol': 'US100', 'name': 'US 100 Index (Nasdaq)', 'min_price': 18000, 'max_price': 19000},
                 ],
                 'stocks': [
-                    {'symbol': 'AMD', 'name': 'Advanced Micro Devices Inc.', 'min_price': 185, 'max_price': 187},
-                    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'min_price': 414, 'max_price': 417},
-                    {'symbol': 'INTC', 'name': 'Intel Corporation', 'min_price': 47.5, 'max_price': 49.0},
-                    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'min_price': 872, 'max_price': 878},
-                    {'symbol': 'NIKL', 'name': 'Nikkei 225 Index', 'min_price': 28850, 'max_price': 28950},
+                    {'symbol': 'AMD', 'name': 'Advanced Micro Devices Inc.', 'min_price': 180, 'max_price': 200},
+                    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'min_price': 400, 'max_price': 430},
+                    {'symbol': 'INTC', 'name': 'Intel Corporation', 'min_price': 45, 'max_price': 55},
+                    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'min_price': 850, 'max_price': 900},
+                    {'symbol': 'NIKL', 'name': 'Nikkei 225 Index', 'min_price': 28000, 'max_price': 30000},
                 ]
             }
             
@@ -1599,6 +1607,45 @@ def list_commodities():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/trading/best-assets', methods=['GET'])
+def get_best_assets():
+    """Get the top N most profitable assets for trading based on intelligent analysis"""
+    try:
+        limit = request.args.get('limit', 5, type=int)
+        limit = max(1, min(limit, 27))  # Clamp between 1 and 27
+        
+        best_assets = get_best_trading_assets(limit=limit)
+        
+        # Get detailed data for each asset
+        asset_details = []
+        with market_data_lock:
+            for symbol in best_assets:
+                data = commodity_market_data.get(symbol, {})
+                asset_details.append({
+                    'symbol': symbol,
+                    'price': data.get('price', 0),
+                    'change': data.get('change', 0),
+                    'signal': data.get('signal', 'UNKNOWN'),
+                    'trend': data.get('trend', 'FLAT'),
+                    'volatility': data.get('volatility', 'Unknown'),
+                    'profitability_score': data.get('profitability_score', 0.50),
+                    'recommendation': data.get('recommendation', 'No data'),
+                })
+        
+        logger.info(f"[/api/trading/best-assets] Returning top {limit} assets for bot trading")
+        
+        return jsonify({
+            'success': True,
+            'best_assets': best_assets,
+            'details': asset_details,
+            'count': len(asset_details),
+            'timestamp': datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting best assets: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/demo/generate-trades', methods=['POST'])
 def generate_demo_trades():
     """Generate mock trades for demo/testing purposes"""
@@ -1611,9 +1658,9 @@ def generate_demo_trades():
         
         demo_trades = []
         
-        # Define trading symbols with realistic price ranges (ONLY METAQUOTES-DEMO AVAILABLE SYMBOLS)
+        # Define trading symbols with realistic price ranges (METAQUOTES-DEMO AVAILABLE SYMBOLS)
         commodity_data = {
-            # ===== FOREX (9) - All available on MetaQuotes-Demo =====
+            # ===== FOREX (9) =====
             'EURUSD': {'min_price': 1.08, 'max_price': 1.10, 'volume_range': (0.1, 5.0)},
             'GBPUSD': {'min_price': 1.27, 'max_price': 1.29, 'volume_range': (0.1, 5.0)},
             'USDCHF': {'min_price': 0.89, 'max_price': 0.91, 'volume_range': (0.1, 5.0)},
@@ -1624,20 +1671,28 @@ def generate_demo_trades():
             'USDCAD': {'min_price': 1.35, 'max_price': 1.37, 'volume_range': (0.1, 5.0)},
             'USDSEK': {'min_price': 10.88, 'max_price': 10.92, 'volume_range': (0.1, 5.0)},
             
-            # ===== COMMODITIES (2) - Available on MetaQuotes-Demo =====
-            'XPTUSD': {'min_price': 915, 'max_price': 925, 'volume_range': (0.01, 1.0)},  # PLATINUM
-            'OILK': {'min_price': 81, 'max_price': 84, 'volume_range': (1, 100)},  # CRUDE OIL
+            # ===== PRECIOUS METALS (4) =====
+            'XAUUSD': {'min_price': 2000, 'max_price': 2100, 'volume_range': (0.01, 2.0)},  # GOLD
+            'XAGUSD': {'min_price': 28, 'max_price': 35, 'volume_range': (0.1, 10.0)},  # SILVER
+            'XPTUSD': {'min_price': 900, 'max_price': 950, 'volume_range': (0.01, 1.0)},  # PLATINUM
+            'XPDUSD': {'min_price': 1100, 'max_price': 1200, 'volume_range': (0.01, 1.0)},  # PALLADIUM
             
-            # ===== INDICES (2) - Available on MetaQuotes-Demo =====
-            'SP500m': {'min_price': 5280, 'max_price': 5290, 'volume_range': (0.1, 5.0)},  # S&P 500
-            'DAX': {'min_price': 18240, 'max_price': 18260, 'volume_range': (0.1, 5.0)},  # DAX
+            # ===== ENERGY (2) =====
+            'OILK': {'min_price': 70, 'max_price': 90, 'volume_range': (1, 100)},  # CRUDE OIL
+            'NATGASUS': {'min_price': 2.0, 'max_price': 4.0, 'volume_range': (1, 500)},  # NATURAL GAS
             
-            # ===== STOCKS (5) - Available on MetaQuotes-Demo =====
-            'AMD': {'min_price': 185, 'max_price': 187, 'volume_range': (0.1, 5.0)},  # AMD
-            'MSFT': {'min_price': 414, 'max_price': 417, 'volume_range': (0.1, 5.0)},  # Microsoft
-            'INTC': {'min_price': 47.5, 'max_price': 49.0, 'volume_range': (0.1, 5.0)},  # Intel
-            'NVDA': {'min_price': 872, 'max_price': 878, 'volume_range': (0.1, 5.0)},  # NVIDIA
-            'NIKL': {'min_price': 28850, 'max_price': 28950, 'volume_range': (0.01, 2.0)},  # Nikkei
+            # ===== INDICES (4) =====
+            'SP500m': {'min_price': 5000, 'max_price': 5500, 'volume_range': (0.1, 5.0)},  # S&P 500
+            'DAX': {'min_price': 18000, 'max_price': 18500, 'volume_range': (0.1, 5.0)},  # DAX
+            'US300': {'min_price': 15000, 'max_price': 16000, 'volume_range': (0.1, 5.0)},  # US 300
+            'US100': {'min_price': 18000, 'max_price': 19000, 'volume_range': (0.1, 5.0)},  # US 100 (Nasdaq)
+            
+            # ===== STOCKS (5) =====
+            'AMD': {'min_price': 180, 'max_price': 200, 'volume_range': (0.1, 5.0)},
+            'MSFT': {'min_price': 400, 'max_price': 430, 'volume_range': (0.1, 5.0)},
+            'INTC': {'min_price': 45, 'max_price': 55, 'volume_range': (0.1, 5.0)},
+            'NVDA': {'min_price': 850, 'max_price': 900, 'volume_range': (0.1, 5.0)},
+            'NIKL': {'min_price': 28000, 'max_price': 30000, 'volume_range': (0.01, 2.0)},
         }
         
         symbols = list(commodity_data.keys())
@@ -1764,10 +1819,19 @@ def get_account_info_alias():
 VALID_SYMBOLS = {
     # Forex (9)
     'EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCNH', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDSEK',
-    # Commodities (2)
-    'XPTUSD', 'OILK',
-    # Indices (2)
-    'SP500m', 'DAX',
+    # Precious Metals (4) - High volatility, high profitability potential
+    'XAUUSD',   # Gold - Most liquid precious metal
+    'XAGUSD',   # Silver - High volatility
+    'XPTUSD',   # Platinum - Lower liquidity but high volatility
+    'XPDUSD',   # Palladium - Rare, high volatility
+    # Energy (2)
+    'OILK',     # Crude Oil (Brent)
+    'NATGASUS', # Natural Gas
+    # Indices (4)
+    'SP500m',   # S&P 500
+    'DAX',      # DAX 40 Germany
+    'US300',    # US 300 Index (broader market)
+    'US100',    # Nasdaq 100 (tech-heavy)
     # Stocks (5)
     'AMD', 'MSFT', 'INTC', 'NVDA', 'NIKL'
 }
@@ -2293,6 +2357,71 @@ def initialize_previous_prices():
             previous_prices[symbol] = None  # Start with None so first MT5 fetch establishes baseline
     logger.info(f"✅ Prepared price tracking for {len(previous_prices)} symbols (will baseline on first MT5 fetch)")
 
+def get_best_trading_assets(limit=5):
+    """
+    Intelligent asset selection: Analyze all available symbols and return the best ones for trading
+    Considers: profitability_score, signal strength, volatility, and trend direction
+    
+    Returns: List of top N symbols sorted by profitability potential
+    """
+    with market_data_lock:
+        asset_scores = {}
+        
+        for symbol, data in commodity_market_data.items():
+            # Base profitability score
+            base_score = data.get('profitability_score', 0.50)
+            
+            # Signal strength multiplier (0.5x = SELL, 1.0x = CONSOLIDATING, 1.5x = BUY, 2.0x = STRONG BUY)
+            signal = data.get('signal', '')
+            if 'STRONG BUY' in signal or 'STRONG SELL' in signal:
+                signal_multiplier = 2.0  # Strong signals = high confidence
+            elif 'BUY' in signal or 'SELL' in signal:
+                signal_multiplier = 1.5
+            elif 'WEAK' in signal or 'VOLATILE' in signal:
+                signal_multiplier = 1.2
+            else:  # CONSOLIDATING or NEUTRAL
+                signal_multiplier = 0.8
+            
+            # Volatility multiplier (more volatile = more profit potential)
+            volatility = data.get('volatility', 'Medium')
+            volatility_multiplier = {
+                'Very Low': 0.6,
+                'Low': 0.8,
+                'Medium': 1.0,
+                'High': 1.4,
+                'Very High': 1.8,
+            }.get(volatility, 1.0)
+            
+            # Trend direction bonus
+            trend = data.get('trend', 'FLAT')
+            trend_bonus = 0.15 if trend == 'UP' else (-0.10 if trend == 'DOWN' else 0)
+            
+            # Price change momentum
+            change = data.get('change', 0)
+            change_bonus = min(abs(change) / 100, 0.20)  # Max 0.20 bonus from price change
+            if change < 0 and 'SELL' not in signal:
+                change_bonus *= 0.5  # Reduce score if trending down without sell signal
+            
+            # Calculate final score
+            final_score = (base_score * signal_multiplier * volatility_multiplier) + trend_bonus + change_bonus
+            
+            asset_scores[symbol] = {
+                'score': final_score,
+                'base_score': base_score,
+                'signal': signal,
+                'volatility': volatility,
+                'trend': trend,
+                'change': change,
+            }
+        
+        # Sort by score and return top symbols
+        sorted_assets = sorted(asset_scores.items(), key=lambda x: x[1]['score'], reverse=True)
+        top_assets = [symbol for symbol, data in sorted_assets[:limit]]
+        
+        logger.info(f"[INTELLIGENT TRADING] Top {limit} assets for trading: {', '.join([f'{s}({asset_scores[s][\"score\"]:.2f})' for s in top_assets])}")
+        
+        return top_assets
+
 def get_live_prices_from_mt5():
     """Fetch real-time prices from MT5 for all available symbols"""
     global previous_prices
@@ -2507,32 +2636,39 @@ def live_market_data_updater():
 # Commodity Market Sentiment Data
 # Tracks price trends, volatility, and trading signals
 commodity_market_data = {
-    # ===== AVAILABLE SYMBOLS ON METAQUOTES-DEMO (Verified from MT5 Market Watch) =====
-    # Forex Pairs (9)
-    'EURUSD': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'GBPUSD': {'price': 1.2750, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
-    'USDJPY': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'USDCHF': {'price': 0.8950, 'change': 0.25, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Safe haven currency - consolidating'},
-    'AUDUSD': {'price': 0.6580, 'change': 1.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
-    'NZDUSD': {'price': 0.6125, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'USDCAD': {'price': 1.3550, 'change': -0.28, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
-    'USDCNH': {'price': 7.2850, 'change': 0.15, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Very Low volatility with no clear direction'},
-    'USDSEK': {'price': 10.8950, 'change': -0.42, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
+    # ===== FOREX PAIRS (9) =====
+    'EURUSD': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.65},
+    'GBPUSD': {'price': 1.2750, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs', 'profitability_score': 0.58},
+    'USDJPY': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.62},
+    'USDCHF': {'price': 0.8950, 'change': 0.25, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Safe haven currency - consolidating', 'profitability_score': 0.45},
+    'AUDUSD': {'price': 0.6580, 'change': 1.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity', 'profitability_score': 0.82},
+    'NZDUSD': {'price': 0.6125, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.72},
+    'USDCAD': {'price': 1.3550, 'change': -0.28, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs', 'profitability_score': 0.55},
+    'USDCNH': {'price': 7.2850, 'change': 0.15, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Very Low volatility with no clear direction', 'profitability_score': 0.40},
+    'USDSEK': {'price': 10.8950, 'change': -0.42, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs', 'profitability_score': 0.53},
     
-    # Commodities (2)
-    'XPTUSD': {'price': 920.00, 'change': 0.68, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'OILK': {'price': 82.45, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
+    # ===== PRECIOUS METALS (4) - High volatility, excellent for swing trading =====
+    'XAUUSD': {'price': 2076.44, 'change': 0.68, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Gold strong uptrend - excellent profitability', 'profitability_score': 0.88},
+    'XAGUSD': {'price': 31.25, 'change': 2.15, 'trend': 'UP', 'volatility': 'Very High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Silver volatile with strong upside momentum', 'profitability_score': 0.85},
+    'XPTUSD': {'price': 920.00, 'change': 0.68, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Platinum positive momentum - good entry point', 'profitability_score': 0.70},
+    'XPDUSD': {'price': 1150.00, 'change': 1.45, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Palladium strong uptrend - high volatility plays well', 'profitability_score': 0.86},
     
-    # Indices (2)
-    'DAX': {'price': 18250.00, 'change': 0.65, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'SP500m': {'price': 5285.50, 'change': 1.02, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
+    # ===== ENERGY (2) =====
+    'OILK': {'price': 82.45, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Oil strong uptrend - excellent entry opportunity', 'profitability_score': 0.84},
+    'NATGASUS': {'price': 2.85, 'change': 1.25, 'trend': 'UP', 'volatility': 'Very High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Natural gas volatile with strong momentum', 'profitability_score': 0.79},
     
-    # Individual Stocks (5)
-    'AMD': {'price': 185.75, 'change': 2.42, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
-    'MSFT': {'price': 415.50, 'change': 1.35, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'INTC': {'price': 48.25, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
-    'NVDA': {'price': 875.00, 'change': 3.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
-    'NIKL': {'price': 28900.00, 'change': 2.55, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
+    # ===== INDICES (4) =====
+    'DAX': {'price': 18250.00, 'change': 0.65, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'DAX stable uptrend - good entry point', 'profitability_score': 0.68},
+    'SP500m': {'price': 5285.50, 'change': 1.02, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'S&P 500 positive momentum - solid entry', 'profitability_score': 0.72},
+    'US300': {'price': 15680.00, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Broader US market showing strength', 'profitability_score': 0.71},
+    'US100': {'price': 18950.00, 'change': 1.35, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Tech stocks leading the market', 'profitability_score': 0.75},
+    
+    # ===== STOCKS (5) =====
+    'AMD': {'price': 185.75, 'change': 2.42, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'AMD strong uptrend - excellent opportunity', 'profitability_score': 0.81},
+    'MSFT': {'price': 415.50, 'change': 1.35, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'MSFT solid momentum - good entry point', 'profitability_score': 0.76},
+    'INTC': {'price': 48.25, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Intel weak - avoid for now', 'profitability_score': 0.42},
+    'NVDA': {'price': 875.00, 'change': 3.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'NVIDIA strongest momentum in tech', 'profitability_score': 0.89},
+    'NIKL': {'price': 28900.00, 'change': 2.55, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Nikkei strong uptrend - Asian market strength', 'profitability_score': 0.83},
 }
 
 # Store active bots configuration
