@@ -2315,7 +2315,7 @@ def get_live_prices_from_mt5():
                         price_change = 0
                 
                     # Determine trend based on CALCULATED price change
-                    # 0.002% threshold = 20 pips movement for 1.08 EURUSD = realistic demo price movement
+                    # 0.0005% threshold = ultra-sensitive detection for demo market data
                     if price_change > 0.0005:  # UP trend
                         trend = 'UP'
                     elif price_change < -0.0005:  # DOWN trend
@@ -2402,6 +2402,10 @@ def get_live_prices_from_mt5():
                     'recommendation': recommendation,
                 }
                 
+                # Log signals for key forex/commodities to debug signal visibility
+                if symbol in ['EURUSD', 'GBPUSD', 'OILK', 'XPTUSD']:
+                    logger.debug(f"[SIGNAL] {symbol}: price={current_price:.5f}, change={price_change:.6f}%, trend={trend}, signal={signal}")
+                
             except Exception as e:
                 logger.debug(f"Error fetching live price for {symbol}: {e}")
                 continue
@@ -2443,7 +2447,11 @@ def live_market_data_updater():
                             updated_count += 1
                     
                     if updated_count > 0:
-                        logger.info(f"✅ Updated {updated_count} live prices from MT5")
+                        # Count signal types for visibility
+                        buy_count = sum(1 for s in commodity_market_data.values() if 'BUY' in s.get('signal', ''))
+                        sell_count = sum(1 for s in commodity_market_data.values() if 'SELL' in s.get('signal', ''))
+                        flat_count = sum(1 for s in commodity_market_data.values() if 'CONSOLIDAT' in s.get('signal', '') or 'VOLATILE' in s.get('signal', ''))
+                        logger.info(f"✅ Updated {updated_count} live prices | Signals: {buy_count} BUY, {sell_count} SELL, {flat_count} FLAT")
                 
                 update_failed_count = 0  # Reset failure counter
             else:
