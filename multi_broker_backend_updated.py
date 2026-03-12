@@ -2250,8 +2250,8 @@ def initialize_previous_prices():
     global previous_prices
     for symbol, data in commodity_market_data.items():
         if 'price' in data:
-            previous_prices[symbol] = data['price']
-    logger.info(f"✅ Initialized previous prices for {len(previous_prices)} symbols")
+            previous_prices[symbol] = None  # Start with None so first MT5 fetch establishes baseline
+    logger.info(f"✅ Prepared price tracking for {len(previous_prices)} symbols (will baseline on first MT5 fetch)")
 
 def get_live_prices_from_mt5():
     """Fetch real-time prices from MT5 for all available symbols"""
@@ -2292,16 +2292,21 @@ def get_live_prices_from_mt5():
                 current_price = (tick.bid + tick.ask) / 2.0
                 
                 # Get previous price (use current if first time)
-                if symbol not in previous_prices:
+                if symbol not in previous_prices or previous_prices[symbol] is None:
+                    # First fetch - baseline the price, don't calculate change yet
                     previous_prices[symbol] = current_price
-                
-                previous_price = previous_prices[symbol]
-                
-                # Calculate price change percentage
-                if previous_price != 0:
-                    price_change = ((current_price - previous_price) / previous_price * 100)
+                    price_change = 0  # No change on first read
                 else:
-                    price_change = 0
+                    previous_price = previous_prices[symbol]
+                    
+                    # Calculate price change percentage
+                    if previous_price != 0:
+                        price_change = ((current_price - previous_price) / previous_price * 100)
+                    else:
+                        price_change = 0
+                
+                    # Update previous price for next cycle
+                    previous_prices[symbol] = current_price
                 
                 # Determine trend based on price change
                 trend = 'UP' if current_price > previous_price else 'DOWN' if current_price < previous_price else 'FLAT'
@@ -2372,9 +2377,6 @@ def get_live_prices_from_mt5():
                     'signal': signal,
                     'recommendation': recommendation,
                 }
-                
-                # Update previous price for next cycle
-                previous_prices[symbol] = current_price
                 
             except Exception as e:
                 logger.debug(f"Error fetching live price for {symbol}: {e}")
