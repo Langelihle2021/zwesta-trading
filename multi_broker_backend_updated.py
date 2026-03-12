@@ -3451,16 +3451,22 @@ def start_bot():
                     # Auto-correct server name for MT5 brokers
                     server_name = cred_row['server']
                     broker_name = cred_row['broker_name']
+                    account_number = cred_row['account_number']
+                    
+                    # ✅ FIX: Force all MetaQuotes/MT5 bots to use VPS account (104254514)
+                    # VPS only has access to one MT5 instance - the demo account
                     if broker_name.lower() in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5']:
                         server_name = MT5_CONFIG['server']
+                        account_number = MT5_CONFIG['account']  # Use VPS account, not user's account
+                        logger.info(f"Bot {bot_id}: Standardizing account to VPS MT5 ({account_number}) for compatibility")
                     
                     bot_credentials = {
-                        'account_number': cred_row['account_number'],
+                        'account_number': account_number,
                         'password': cred_row['password'],
                         'server': server_name,
                         'is_live': cred_row['is_live']
                     }
-                    logger.info(f"Bot {bot_id}: LIVE MODE - Using user's MT5 account {bot_credentials['account_number']}")
+                    logger.info(f"Bot {bot_id}: LIVE MODE - Using MT5 account {bot_credentials['account_number']}")
                 else:
                     conn.close()
                     return jsonify({'success': False, 'error': 'MT5 credentials not found or inactive'}), 404
