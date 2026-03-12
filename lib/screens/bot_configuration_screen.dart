@@ -69,12 +69,15 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final commodities = data['commodities'] as Map;
         
         setState(() {
-          commodityMarketData = commodities.cast<String, dynamic>();
-          // Convert API data to UI format
-          tradingSymbols = _buildSymbolsFromApiData(commodities);
+          // Get market data for signal display (flat dict: {EURUSD: {signal, trend, ...}, ...})
+          final marketDataResponse = data['marketData'] ?? {};
+          commodityMarketData = marketDataResponse.cast<String, dynamic>();
+          
+          // Get commodities list for symbol selection (nested by category)
+          final commoditiesList = data['commodities'] as Map? ?? {};
+          tradingSymbols = _buildSymbolsFromApiData(commoditiesList);
           _isLoadingData = false;
         });
       }

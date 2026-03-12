@@ -1529,41 +1529,69 @@ def list_commodities():
     """Get list of available trading symbols/commodities WITH live market data"""
     try:
         with market_data_lock:
-            commodities = {
+            # Build two things:
+            # 1. Flat dictionary for UI market data lookup (by symbol)
+            # 2. Categorized list for symbol selection
+            
+            flat_market_data = {}  # {EURUSD: {signal, trend, etc}, GBPUSD: {signal, trend, etc}, ...}
+            categorized = {
+                'forex': [],
+                'commodities': [],
+                'indices': [],
+                'stocks': []
+            }
+            
+            symbol_config = {
                 'forex': [
-                    {'symbol': 'EURUSD', 'name': 'Euro vs US Dollar', 'type': 'Forex', 'min_price': 1.08, 'max_price': 1.10, **commodity_market_data.get('EURUSD', {})},
-                    {'symbol': 'GBPUSD', 'name': 'British Pound vs US Dollar', 'type': 'Forex', 'min_price': 1.27, 'max_price': 1.29, **commodity_market_data.get('GBPUSD', {})},
-                    {'symbol': 'USDCHF', 'name': 'US Dollar vs Swiss Franc', 'type': 'Forex', 'min_price': 0.89, 'max_price': 0.91, **commodity_market_data.get('USDCHF', {})},
-                    {'symbol': 'USDJPY', 'name': 'US Dollar vs Japanese Yen', 'type': 'Forex', 'min_price': 149.0, 'max_price': 151.0, **commodity_market_data.get('USDJPY', {})},
-                    {'symbol': 'USDCNH', 'name': 'US Dollar vs Chinese Yuan', 'type': 'Forex', 'min_price': 7.28, 'max_price': 7.30, **commodity_market_data.get('USDCNH', {})},
-                    {'symbol': 'AUDUSD', 'name': 'Australian Dollar vs US Dollar', 'type': 'Forex', 'min_price': 0.65, 'max_price': 0.67, **commodity_market_data.get('AUDUSD', {})},
-                    {'symbol': 'NZDUSD', 'name': 'New Zealand Dollar vs US Dollar', 'type': 'Forex', 'min_price': 0.61, 'max_price': 0.63, **commodity_market_data.get('NZDUSD', {})},
-                    {'symbol': 'USDCAD', 'name': 'US Dollar vs Canadian Dollar', 'type': 'Forex', 'min_price': 1.35, 'max_price': 1.37, **commodity_market_data.get('USDCAD', {})},
-                    {'symbol': 'USDSEK', 'name': 'US Dollar vs Swedish Krona', 'type': 'Forex', 'min_price': 10.88, 'max_price': 10.92, **commodity_market_data.get('USDSEK', {})},
+                    {'symbol': 'EURUSD', 'name': 'Euro vs US Dollar', 'min_price': 1.08, 'max_price': 1.10},
+                    {'symbol': 'GBPUSD', 'name': 'British Pound vs US Dollar', 'min_price': 1.27, 'max_price': 1.29},
+                    {'symbol': 'USDCHF', 'name': 'US Dollar vs Swiss Franc', 'min_price': 0.89, 'max_price': 0.91},
+                    {'symbol': 'USDJPY', 'name': 'US Dollar vs Japanese Yen', 'min_price': 149.0, 'max_price': 151.0},
+                    {'symbol': 'USDCNH', 'name': 'US Dollar vs Chinese Yuan', 'min_price': 7.28, 'max_price': 7.30},
+                    {'symbol': 'AUDUSD', 'name': 'Australian Dollar vs US Dollar', 'min_price': 0.65, 'max_price': 0.67},
+                    {'symbol': 'NZDUSD', 'name': 'New Zealand Dollar vs US Dollar', 'min_price': 0.61, 'max_price': 0.63},
+                    {'symbol': 'USDCAD', 'name': 'US Dollar vs Canadian Dollar', 'min_price': 1.35, 'max_price': 1.37},
+                    {'symbol': 'USDSEK', 'name': 'US Dollar vs Swedish Krona', 'min_price': 10.88, 'max_price': 10.92},
                 ],
                 'commodities': [
-                    {'symbol': 'XPTUSD', 'name': 'Platinum (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 915, 'max_price': 925, **commodity_market_data.get('XPTUSD', {})},
-                    {'symbol': 'OILK', 'name': 'Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 81, 'max_price': 84, **commodity_market_data.get('OILK', {})},
+                    {'symbol': 'XPTUSD', 'name': 'Platinum (per troy ounce)', 'type': 'Metal', 'lucrative': True, 'min_price': 915, 'max_price': 925},
+                    {'symbol': 'OILK', 'name': 'Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 81, 'max_price': 84},
                 ],
                 'indices': [
-                    {'symbol': 'SP500m', 'name': 'S&P 500 Index', 'type': 'Index', 'min_price': 5280, 'max_price': 5290, **commodity_market_data.get('SP500m', {})},
-                    {'symbol': 'DAX', 'name': 'DAX 40 (Germany)', 'type': 'Index', 'min_price': 18240, 'max_price': 18260, **commodity_market_data.get('DAX', {})},
+                    {'symbol': 'SP500m', 'name': 'S&P 500 Index', 'min_price': 5280, 'max_price': 5290},
+                    {'symbol': 'DAX', 'name': 'DAX 40 (Germany)', 'min_price': 18240, 'max_price': 18260},
                 ],
                 'stocks': [
-                    {'symbol': 'AMD', 'name': 'Advanced Micro Devices Inc.', 'type': 'Stock', 'min_price': 185, 'max_price': 187, **commodity_market_data.get('AMD', {})},
-                    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'type': 'Stock', 'min_price': 414, 'max_price': 417, **commodity_market_data.get('MSFT', {})},
-                    {'symbol': 'INTC', 'name': 'Intel Corporation', 'type': 'Stock', 'min_price': 47.5, 'max_price': 49.0, **commodity_market_data.get('INTC', {})},
-                    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'type': 'Stock', 'min_price': 872, 'max_price': 878, **commodity_market_data.get('NVDA', {})},
-                    {'symbol': 'NIKL', 'name': 'Nikkei 225 Index', 'type': 'Index', 'min_price': 28850, 'max_price': 28950, **commodity_market_data.get('NIKL', {})},
+                    {'symbol': 'AMD', 'name': 'Advanced Micro Devices Inc.', 'min_price': 185, 'max_price': 187},
+                    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'min_price': 414, 'max_price': 417},
+                    {'symbol': 'INTC', 'name': 'Intel Corporation', 'min_price': 47.5, 'max_price': 49.0},
+                    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'min_price': 872, 'max_price': 878},
+                    {'symbol': 'NIKL', 'name': 'Nikkei 225 Index', 'min_price': 28850, 'max_price': 28950},
                 ]
             }
             
-            logger.info(f"[API] Returning /api/commodities/list with live market data and signals")
+            # Build response by merging live data with config
+            for category, items in symbol_config.items():
+                for item_config in items:
+                    symbol = item_config['symbol']
+                    # Get live market data for this symbol (from the updater thread)
+                    live_data = commodity_market_data.get(symbol, {})
+                    # Merge config + live data
+                    merged_item = {**item_config, **live_data}
+                    categorized[category].append(merged_item)
+                    # Also store in flat dict for easy lookup by symbol
+                    flat_market_data[symbol] = live_data
+            
+            # Log sample signals for debugging
+            eurusd_signal = flat_market_data.get('EURUSD', {}).get('signal', 'NO DATA')
+            oilk_signal = flat_market_data.get('OILK', {}).get('signal', 'NO DATA')
+            logger.info(f"[/api/commodities/list] Returning signals: EURUSD={eurusd_signal}, OILK={oilk_signal}")
             
             return jsonify({
                 'success': True,
-                'commodities': commodities,
-                'total_symbols': sum(len(v) for v in commodities.values()),
+                'commodities': categorized,  # Nested format for symbol selection
+                'marketData': flat_market_data,  # Flat format for signal lookup
+                'total_symbols': sum(len(v) for v in categorized.values()),
                 'timestamp': datetime.now().isoformat(),
             }), 200
     except Exception as e:
