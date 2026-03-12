@@ -1737,33 +1737,20 @@ def get_trades_public():
     try:
         trades_list = []
         
-        # Query database for all trades
-        conn = sqlite3.connect('zwesta_trading.db')
-        cursor = conn.cursor()
+        # Get trades from active bots' trade history
+        for bot_id, bot in active_bots.items():
+            if 'tradeHistory' in bot:
+                trades_list.extend(bot['tradeHistory'][-100:])  # Last 100 trades per bot
         
-        try:
-            # Get all trades from all bots
-            cursor.execute('''
-                SELECT trade_data FROM trades
-                ORDER BY timestamp DESC
-                LIMIT 1000
-            ''')
-            
-            for row in cursor.fetchall():
-                try:
-                    trade = json.loads(row[0])
-                    trades_list.append(trade)
-                except:
-                    pass
-            
-            logger.info(f"Returning {len(trades_list)} public trades")
-            return jsonify({
-                'success': True,
-                'trades': trades_list,
-                'timestamp': datetime.now().isoformat(),
-            })
-        finally:
-            conn.close()
+        # Sort by recent first and limit to 1000 total
+        trades_list = sorted(trades_list, key=lambda x: x.get('time', ''), reverse=True)[:1000]
+        
+        logger.info(f"Returning {len(trades_list)} public trades from active bots")
+        return jsonify({
+            'success': True,
+            'trades': trades_list,
+            'timestamp': datetime.now().isoformat(),
+        })
     except Exception as e:
         logger.error(f"Error in get_trades_public: {e}")
         return jsonify({
@@ -1837,36 +1824,39 @@ def get_account_info_alias():
     user_id = request.user_id
     
     try:
-        # Query user's account from database
-        conn = sqlite3.connect('zwesta_trading.db')
-        cursor = conn.cursor()
+        # Get MT5 account info from broker manager
+        # Query MT5 connection(s) for account info
         
-        cursor.execute('''
-            SELECT account_id, account_number FROM users WHERE user_id = ?
-        ''', (user_id,))
+        if not broker_manager.connections:
+            return jsonify({
+                'success': True,
+                'userId': user_id,
+                'account': {
+                    'accountNumber': 'N/A',
+                    'broker': 'MetaQuotes MT5',
+                    'balance': 0,
+                    'equity': 0,
+                    'margin': 0,
+                    'freeMargin': 0,
+                }
+            })
         
-        user_account = cursor.fetchone()
-        conn.close()
-        
-        if user_account:
-            account_id, account_number = user_account
-            
-            # Get MT5 account info
-            for conn_id, connection in broker_manager.connections.items():
-                if connection.connected and str(connection.account_info.get('accountNumber')) == str(account_number):
-                    return jsonify({
-                        'success': True,
-                        'userId': user_id,
-                        'account': {
-                            'accountId': account_id,
-                            'accountNumber': account_number,
-                            'broker': 'MetaQuotes MT5',
-                            'balance': connection.account_info.get('balance', 0) if connection.account_info else 0,
-                            'equity': connection.account_info.get('equity', 0) if connection.account_info else 0,
-                            'margin': connection.account_info.get('margin', 0) if connection.account_info else 0,
-                            'freeMargin': connection.account_info.get('margin_free', 0) if connection.account_info else 0,
-                        }
-                    })
+        # Return first connected account
+        for conn_id, connection in broker_manager.connections.items():
+            if connection.connected and connection.account_info:
+                account_number = str(connection.account_info.get('accountNumber', 'N/A'))
+                return jsonify({
+                    'success': True,
+                    'userId': user_id,
+                    'account': {
+                        'accountNumber': account_number,
+                        'broker': 'MetaQuotes MT5',
+                        'balance': connection.account_info.get('balance', 0),
+                        'equity': connection.account_info.get('equity', 0),
+                        'margin': connection.account_info.get('margin', 0),
+                        'freeMargin': connection.account_info.get('margin_free', 0),
+                    }
+                })
         
         # Return default demo account for user
         return jsonify({
