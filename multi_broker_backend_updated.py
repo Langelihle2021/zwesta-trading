@@ -4188,44 +4188,50 @@ def bot_status_public():
         for bot in active_bots.values():
             # Return basic info about active bots (especially demo bots)
             # Calculate runtime
-            created = datetime.fromisoformat(bot['createdAt'])
+            created = datetime.fromisoformat(bot.get('createdAt', datetime.now().isoformat()))
             runtime_seconds = (datetime.now() - created).total_seconds()
             runtime_hours = runtime_seconds / 3600
             runtime_minutes = (runtime_seconds % 3600) / 60
             
-            # Calculate daily profit
+            # Calculate daily profit (safely access dailyProfits)
             today = datetime.now().strftime('%Y-%m-%d')
-            daily_profit = bot['dailyProfits'].get(today, bot.get('dailyProfit', 0))
+            daily_profit = bot.get('dailyProfits', {}).get(today, bot.get('dailyProfit', 0))
             
-            # Calculate ROI
-            investment = bot['totalInvestment']
-            roi = (bot['totalProfit'] / max(investment, 1)) * 100 if investment > 0 else 0
+            # Calculate ROI (safely access totalInvestment)
+            investment = bot.get('totalInvestment', 0)
+            total_profit = bot.get('totalProfit', 0)
+            roi = (total_profit / max(investment, 1)) * 100 if investment > 0 else 0
             
-            # Calculate profit factor
-            if bot['totalLosses'] > 0:
-                profit_factor = min(bot['totalProfit'] / bot['totalLosses'], 99.99) if bot['totalProfit'] > 0 else 0
+            # Calculate profit factor (safely access totalLosses)
+            total_losses = bot.get('totalLosses', 0)
+            if total_losses > 0:
+                profit_factor = min(total_profit / total_losses, 99.99) if total_profit > 0 else 0
             else:
-                profit_factor = 99.99 if bot['totalProfit'] > 0 else 0
+                profit_factor = 99.99 if total_profit > 0 else 0
+            
+            # Safely access symbols and strategy
+            symbols = bot.get('symbols', [])
+            symbol = symbols[0] if symbols else 'EURUSD'
             
             enhanced_bot = {
-                'botId': bot['botId'],
-                'symbol': bot['symbols'][0] if bot['symbols'] else 'EURUSD',
-                'strategy': bot['strategy'],
-                'commission': round(bot['totalProfit'] * 0.01, 2),
-                'profit': round(bot['totalProfit'], 2),
+                'botId': bot.get('botId', 'unknown'),
+                'symbol': symbol,
+                'strategy': bot.get('strategy', 'Unknown'),
+                'commission': round(total_profit * 0.01, 2),
+                'profit': round(total_profit, 2),
                 'runtimeFormatted': f"{int(runtime_hours)}h {int(runtime_minutes)}m",
                 'dailyProfit': round(daily_profit, 2),
                 'roi': round(roi, 2),
                 'profitFactor': round(profit_factor, 2),
-                'avgProfitPerTrade': round(bot['totalProfit'] / max(bot['totalTrades'], 1), 2),
-                'status': 'Active' if bot['enabled'] else 'Inactive',
-                'lastTradeTime': bot['tradeHistory'][-1]['time'] if bot['tradeHistory'] else bot['createdAt'],
+                'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
+                'status': 'Active' if bot.get('enabled', True) else 'Inactive',
+                'lastTradeTime': bot.get('tradeHistory', [{}])[-1].get('time') if bot.get('tradeHistory') else bot.get('createdAt', datetime.now().isoformat()),
             }
             bots_list.append(enhanced_bot)
         
         return jsonify({
             'success': True,
-            'activeBots': len([b for b in bots_list if b['enabled']]),
+            'activeBots': len([b for b in bots_list if b.get('status') == 'Active']),
             'bots': bots_list,
             'timestamp': datetime.now().isoformat(),
         }), 200
