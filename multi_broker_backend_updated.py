@@ -5409,6 +5409,445 @@ def auto_withdrawal_monitor():
     logger.info("Auto-withdrawal monitoring thread stopped")
 
 
+# ==================== USER MANAGEMENT & MULTI-BROKER SYSTEM ====================
+
+@app.route('/api/user/register', methods=['POST'])
+def register_user():
+    """Register a new user account"""
+    try:
+        data = request.get_json()
+        email = data.get('email', '').lower().strip()
+        name = data.get('name', '').strip()
+        referrer_code = data.get('referrer_code', '').strip()
+        
+        if not email or not name:
+            return jsonify({'success': False, 'error': 'Email and name required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if user already exists
+        cursor.execute('SELECT user_id FROM users WHERE email = ?', (email,))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'User already exists'}), 409
+        
+        user_id = str(uuid.uuid4())
+        referral_code = hashlib.sha256(f"{email}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+        referrer_id = None
+        
+        # Check if referrer exists
+        if referrer_code:
+            cursor.execute('SELECT user_id FROM users WHERE referral_code = ?', (referrer_code,))
+            referrer = cursor.fetchone()
+            if referrer:
+                referrer_id = referrer[0]
+        
+        cursor.execute('''
+            INSERT INTO users (user_id, email, name, referrer_id, referral_code, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (user_id, email, name, referrer_id, referral_code, datetime.now().isoformat()))
+        
+        if referrer_id:
+            referral_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO referrals (referral_id, referrer_id, referred_user_id, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (referral_id, referrer_id, user_id, datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ New user registered: {email} (ID: {user_id})")
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'email': email,
+            'name': name,
+            'referral_code': referral_code,
+            'message': 'Registration successful - use email to login'
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error in register_user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/brokers', methods=['GET'])
+@require_session
+def list_user_brokers():
+    """Get all broker credentials for authenticated user"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, server, is_live, is_active, created_at
+            FROM broker_credentials
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        brokers = []
+        for row in cursor.fetchall():
+            brokers.append({
+                'credential_id': row[0],
+                'broker_name': row[1],
+                'account_number': row[2],
+                'server': row[3],
+                'is_live': row[4],
+                'is_active': row[5],
+                'created_at': row[6],
+            })
+        
+        conn.close()
+        
+        logger.info(f"✅ Retrieved {len(brokers)} brokers for user {user_id}")
+        return jsonify({
+            'success': True,
+            'brokers': brokers,
+            'total': len(brokers)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error listing brokers: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/brokers/add', methods=['POST'])
+@require_session
+def add_user_broker():
+    """Add a new broker credential for user"""
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        
+        broker_name = data.get('broker_name', '').strip()
+        account_number = data.get('account_number', '').strip()
+        password = data.get('password', '').strip()
+        server = data.get('server', 'MetaQuotes-Demo').strip()
+        is_live = data.get('is_live', False)
+        
+        if not broker_name or not account_number or not password:
+            return jsonify({'success': False, 'error': 'Broker name, account number, and password required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if already exists
+        cursor.execute('''
+            SELECT credential_id FROM broker_credentials
+            WHERE user_id = ? AND account_number = ? AND broker_name = ?
+        ''', (user_id, account_number, broker_name))
+        
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'Broker credential already exists'}), 409
+        
+        credential_id = str(uuid.uuid4())
+        
+        cursor.execute('''
+            INSERT INTO broker_credentials 
+            (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ''', (credential_id, user_id, broker_name, account_number, password, server, is_live, datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Added broker credential for user {user_id}: {broker_name} ({account_number})")
+        
+        return jsonify({
+            'success': True,
+            'credential_id': credential_id,
+            'broker_name': broker_name,
+            'account_number': account_number,
+            'message': 'Broker credential added successfully'
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error adding broker: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/brokers/<credential_id>', methods=['DELETE'])
+@require_session
+def remove_user_broker(credential_id):
+    """Remove a broker credential"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify ownership
+        cursor.execute('''
+            SELECT user_id FROM broker_credentials WHERE credential_id = ?
+        ''', (credential_id,))
+        
+        result = cursor.fetchone()
+        if not result or result[0] != user_id:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Unauthorized or not found'}), 403
+        
+        # Delete the credential
+        cursor.execute('DELETE FROM broker_credentials WHERE credential_id = ?', (credential_id,))
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Removed broker credential {credential_id} for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Broker credential removed'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error removing broker: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/dashboard', methods=['GET'])
+@require_session
+def user_dashboard():
+    """Get comprehensive user dashboard with stats"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # User info
+        cursor.execute('''
+            SELECT user_id, name, email, total_commission, created_at FROM users WHERE user_id = ?
+        ''', (user_id,))
+        user_row = cursor.fetchone()
+        user_info = dict(user_row) if user_row else {}
+        
+        # Total bots
+        cursor.execute('SELECT COUNT(*) FROM user_bots WHERE user_id = ?', (user_id,))
+        total_bots = cursor.fetchone()[0]
+        
+        # Active bots
+        cursor.execute('SELECT COUNT(*) FROM user_bots WHERE user_id = ? AND enabled = 1', (user_id,))
+        active_bots_count = cursor.fetchone()[0]
+        
+        # Total profit
+        cursor.execute('''
+            SELECT COALESCE(SUM(total_profit), 0) FROM user_bots WHERE user_id = ?
+        ''', (user_id,))
+        total_profit = cursor.fetchone()[0] or 0
+        
+        # Total trades
+        cursor.execute('''
+            SELECT COUNT(*) FROM trades WHERE bot_id IN (SELECT bot_id FROM user_bots WHERE user_id = ?)
+        ''', (user_id,))
+        total_trades = cursor.fetchone()[0]
+        
+        # Commission stats
+        cursor.execute('''
+            SELECT 
+                COALESCE(SUM(commission_amount), 0) as total_earned,
+                COUNT(*) as commission_count
+            FROM commissions WHERE earner_id = ?
+        ''', (user_id,))
+        comm_row = cursor.fetchone()
+        total_commission_earned = comm_row[0] if comm_row else 0
+        commission_count = comm_row[1] if comm_row else 0
+        
+        # Win rate (profitable trades / total trades)
+        cursor.execute('''
+            SELECT COUNT(*) FROM trades 
+            WHERE bot_id IN (SELECT bot_id FROM user_bots WHERE user_id = ?)
+            AND json_extract(trade_data, '$.isWinning') = 1
+        ''', (user_id,))
+        winning_trades = cursor.fetchone()[0]
+        win_rate = round((winning_trades / max(total_trades, 1)) * 100, 2)
+        
+        # Get top performers (bots)
+        cursor.execute('''
+            SELECT bot_id, name, total_profit, strategy FROM user_bots
+            WHERE user_id = ?
+            ORDER BY total_profit DESC
+            LIMIT 5
+        ''', (user_id,))
+        
+        top_bots = []
+        for row in cursor.fetchall():
+            top_bots.append({
+                'bot_id': row[0],
+                'name': row[1],
+                'profit': row[2],
+                'strategy': row[3]
+            })
+        
+        # Get broker list
+        cursor.execute('''
+            SELECT COUNT(*) FROM broker_credentials WHERE user_id = ? AND is_active = 1
+        ''', (user_id,))
+        active_brokers = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        dashboard = {
+            'user': user_info,
+            'stats': {
+                'total_bots': total_bots,
+                'active_bots': active_bots_count,
+                'total_profit': round(total_profit, 2),
+                'total_trades': total_trades,
+                'win_rate_percent': win_rate,
+                'total_commission_earned': round(total_commission_earned, 2),
+                'commission_count': commission_count,
+                'active_brokers': active_brokers,
+            },
+            'top_performers': top_bots,
+        }
+        
+        logger.info(f"✅ Generated dashboard for user {user_id}: {total_bots} bots, ${total_profit:.2f} profit")
+        
+        return jsonify({
+            'success': True,
+            'dashboard': dashboard
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error generating dashboard: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/trading/intelligent-switch', methods=['POST'])
+@require_session
+def intelligent_asset_switch():
+    """Intelligently switch bot assets based on profitability scores"""
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        bot_id = data.get('bot_id')
+        
+        if not bot_id:
+            return jsonify({'success': False, 'error': 'bot_id required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify bot ownership
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        bot_owner = cursor.fetchone()
+        if not bot_owner or bot_owner[0] != user_id:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        
+        # Get current bot symbols
+        cursor.execute('SELECT symbols FROM user_bots WHERE bot_id = ?', (bot_id,))
+        current_symbols_str = cursor.fetchone()[0]
+        current_symbols = current_symbols_str.split(',') if current_symbols_str else ['EURUSD']
+        
+        # Get best assets based on profitability
+        best_assets = get_best_trading_assets(limit=5)
+        
+        # Check if we should switch
+        asset_switch_made = False
+        if best_assets and best_assets != current_symbols:
+            new_symbols = best_assets
+            cursor.execute('''
+                UPDATE user_bots SET symbols = ? WHERE bot_id = ?
+            ''', (','.join(new_symbols), bot_id))
+            
+            conn.commit()
+            asset_switch_made = True
+            
+            logger.info(f"✅ Intelligent asset switch for bot {bot_id}: {current_symbols} → {new_symbols}")
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'bot_id': bot_id,
+            'previous_assets': current_symbols,
+            'new_assets': best_assets,
+            'switch_made': asset_switch_made,
+            'best_profitability_assets': best_assets
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error in intelligent asset switch: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/commission-summary', methods=['GET'])
+@require_session
+def commission_summary():
+    """Get detailed commission summary for user"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Total commissions
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as count,
+                SUM(commission_amount) as total,
+                SUM(CASE WHEN created_at > datetime('now', '-30 days') THEN commission_amount ELSE 0 END) as last_30_days
+            FROM commissions WHERE earner_id = ?
+        ''', (user_id,))
+        
+        comm_stats = cursor.fetchone()
+        
+        # Top earning bots
+        cursor.execute('''
+            SELECT bot_id, SUM(commission_amount) as total_commission
+            FROM commissions WHERE earner_id = ?
+            GROUP BY bot_id
+            ORDER BY total_commission DESC
+            LIMIT 10
+        ''', (user_id,))
+        
+        top_earning_bots = []
+        for row in cursor.fetchall():
+            top_earning_bots.append({
+                'bot_id': row[0],
+                'total_commission': round(row[1], 2)
+            })
+        
+        # Recent commissions
+        cursor.execute('''
+            SELECT commission_id, bot_id, profit_amount, commission_amount, commission_rate, created_at
+            FROM commissions WHERE earner_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+        ''', (user_id,))
+        
+        recent = []
+        for row in cursor.fetchall():
+            recent.append({
+                'commission_id': row[0],
+                'bot_id': row[1],
+                'profit_amount': round(row[2], 2),
+                'commission_amount': round(row[3], 2),
+                'rate': row[4],
+                'created_at': row[5]
+            })
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'summary': {
+                'total_commissions': len(comm_stats),
+                'total_earned': round(comm_stats[1] or 0, 2),
+                'last_30_days_earned': round(comm_stats[2] or 0, 2),
+            },
+            'top_earning_bots': top_earning_bots,
+            'recent_commissions': recent,
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting commission summary: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
     logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
