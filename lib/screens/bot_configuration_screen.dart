@@ -646,31 +646,35 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                           Expanded(
                                             child: Text(symbol['name']!),
                                           ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: isBullish
-                                                  ? Colors.green.withOpacity(0.2)
-                                                  : Colors.red.withOpacity(0.2),
-                                              border: Border.all(
-                                                color: isBullish
-                                                    ? Colors.green
-                                                    : Colors.red,
+                                          Flexible(
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 4,
                                               ),
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              signal,
-                                              style: TextStyle(
+                                              decoration: BoxDecoration(
                                                 color: isBullish
-                                                    ? Colors.green
-                                                    : Colors.red,
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
+                                                    ? Colors.green.withOpacity(0.2)
+                                                    : Colors.red.withOpacity(0.2),
+                                                border: Border.all(
+                                                  color: isBullish
+                                                      ? Colors.green
+                                                      : Colors.red,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                signal,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  color: isBullish
+                                                      ? Colors.green
+                                                      : Colors.red,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -679,54 +683,59 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                       subtitle: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Row(
-                                            children: [
-                                              Text(
-                                                symbol['category']!,
-                                                style: const TextStyle(fontSize: 11),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '${change > 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
-                                                style: TextStyle(
-                                                  color: change >= 0
-                                                      ? Colors.green
-                                                      : Colors.red,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 11,
+                                          SingleChildScrollView(
+                                            scrollDirection: Axis.horizontal,
+                                            child: Row(
+                                              children: [
+                                                Text(
+                                                  symbol['category']!,
+                                                  style: const TextStyle(fontSize: 11),
                                                 ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: volatility == 'Low'
-                                                      ? Colors.blue
-                                                          .withOpacity(0.2)
-                                                      : volatility == 'High'
-                                                          ? Colors.orange
-                                                              .withOpacity(0.2)
-                                                          : Colors.grey
-                                                              .withOpacity(0.2),
-                                                  borderRadius:
-                                                      BorderRadius.circular(3),
-                                                ),
-                                                child: Text(
-                                                  volatility,
-                                                  style: const TextStyle(
-                                                    fontSize: 9,
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  '${change > 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
+                                                  style: TextStyle(
+                                                    color: change >= 0
+                                                        ? Colors.green
+                                                        : Colors.red,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 11,
                                                   ),
                                                 ),
-                                              ),
-                                            ],
+                                                const SizedBox(width: 8),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: volatility == 'Low'
+                                                        ? Colors.blue
+                                                            .withOpacity(0.2)
+                                                        : volatility == 'High'
+                                                            ? Colors.orange
+                                                                .withOpacity(0.2)
+                                                            : Colors.grey
+                                                                .withOpacity(0.2),
+                                                    borderRadius:
+                                                        BorderRadius.circular(3),
+                                                  ),
+                                                  child: Text(
+                                                    volatility,
+                                                    style: const TextStyle(
+                                                      fontSize: 9,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
                                             '💡 $recommendation',
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
                                               fontSize: 10,
                                               color: Colors.grey[300],
