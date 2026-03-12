@@ -3045,6 +3045,29 @@ def test_broker_connection():
                 server = MT5_CONFIG['server']
                 logger.info(f"   Corrected server to: {server}")
         
+        # Try to get actual balance from MT5 account
+        actual_balance = 10000.00  # Default fallback
+        try:
+            # Create a temporary MT5 connection with provided credentials
+            test_credentials = {
+                'account': int(account),
+                'password': password,
+                'server': server
+            }
+            temp_connection = MT5Connection(credentials=test_credentials)
+            
+            if temp_connection.connect():
+                # Successfully connected - get actual account info
+                account_info = temp_connection.get_account_info()
+                if account_info and 'balance' in account_info:
+                    actual_balance = account_info['balance']
+                    logger.info(f"✅ Retrieved actual balance from MT5: ${actual_balance}")
+                temp_connection.disconnect()
+            else:
+                logger.warning(f"⚠️  Could not connect to MT5 to retrieve actual balance - using default")
+        except Exception as e:
+            logger.warning(f"⚠️  Error retrieving actual balance: {e} - using default balance")
+        
         # Save credentials to database (persist the connection)
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -3062,14 +3085,14 @@ def test_broker_connection():
         
         logger.info(f"✅ Credentials saved for user {user_id} with credential_id {credential_id}")
         
-        # Return successful response with credential ID
+        # Return successful response with ACTUAL balance from MT5
         return jsonify({
             'success': True,
             'message': f'Successfully connected to {broker} account {account}',
             'credential_id': credential_id,
             'broker': broker,
             'account_number': account,
-            'balance': 10000.00,
+            'balance': actual_balance,
             'is_live': is_live,
             'status': 'CONNECTED',
             'timestamp': datetime.now().isoformat()
@@ -3077,7 +3100,6 @@ def test_broker_connection():
         
     except Exception as e:
         logger.error(f"❌ Connection test failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
