@@ -2331,7 +2331,7 @@ def get_live_prices_from_mt5():
                 if trend == 'UP':
                     if abs_change >= 1.0:
                         signal = '🟢 STRONG BUY'
-                    elif abs_change >= 0.3:
+                    elif abs_change >= 0.1:
                         signal = '🟢 BUY'
                     elif spread_percent < 0.10:  # If UP and tight spread = bullish
                         signal = '🟢 BUY'
@@ -2340,7 +2340,7 @@ def get_live_prices_from_mt5():
                 elif trend == 'DOWN':
                     if abs_change >= 1.0:
                         signal = '🔴 STRONG SELL'
-                    elif abs_change >= 0.3:
+                    elif abs_change >= 0.1:
                         signal = '🔴 SELL'
                     elif spread_percent > 0.20:  # If DOWN and wide spread = bearish
                         signal = '🔴 SELL'
