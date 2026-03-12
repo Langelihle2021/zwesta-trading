@@ -2477,11 +2477,11 @@ commodity_market_data = {
     'EURUSD': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
     'GBPUSD': {'price': 1.2750, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
     'USDJPY': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
-    'USDCHF': {'price': 0.8950, 'change': 0.25, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 HOLD', 'recommendation': 'Safe haven currency - consolidating'},
+    'USDCHF': {'price': 0.8950, 'change': 0.25, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Safe haven currency - consolidating'},
     'AUDUSD': {'price': 0.6580, 'change': 1.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity'},
     'NZDUSD': {'price': 0.6125, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point'},
     'USDCAD': {'price': 1.3550, 'change': -0.28, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
-    'USDCNH': {'price': 7.2850, 'change': 0.15, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 HOLD', 'recommendation': 'Very Low volatility with no clear direction'},
+    'USDCNH': {'price': 7.2850, 'change': 0.15, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Very Low volatility with no clear direction'},
     'USDSEK': {'price': 10.8950, 'change': -0.42, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs'},
     
     # Commodities (2)
@@ -3793,6 +3793,13 @@ def get_commodity_market_data():
     try:
         # Thread-safe access to commodity_market_data
         with market_data_lock:
+            # Count signals in response for debugging
+            buy_count = sum(1 for s in commodity_market_data.values() if 'BUY' in s.get('signal', ''))
+            sell_count = sum(1 for s in commodity_market_data.values() if 'SELL' in s.get('signal', ''))
+            flat_count = sum(1 for s in commodity_market_data.values() if 'CONSOLIDAT' in s.get('signal', '') or 'VOLATILE' in s.get('signal', ''))
+            hold_count = sum(1 for s in commodity_market_data.values() if s.get('signal', '') == '🟡 HOLD')
+            logger.debug(f"[API] Returning commodities data: {buy_count} BUY, {sell_count} SELL, {flat_count} FLAT, {hold_count} HOLD")
+            
             return jsonify({
                 'success': True,
                 'commodities': commodity_market_data.copy(),
