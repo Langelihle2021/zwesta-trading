@@ -1729,50 +1729,52 @@ def generate_demo_trades():
 
 # ==================== ALIAS ROUTES (for Flutter app compatibility) ====================
 @app.route('/api/trades', methods=['GET'])
+@require_session
 def get_trades_alias():
-    """Alias for /api/trades/all - returns flattened trades list including demo trades"""
+    """Get trades for the authenticated user - returns flattened trades list"""
     try:
+        user_id = request.user_id  # From require_session decorator
         trades_list = []
         
-        # Get real trades from broker connections
-        all_trades = {}
-        for account_id, connection in broker_manager.connections.items():
-            if connection.broker_type == BrokerType.METATRADER5:
-                trades = connection.get_trades()
-                # Ensure trades is always a list
-                if trades is None:
-                    trades = []
-                elif isinstance(trades, dict):
-                    # If accidentally passed dict, extract trades list if it exists
-                    trades = trades.get('trades', []) if isinstance(trades, dict) else []
-                all_trades[account_id] = trades
+        # Query database for user's bots and their associated trades
+        conn = sqlite3.connect('zwesta_trading.db')
+        cursor = conn.cursor()
         
-        # Add real trades from broker accounts
-        for account_id, trades in all_trades.items():
-            if isinstance(trades, list):
-                for trade in trades:
-                    if isinstance(trade, dict):
-                        trade['accountId'] = account_id
+        try:
+            # Get all bots for this user
+            cursor.execute('''
+                SELECT bot_id, config FROM user_bots WHERE user_id = ?
+            ''', (user_id,))
+            user_bots = cursor.fetchall()
+            
+            bot_ids = [bot[0] for bot in user_bots]
+            
+            if bot_ids:
+                # Get all trades for user's bots
+                placeholders = ','.join(['?' for _ in bot_ids])
+                cursor.execute(f'''
+                    SELECT trade_data FROM trades WHERE bot_id IN ({placeholders})
+                    ORDER BY timestamp DESC
+                ''', bot_ids)
+                
+                for row in cursor.fetchall():
+                    try:
+                        trade = json.loads(row[0])
+                        trade['userId'] = user_id  # Ensure user isolation
                         trades_list.append(trade)
-        
-        # Add demo trades from storage
-        for account_id, demo_trades in demo_trades_storage.items():
-            if isinstance(demo_trades, list):
-                for demo_trade in demo_trades:
-                    if isinstance(demo_trade, dict):
-                        # Make sure it has all required fields
-                        if 'accountId' not in demo_trade:
-                            demo_trade['accountId'] = account_id
-                        trades_list.append(demo_trade)
-        
-        logger.info(f"Returning {len(trades_list)} trades (including {sum(len(t) for t in demo_trades_storage.values())} demo trades) to Flutter app")
-        return jsonify({
-            'success': True,
-            'trades': trades_list,
-            'timestamp': datetime.now().isoformat(),
-        })
+                    except:
+                        pass
+            
+            logger.info(f"Returning {len(trades_list)} trades for user {user_id}")
+            return jsonify({
+                'success': True,
+                'trades': trades_list,
+                'timestamp': datetime.now().isoformat(),
+            })
+        finally:
+            conn.close()
     except Exception as e:
-        logger.error(f"Error in get_trades_alias: {e}")
+        logger.error(f"Error in get_trades_alias for user {request.user_id}: {e}")
         return jsonify({
             'success': False,
             'trades': [],
@@ -1782,36 +1784,64 @@ def get_trades_alias():
 
 
 @app.route('/api/account/info', methods=['GET'])
+@require_session
 def get_account_info_alias():
-    """Get info for the first/default account"""
-    for account_id, connection in broker_manager.connections.items():
-        if connection.connected:
-            return jsonify({
-                'success': True,
-                'account': {
-                    'accountId': account_id,
-                    'broker': connection.broker_type.value,
-                    'accountNumber': connection.account_info.get('accountNumber') if connection.account_info else 'N/A',
-                    'balance': connection.account_info.get('balance', 0) if connection.account_info else 0,
-                    'equity': connection.account_info.get('equity', 0) if connection.account_info else 0,
-                    'margin': connection.account_info.get('margin', 0) if connection.account_info else 0,
-                    'freeMargin': connection.account_info.get('margin_free', 0) if connection.account_info else 0,
-                }
-            })
+    """Get account info for authenticated user"""
+    user_id = request.user_id
     
-    # Return default account info if no connection found
-    return jsonify({
-        'success': True,
-        'account': {
-            'accountId': 'default_mt5',
-            'broker': 'mt5',
-            'accountNumber': MT5_CONFIG['account'],
-            'balance': 0,
-            'equity': 0,
-            'margin': 0,
-            'freeMargin': 0,
-        }
-    })
+    try:
+        # Query user's account from database
+        conn = sqlite3.connect('zwesta_trading.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT account_id, account_number FROM users WHERE user_id = ?
+        ''', (user_id,))
+        
+        user_account = cursor.fetchone()
+        conn.close()
+        
+        if user_account:
+            account_id, account_number = user_account
+            
+            # Get MT5 account info
+            for conn_id, connection in broker_manager.connections.items():
+                if connection.connected and str(connection.account_info.get('accountNumber')) == str(account_number):
+                    return jsonify({
+                        'success': True,
+                        'userId': user_id,
+                        'account': {
+                            'accountId': account_id,
+                            'accountNumber': account_number,
+                            'broker': 'MetaQuotes MT5',
+                            'balance': connection.account_info.get('balance', 0) if connection.account_info else 0,
+                            'equity': connection.account_info.get('equity', 0) if connection.account_info else 0,
+                            'margin': connection.account_info.get('margin', 0) if connection.account_info else 0,
+                            'freeMargin': connection.account_info.get('margin_free', 0) if connection.account_info else 0,
+                        }
+                    })
+        
+        # Return default demo account for user
+        return jsonify({
+            'success': True,
+            'userId': user_id,
+            'account': {
+                'accountId': 'demo_mt5',
+                'accountNumber': MT5_CONFIG['account'],
+                'broker': 'MetaQuotes MT5 Demo',
+                'balance': 100000,  # Demo default balance
+                'equity': 100000,
+                'margin': 0,
+                'freeMargin': 100000,
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting account info for user {user_id}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'userId': user_id
+        }), 500
 
 
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
@@ -3707,11 +3737,10 @@ def start_bot():
             except Exception as e:
                 logger.warning(f"Could not update bot symbols in DB: {e}")
         
-        # TRY REAL MT5 TRADES, FALLBACK TO SIMULATED IF UNAVAILABLE
-        logger.info(f"📍 Bot {bot_id}: Attempting to use REAL MT5 trades...")
+        # REQUIRE REAL MT5 TRADES - NO SIMULATION
+        logger.info(f"📍 Bot {bot_id}: Connecting to REAL MT5 account...")
         
         mt5_conn = None
-        use_simulated = False
         
         try:
             if bot_mode == 'live' and bot_credentials:
@@ -3721,15 +3750,25 @@ def start_bot():
                 mt5_conn = MT5Connection()
             
             if not mt5_conn.connect():
-                logger.warning(f"⚠️  Failed to connect to MT5 for bot {bot_id} - falling back to simulated trading")
-                use_simulated = True
-                mt5_conn = None
+                error_msg = f"❌ CRITICAL: Failed to connect to MT5 for bot {bot_id} - bot cannot start without real MT5 connection"
+                logger.error(error_msg)
+                return jsonify({
+                    'success': False,
+                    'error': error_msg,
+                    'botId': bot_id,
+                    'status': 'FAILED'
+                }), 503
             else:
-                logger.info(f"✅ Bot {bot_id} connected to REAL MT5 account")
+                logger.info(f"✅ Bot {bot_id} connected to REAL MT5 account {MT5_CONFIG.get('account')}")
         except Exception as e:
-            logger.warning(f"⚠️  MT5 not available ({e}) - using SIMULATED trading for bot {bot_id}")
-            use_simulated = True
-            mt5_conn = None
+            error_msg = f"❌ CRITICAL: MT5 connection failed for bot {bot_id}: {e}"
+            logger.error(error_msg)
+            return jsonify({
+                'success': False,
+                'error': error_msg,
+                'botId': bot_id,
+                'status': 'FAILED'
+            }), 503
         
         # INTELLIGENT STRATEGY SWITCHING
         if bot_config.get('autoSwitch', True):
@@ -3787,7 +3826,7 @@ def start_bot():
                         
                         # If symbol not found, try fallback to EURUSD (default available symbol)
                         if not order_result.get('success', False) and 'not found' in order_result.get('error', '').lower():
-                            logger.warning(f"Symbol {symbol} not found on MetaQuotes-Demo - retrying with EURUSD")
+                            logger.warning(f"Symbol {symbol} not found on MT5 - retrying with EURUSD")
                             fallback_symbol = 'EURUSD'
                             order_result = mt5_conn.place_order(
                                 symbol=fallback_symbol,
@@ -3826,35 +3865,35 @@ def start_bot():
                                         logger.info(f"✅ REAL TRADE: {symbol} | P&L: ${pos['pnl']:.2f}")
                                         break
                         else:
-                            logger.warning(f"Failed real order on {symbol}: {order_result.get('error')} - using simulated")
-                    except Exception as e:
-                        logger.warning(f"Error placing real trade on {symbol}: {e} - falling back to simulated")
+                            # Real trade failed - log error but DON'T use simulated
+                            logger.error(f"❌ Failed to place real order on {symbol}: {order_result.get('error')}")
+                            logger.error(f"   Request was: {order_result.get('request')}")
+                            # Trade not placed - will be skipped (not double-counted in stats)
+                            trade = None
                 
-                # FALLBACK TO SIMULATED if no real trade placed
-                if not trade:
-                    entry_price = random.uniform(1, 2000)
-                    exit_price = entry_price + random.uniform(-50, 50)
-                    trade = {
-                        'ticket': random.randint(1000000, 9999999),
-                        'symbol': trade_params['symbol'],
-                        'type': trade_params['type'],
-                        'volume': round(adjusted_volume, 2),
-                        'baseVolume': trade_params['volume'],
-                        'positionSize': position_size,
-                        'entryPrice': entry_price,
-                        'exitPrice': exit_price,
-                        'profit': trade_params['profit'],
-                        'time': datetime.now().isoformat(),
-                        'timestamp': int(datetime.now().timestamp() * 1000),
-                        'botId': bot_id,
-                        'strategy': strategy_name,
-                        'isWinning': trade_params['profit'] > 0,
-                        'source': 'SIMULATED',
-                    }
-                    logger.info(f"🟡 SIMULATED: {symbol} | P&L: ${trade_params['profit']:.2f}")
-                
-                # Store trade and update stats (same for both real and simulated)
+                # Store trade ONCE to database (consolidating multiple save points)
                 if trade:
+                    try:
+                        trade_conn = sqlite3.connect('zwesta_trading.db')
+                        trade_cursor = trade_conn.cursor()
+                        
+                        trade_cursor.execute('''
+                            INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
+                            VALUES (?, ?, ?, ?)
+                        ''', (
+                            bot_id,
+                            bot_config.get('userId'),
+                            json.dumps(trade),
+                            int(datetime.now().timestamp() * 1000)
+                        ))
+                        
+                        trade_conn.commit()
+                        trade_conn.close()
+                        logger.info(f"✅ Trade stored for bot {bot_id}")
+                    except Exception as e:
+                        logger.error(f"Error storing trade in database: {e}")
+                    
+                    # Also keep in memory for this session (for backwards compatibility)
                     if bot_config['accountId'] not in demo_trades_storage:
                         demo_trades_storage[bot_config['accountId']] = []
                     demo_trades_storage[bot_config['accountId']].append(trade)
@@ -3892,9 +3931,9 @@ def start_bot():
                         bot_config['dailyProfits'][today] = 0
                     bot_config['dailyProfits'][today] += trade['profit']
                     
-                    # Add to trade history
-                    bot_config['tradeHistory'].append(trade)
+                    # Add to trades_placed list for batch return
                     trades_placed.append(trade)
+                    # NOTE: Trade is already stored in database above - NOT adding to tradeHistory to avoid duplicates
                     
                     # COMMISSION CALCULATION - Only for profitable trades
                     if trade['profit'] > 0:
@@ -3913,15 +3952,15 @@ def start_bot():
                 logger.error(f"Error placing trade on {symbol}: {e}")
                 continue
         
-        # Get updated account info from MT5 (only if connection exists)
+        # Get updated account info from MT5 (required - no fallback)
         try:
-            if mt5_conn and not use_simulated:
+            if mt5_conn:
                 account_info = mt5_conn.get_account_info()
                 if account_info:
                     bot_config['accountBalance'] = account_info.get('balance', 0)
-                    logger.info(f"📊 Account Balance (from MT5): ${account_info.get('balance', 0):.2f}")
+                    logger.info(f"📊 Account Balance (from REAL MT5): ${account_info.get('balance', 0):.2f}")
             else:
-                logger.info(f"📊 Using SIMULATED account balance: ${bot_config.get('accountBalance', 0):.2f}")
+                logger.error(f"⚠️  MT5 connection lost - could not retrieve account info")
         except Exception as e:
             logger.warning(f"Could not update account info: {e}")
         
@@ -3991,15 +4030,16 @@ def get_commodity_market_data():
 
 
 @app.route('/api/bot/status', methods=['GET'])
+@require_session
 def bot_status():
-    """Get status of all active bots (supports user_id filter)"""
+    """Get status of authenticated user's bots only"""
     try:
-        user_id = request.args.get('user_id')
+        user_id = request.user_id  # From session token
         
         bots_list = []
         for bot in active_bots.values():
-            # Filter by user_id if provided
-            if user_id and bot.get('user_id') != user_id:
+            # Only return bots for authenticated user
+            if bot.get('user_id') != user_id:
                 continue
             
             # Calculate runtime
