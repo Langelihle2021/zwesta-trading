@@ -2292,10 +2292,14 @@ def get_live_prices_from_mt5():
                 current_price = (tick.bid + tick.ask) / 2.0
                 
                 # Get previous price (use current if first time)
+                price_change = 0  # Default to no change
+                trend = 'FLAT'  # Default trend
+                
                 if symbol not in previous_prices or previous_prices[symbol] is None:
                     # First fetch - baseline the price, don't calculate change yet
                     previous_prices[symbol] = current_price
                     price_change = 0  # No change on first read
+                    trend = 'FLAT'  # First read is always flat
                 else:
                     previous_price = previous_prices[symbol]
                     
@@ -2305,11 +2309,16 @@ def get_live_prices_from_mt5():
                     else:
                         price_change = 0
                 
+                    # Determine trend based on CALCULATED price change
+                    if price_change > 0.0001:  # Slightly UP
+                        trend = 'UP'
+                    elif price_change < -0.0001:  # Slightly DOWN
+                        trend = 'DOWN'
+                    else:  # Essentially flat (difference is rounding error)
+                        trend = 'FLAT'
+                    
                     # Update previous price for next cycle
                     previous_prices[symbol] = current_price
-                
-                # Determine trend based on price change
-                trend = 'UP' if current_price > previous_price else 'DOWN' if current_price < previous_price else 'FLAT'
                 
                 # Estimate volatility based on bid-ask spread
                 spread_percent = ((tick.ask - tick.bid) / current_price * 100) if current_price != 0 else 0
