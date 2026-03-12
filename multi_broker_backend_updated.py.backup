@@ -3,7 +3,6 @@
 Zwesta Multi-Broker Trading Backend
 Supports multiple brokers with unified API
 Updated with MT5 Demo Credentials
-Last Verified: 2026-03-12 (All changes confirmed - Production Ready)
 """
 
 import os
