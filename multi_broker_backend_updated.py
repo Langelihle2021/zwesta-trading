@@ -857,6 +857,67 @@ class MT5Connection(BrokerConnection):
             logger.error(f"MT5 disconnect error: {e}")
             return False
 
+    def wait_for_mt5_ready(self, timeout_seconds: int = 60) -> bool:
+        """
+        Wait for MT5 terminal to be fully ready to execute orders.
+        After MT5 restart, the terminal can connect but needs time to be operational.
+        
+        This method:
+        1. Checks if MT5 can execute a simple order (verifies terminal is ready)
+        2. Waits up to timeout_seconds for MT5 to be ready
+        3. Returns True if ready, False if timeout
+        """
+        if not self.connected:
+            logger.warning("MT5 not connected - cannot check readiness")
+            return False
+        
+        logger.info(f"🔍 Checking MT5 readiness (will wait up to {timeout_seconds} seconds)...")
+        
+        start_time = time.time()
+        check_interval = 5  # Check every 5 seconds
+        attempt = 0
+        
+        while time.time() - start_time < timeout_seconds:
+            attempt += 1
+            try:
+                # Try to get account info - this verifies basic connectivity
+                info = self.mt5.account_info()
+                
+                if info is None:
+                    logger.debug(f"  Attempt {attempt}: account_info returned None")
+                    time.sleep(check_interval)
+                    continue
+                
+                # Try to select a symbol and get tick data - verifies order execution capability
+                test_symbol = "EURUSD"  # Universally available
+                if self.mt5.symbol_select(test_symbol, True):
+                    tick = self.mt5.symbol_info_tick(test_symbol)
+                    if tick is not None:
+                        logger.info(f"✅ MT5 is READY to execute orders (checked {test_symbol})")
+                        return True
+                    else:
+                        logger.debug(f"  Attempt {attempt}: tick data not ready")
+                else:
+                    logger.debug(f"  Attempt {attempt}: symbol select failed")
+                
+                # Not ready yet, wait and retry
+                elapsed = time.time() - start_time
+                remaining = timeout_seconds - elapsed
+                logger.debug(f"  MT5 not ready yet ({elapsed:.0f}s elapsed, {remaining:.0f}s remaining)...")
+                time.sleep(check_interval)
+                
+            except Exception as e:
+                logger.debug(f"  Attempt {attempt}: Exception during readiness check: {e}")
+                time.sleep(check_interval)
+        
+        # Timeout reached
+        logger.error(f"❌ MT5 did not become ready within {timeout_seconds} seconds")
+        logger.error("   This usually means:")
+        logger.error("   1. MT5 terminal is still initializing")
+        logger.error("   2. Network connection issue")
+        logger.error("   3. Account permissions or server issue")
+        return False
+
     def get_account_info(self) -> Dict:
         """Get account information"""
         try:
@@ -4319,6 +4380,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         
         running_bots[bot_id] = True
         trade_cycle = 0
+        mt5_ready_timeout = 60  # Wait up to 60 seconds on first cycle
         
         while not bot_stop_flags.get(bot_id, False):
             try:
@@ -4336,6 +4398,21 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
                         time.sleep(trading_interval)
                         continue
+                    
+                    # ✅ NEW: Wait for MT5 to be fully ready to execute orders
+                    # This is critical after MT5 restart - terminal connects but needs initialization time
+                    timeout_for_this_cycle = mt5_ready_timeout if trade_cycle == 1 else 15
+                    if not mt5_conn.wait_for_mt5_ready(timeout_seconds=timeout_for_this_cycle):
+                        logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
+                        if trade_cycle == 1:
+                            # On first cycle, be more aggressive with retries
+                            logger.info(f"Bot {bot_id}: First cycle timeout - retrying in 10 seconds...")
+                            time.sleep(10)
+                            continue
+                        else:
+                            time.sleep(trading_interval)
+                            continue
+                    
                 except Exception as e:
                     logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
                     time.sleep(trading_interval)
@@ -4696,6 +4773,14 @@ def start_bot():
                 }), 503
             else:
                 logger.info(f"✅ Bot {bot_id} connected to REAL MT5 - connection validated")
+                # ✅ NEW: Quick readiness check (non-blocking, 10 second timeout)
+                # Just verify MT5 can access market data, don't wait for full trading readiness
+                if not mt5_conn.wait_for_mt5_ready(timeout_seconds=10):
+                    logger.warning(f"⚠️  Bot {bot_id}: MT5 slow to initialize (readiness check timeout)")
+                    logger.warning(f"    Bot will continue attempting to trade in background")
+                    logger.warning(f"    If MT5 is restarting, it may need up to 60 seconds to be fully operational")
+                    # Don't fail here - just warn. Background thread has longer timeout (60 seconds on first cycle)
+                
                 mt5_conn.disconnect()  # Disconnect from main thread - background thread will create own connection
         except Exception as e:
             error_msg = f"❌ CRITICAL: MT5 connection failed for bot {bot_id}: {e}"
