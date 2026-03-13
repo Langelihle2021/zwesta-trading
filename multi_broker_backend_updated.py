@@ -2348,40 +2348,37 @@ def get_account_info_alias():
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
-    # Forex (9)
+    # Forex (9) - Most Reliable
     'EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCNH', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDSEK',
     # Precious Metals (4) - High volatility, high profitability potential
     'XAUUSD',   # Gold - Most liquid precious metal
     'XAGUSD',   # Silver - High volatility
     'XPTUSD',   # Platinum - Lower liquidity but high volatility
     'XPDUSD',   # Palladium - Rare, high volatility
-    # Energy (2)
+    # Energy (1) - Only OILK is available
     'OILK',     # Crude Oil (Brent)
-    'NATGASUS', # Natural Gas
     # Indices (4)
     'SP500m',   # S&P 500
     'DAX',      # DAX 40 Germany
     'US300',    # US 300 Index (broader market)
     'US100',    # Nasdaq 100 (tech-heavy)
-    # Stocks (5)
-    'AMD', 'MSFT', 'INTC', 'NVDA', 'NIKL'
 }
 
 SYMBOL_MAPPING = {
     # OLD -> NEW SYMBOL CORRECTIONS
     # Metals
-    'GOLD': 'XPTUSD', 'XAUUSD': 'XPTUSD',
-    'SILVER': 'XPTUSD', 'XAGUSD': 'XPTUSD',
+    'GOLD': 'XAUUSD', 'XAUUSD': 'XAUUSD',
+    'SILVER': 'XAGUSD', 'XAGUSD': 'XAGUSD',
     'PLATINUM': 'XPTUSD',
-    'PALLADIUM': 'XPTUSD', 'XPDUSD': 'XPTUSD',
-    'COPPER': 'XPTUSD',
+    'PALLADIUM': 'XPDUSD', 'XPDUSD': 'XPDUSD',
+    'COPPER': 'XAUUSD',
     
     # Energy
     'WTIUSD': 'OILK', 'CRUDE_OIL': 'OILK',
     'BRENTUSD': 'OILK',
     'NATGASUS': 'OILK', 'NATURAL_GAS': 'OILK',
     
-    # Agriculture
+    # Agriculture (map to EURUSD as fallback)
     'CORNUSD': 'EURUSD', 'CORN': 'EURUSD',
     'WHEATUSD': 'EURUSD', 'WHEAT': 'EURUSD',
     'SOYBEANSUSD': 'EURUSD', 'SOYBEANS': 'EURUSD',
@@ -2396,9 +2393,12 @@ SYMBOL_MAPPING = {
     'CAC40': 'EURUSD',
     'NIKKEI225': 'NIKL', 'NIKKEI': 'NIKL',
     
+    # Stocks (map to forex as fallback - not available on demo)
+    'AMD': 'EURUSD', 'MSFT': 'EURUSD', 'INTC': 'EURUSD', 'NVDA': 'EURUSD', 'NIKL': 'EURUSD',
+    
     # Crypto (not available)
-    'BITCOIN': 'MSFT', 'BTC': 'MSFT',
-    'ETHEREUM': 'MSFT', 'ETH': 'MSFT',
+    'BITCOIN': 'EURUSD', 'BTC': 'EURUSD',
+    'ETHEREUM': 'EURUSD', 'ETH': 'EURUSD',
 }
 
 def validate_and_correct_symbols(symbols):
@@ -4310,30 +4310,40 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         adjusted_volume = trade_params['volume'] * position_size
                         order_type = trade_params['type']
                         
-                        # Place order on MT5
+                        # Place order on MT5 with RETRY LOGIC
                         logger.info(f"📍 Bot {bot_id}: Placing {order_type} order on {symbol} | Cycle: {trade_cycle}")
                         
-                        order_result = mt5_conn.place_order(
-                            symbol=symbol,
-                            order_type=order_type,
-                            volume=round(adjusted_volume, 2),
-                            comment=f'Zwesta Bot {bot_id} - {strategy_name}'
-                        )
+                        order_result = None
+                        symbols_to_try = [symbol, 'EURUSD']  # Try original symbol, then fallback
                         
-                        # Fallback to EURUSD if symbol not found
-                        if not order_result.get('success', False) and 'not found' in order_result.get('error', '').lower():
-                            logger.warning(f"Bot {bot_id}: Symbol {symbol} not found - trying EURUSD fallback")
-                            fallback_symbol = 'EURUSD'
-                            order_result = mt5_conn.place_order(
-                                symbol=fallback_symbol,
-                                order_type=order_type,
-                                volume=round(adjusted_volume, 2),
-                                comment=f'Zwesta Bot {bot_id} - {strategy_name} (fallback)'
-                            )
-                            if order_result.get('success', False):
-                                symbol = fallback_symbol
+                        for attempt_symbol in symbols_to_try:
+                            try:
+                                order_result = mt5_conn.place_order(
+                                    symbol=attempt_symbol,
+                                    order_type=order_type,
+                                    volume=round(adjusted_volume, 2),
+                                    comment=f'Zwesta Bot {bot_id} - {strategy_name}'
+                                )
+                                
+                                if order_result.get('success', False):
+                                    logger.info(f"✅ Bot {bot_id}: Order placed successfully on {attempt_symbol}")
+                                    symbol = attempt_symbol
+                                    break
+                                elif 'not found' in order_result.get('error', '').lower():
+                                    logger.warning(f"Bot {bot_id}: Symbol {attempt_symbol} not found - trying next...")
+                                    continue
+                                else:
+                                    logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
+                                    # Don't continue on other errors, last attempt
+                                    break
+                            except Exception as e:
+                                logger.error(f"Bot {bot_id}: Exception placing order on {attempt_symbol}: {e}")
+                                if attempt_symbol == symbols_to_try[-1]:
+                                    # Last attempt failed
+                                    break
+                                continue
                         
-                        if order_result.get('success', False):
+                        if order_result and order_result.get('success', False):
                             # Get current position info
                             positions = mt5_conn.get_positions()
                             if positions:
@@ -4414,7 +4424,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         trades_placed += 1
                                         break
                         else:
-                            logger.warning(f"Bot {bot_id}: Failed to place order on {symbol}: {order_result.get('error')}")
+                            logger.warning(f"Bot {bot_id}: Could not place order on {symbol} or EURUSD fallback")
                     
                     except Exception as e:
                         logger.error(f"Bot {bot_id}: Error in trade cycle for {symbol}: {e}")
