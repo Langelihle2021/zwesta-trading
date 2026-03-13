@@ -3277,6 +3277,11 @@ commodity_market_data = {
 # Store active bots configuration
 active_bots = {}
 
+# Track running bots and their threads (NEW)
+running_bots = {}  # {bot_id: True/False}
+bot_threads = {}   # {bot_id: thread_object}
+bot_stop_flags = {} # {bot_id: stop_requested}
+
 # ==================== BROKER REGISTRY (Dynamic Broker Configuration) ====================
 # This registry can be updated without code changes
 REGISTERED_BROKERS = [
@@ -4228,6 +4233,221 @@ def create_bot():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ==================== CONTINUOUS BOT TRADING LOOP ====================
+
+def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict = None):
+    """
+    Continuously execute trading for a bot until stop is requested
+    
+    This function runs in a background thread and:
+    1. Executes trades every trading_interval seconds
+    2. Updates bot stats after each trade cycle
+    3. Manages position sizing and risk
+    4. Stops when bot_stop_flags[bot_id] is set to True
+    """
+    try:
+        logger.info(f"🤖 Bot {bot_id}: CONTINUOUS TRADING LOOP STARTED (user {user_id})")
+        
+        bot_config = active_bots.get(bot_id)
+        if not bot_config:
+            logger.error(f"Bot {bot_id} not found in active_bots")
+            return
+        
+        trading_interval = bot_config.get('tradingInterval', 300)  # Default 5 minutes
+        logger.info(f"Bot {bot_id}: Trading interval set to {trading_interval} seconds ({trading_interval/60:.1f} minutes)")
+        
+        # Initialize stop flag if not exists
+        if bot_id not in bot_stop_flags:
+            bot_stop_flags[bot_id] = False
+        
+        running_bots[bot_id] = True
+        trade_cycle = 0
+        
+        while not bot_stop_flags.get(bot_id, False):
+            try:
+                trade_cycle += 1
+                logger.info(f"🔄 Bot {bot_id}: Trade cycle #{trade_cycle} starting at {datetime.now().isoformat()}")
+                
+                # Connect to MT5
+                try:
+                    if bot_config.get('mode') == 'live' and bot_credentials:
+                        mt5_conn = MT5Connection(bot_credentials)
+                    else:
+                        mt5_conn = MT5Connection()
+                    
+                    if not mt5_conn.connect():
+                        logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
+                        time.sleep(trading_interval)
+                        continue
+                except Exception as e:
+                    logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
+                    time.sleep(trading_interval)
+                    continue
+                
+                # Execute trade cycle (same logic as in start_bot endpoint)
+                strategy_name = bot_config.get('strategy', 'trend_following')
+                strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
+                
+                trades_placed = 0
+                symbols = bot_config.get('symbols', ['EURUSD'])
+                
+                for symbol in symbols[:3]:  # Max 3 trades per cycle
+                    if bot_stop_flags.get(bot_id, False):
+                        break  # Stop requested, exit loop
+                    
+                    try:
+                        # Dynamic position sizing
+                        if bot_config.get('dynamicSizing', True):
+                            position_size = position_sizer.calculate_position_size(
+                                bot_config,
+                                volatility_level=bot_config.get('volatilityLevel', 'Medium')
+                            )
+                        else:
+                            position_size = bot_config.get('basePositionSize', 1.0)
+                        
+                        # Get trade direction from strategy
+                        trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'])
+                        adjusted_volume = trade_params['volume'] * position_size
+                        order_type = trade_params['type']
+                        
+                        # Place order on MT5
+                        logger.info(f"📍 Bot {bot_id}: Placing {order_type} order on {symbol} | Cycle: {trade_cycle}")
+                        
+                        order_result = mt5_conn.place_order(
+                            symbol=symbol,
+                            order_type=order_type,
+                            volume=round(adjusted_volume, 2),
+                            comment=f'Zwesta Bot {bot_id} - {strategy_name}'
+                        )
+                        
+                        # Fallback to EURUSD if symbol not found
+                        if not order_result.get('success', False) and 'not found' in order_result.get('error', '').lower():
+                            logger.warning(f"Bot {bot_id}: Symbol {symbol} not found - trying EURUSD fallback")
+                            fallback_symbol = 'EURUSD'
+                            order_result = mt5_conn.place_order(
+                                symbol=fallback_symbol,
+                                order_type=order_type,
+                                volume=round(adjusted_volume, 2),
+                                comment=f'Zwesta Bot {bot_id} - {strategy_name} (fallback)'
+                            )
+                            if order_result.get('success', False):
+                                symbol = fallback_symbol
+                        
+                        if order_result.get('success', False):
+                            # Get current position info
+                            positions = mt5_conn.get_positions()
+                            if positions:
+                                for pos in positions:
+                                    if pos['symbol'] == symbol and pos['type'] == order_type:
+                                        trade = {
+                                            'ticket': pos['ticket'],
+                                            'symbol': pos['symbol'],
+                                            'type': pos['type'],
+                                            'volume': pos['volume'],
+                                            'baseVolume': trade_params['volume'],
+                                            'positionSize': position_size,
+                                            'entryPrice': pos['openPrice'],
+                                            'exitPrice': pos['currentPrice'],
+                                            'profit': pos['pnl'],
+                                            'time': datetime.now().isoformat(),
+                                            'timestamp': int(datetime.now().timestamp() * 1000),
+                                            'botId': bot_id,
+                                            'cycle': trade_cycle,
+                                            'strategy': strategy_name,
+                                            'isWinning': pos['pnl'] > 0,
+                                            'source': 'REAL_MT5',
+                                        }
+                                        
+                                        # Store in database
+                                        try:
+                                            trade_conn = sqlite3.connect('zwesta_trading.db')
+                                            trade_cursor = trade_conn.cursor()
+                                            trade_cursor.execute('''
+                                                INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
+                                                VALUES (?, ?, ?, ?)
+                                            ''', (bot_id, user_id, json.dumps(trade), trade['timestamp']))
+                                            trade_conn.commit()
+                                            trade_conn.close()
+                                        except Exception as e:
+                                            logger.error(f"Bot {bot_id}: Error storing trade: {e}")
+                                        
+                                        # Update bot stats
+                                        bot_config['totalTrades'] += 1
+                                        bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
+                                        
+                                        if trade['profit'] > 0:
+                                            bot_config['winningTrades'] += 1
+                                        else:
+                                            bot_config['totalLosses'] += abs(trade['profit'])
+                                        
+                                        bot_config['totalProfit'] += trade['profit']
+                                        
+                                        # Update peak & drawdown
+                                        if bot_config['totalProfit'] > bot_config['peakProfit']:
+                                            bot_config['peakProfit'] = bot_config['totalProfit']
+                                        
+                                        drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
+                                        if drawdown > bot_config['maxDrawdown']:
+                                            bot_config['maxDrawdown'] = drawdown
+                                        
+                                        # Track profit history
+                                        bot_config['profitHistory'].append({
+                                            'timestamp': trade['timestamp'],
+                                            'profit': round(bot_config['totalProfit'], 2),
+                                            'trades': bot_config['totalTrades'],
+                                        })
+                                        
+                                        # Track daily profit
+                                        today = datetime.now().strftime('%Y-%m-%d')
+                                        if today not in bot_config['dailyProfits']:
+                                            bot_config['dailyProfits'][today] = 0
+                                        bot_config['dailyProfits'][today] += trade['profit']
+                                        
+                                        # Distribution commissions
+                                        if trade['profit'] > 0:
+                                            try:
+                                                distribute_trade_commissions(bot_id, user_id, trade['profit'])
+                                            except Exception as e:
+                                                logger.error(f"Bot {bot_id}: Commission error: {e}")
+                                        
+                                        logger.info(f"✅ Bot {bot_id}: Trade executed | {symbol} {order_type} | P&L: ${trade['profit']:.2f}")
+                                        trades_placed += 1
+                                        break
+                        else:
+                            logger.warning(f"Bot {bot_id}: Failed to place order on {symbol}: {order_result.get('error')}")
+                    
+                    except Exception as e:
+                        logger.error(f"Bot {bot_id}: Error in trade cycle for {symbol}: {e}")
+                        continue
+                
+                # Update account balance
+                try:
+                    if mt5_conn:
+                        account_info = mt5_conn.get_account_info()
+                        if account_info:
+                            bot_config['accountBalance'] = account_info.get('balance', 0)
+                except Exception as e:
+                    logger.warning(f"Bot {bot_id}: Could not update account balance: {e}")
+                
+                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Total P&L: ${bot_config['totalProfit']:.2f}")
+                
+                # Wait for next trading interval
+                logger.info(f"⏳ Bot {bot_id}: Waiting {trading_interval} seconds until next cycle...")
+                time.sleep(trading_interval)
+            
+            except Exception as e:
+                logger.error(f"Bot {bot_id}: Error in trading loop: {e}")
+                time.sleep(min(trading_interval, 60))  # Wait at least 60 seconds before retry
+        
+        # Bot stopped
+        logger.info(f"🛑 Bot {bot_id}: CONTINUOUS TRADING LOOP STOPPED")
+        running_bots[bot_id] = False
+    
+    except Exception as e:
+        logger.error(f"Bot {bot_id}: FATAL error in trading loop: {e}")
+        running_bots[bot_id] = False
+
+
 @app.route('/api/bot/start', methods=['POST'])
 @require_session
 def start_bot():
@@ -4381,8 +4601,8 @@ def start_bot():
             except Exception as e:
                 logger.warning(f"Could not update bot symbols in DB: {e}")
         
-        # REQUIRE REAL MT5 TRADES - NO SIMULATION
-        logger.info(f"📍 Bot {bot_id}: Connecting to REAL MT5 account...")
+        # REQUIRE REAL MT5 TRADES - Validate connection will work
+        logger.info(f"📍 Bot {bot_id}: Validating MT5 connection...")
         
         mt5_conn = None
         
@@ -4403,7 +4623,8 @@ def start_bot():
                     'status': 'FAILED'
                 }), 503
             else:
-                logger.info(f"✅ Bot {bot_id} connected to REAL MT5 account {MT5_CONFIG.get('account')}")
+                logger.info(f"✅ Bot {bot_id} connected to REAL MT5 - connection validated")
+                mt5_conn.disconnect()  # Disconnect from main thread - background thread will create own connection
         except Exception as e:
             error_msg = f"❌ CRITICAL: MT5 connection failed for bot {bot_id}: {e}"
             logger.error(error_msg)
@@ -4414,229 +4635,46 @@ def start_bot():
                 'status': 'FAILED'
             }), 503
         
-        # INTELLIGENT STRATEGY SWITCHING
-        if bot_config.get('autoSwitch', True):
-            if bot_config['totalTrades'] > 0 and bot_config['totalTrades'] % 10 == 0:
-                best_strategy = strategy_tracker.get_best_strategy()
-                if best_strategy != bot_config['strategy']:
-                    old_strategy = bot_config['strategy']
-                    bot_config['strategy'] = best_strategy
-                    bot_config['lastStrategySwitch'] = datetime.now().isoformat()
-                    bot_config['strategyHistory'].append({
-                        'timestamp': bot_config['lastStrategySwitch'],
-                        'oldStrategy': old_strategy,
-                        'newStrategy': best_strategy,
-                        'reason': 'Auto-switch to best performer',
-                        'trades': bot_config['totalTrades']
-                    })
-                    logger.info(f"Bot {bot_id} switched from {old_strategy} to {best_strategy}")
+        # Validate symbols are available
+        validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSD']))
+        bot_config['symbols'] = validated_symbols
+        logger.info(f"📍 Bot {bot_id}: Trading symbols validated: {validated_symbols}")
         
-        # Place REAL trades on MT5
-        strategy_name = bot_config['strategy']
-        strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
+        logger.info(f"Bot {bot_id}: Starting CONTINUOUS trading in background thread")
         
-        # ✅ VALIDATE & CORRECT BOT SYMBOLS (in case they're old/unavailable)
-        bot_config['symbols'] = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSD']))
+        # Launch background trading thread
+        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+            logger.warning(f"Bot {bot_id}: Already running - stopping old thread first")
+            bot_stop_flags[bot_id] = True
+            bot_threads[bot_id].join(timeout=10)
         
-        # We have a real MT5 connection, so never use simulated trades
-        use_simulated = False
+        # Reset stop flag and start new thread
+        bot_stop_flags[bot_id] = False
+        bot_thread = threading.Thread(
+            target=continuous_bot_trading_loop,
+            args=(bot_id, user_id, bot_credentials),
+            daemon=True,
+            name=f"BotThread-{bot_id}"
+        )
+        bot_threads[bot_id] = bot_thread
+        bot_thread.start()
         
-        trades_placed = []
-        for symbol in bot_config['symbols'][:3]:  # Limit to 3 trades per cycle
-            trade = None  # Initialize trade variable
-            try:
-                # DYNAMIC POSITION SIZING
-                if bot_config.get('dynamicSizing', True):
-                    position_size = position_sizer.calculate_position_size(
-                        bot_config, 
-                        volatility_level=bot_config.get('volatilityLevel', 'Medium')
-                    )
-                else:
-                    position_size = bot_config.get('basePositionSize', 1.0)
-                
-                # Get trade direction from strategy
-                trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'])
-                adjusted_volume = trade_params['volume'] * position_size
-                order_type = trade_params['type']
-                
-                # TRY REAL MT5 ORDER IF AVAILABLE
-                if mt5_conn and not use_simulated:
-                    try:
-                        logger.info(f"📍 Placing REAL {order_type} order on {symbol} | Volume: {adjusted_volume:.2f}")
-                        
-                        order_result = mt5_conn.place_order(
-                            symbol=symbol,
-                            order_type=order_type,
-                            volume=round(adjusted_volume, 2),
-                            comment=f'Zwesta Bot {bot_id} - {strategy_name}'
-                        )
-                        
-                        # If symbol not found, try fallback to EURUSD (default available symbol)
-                        if not order_result.get('success', False) and 'not found' in order_result.get('error', '').lower():
-                            logger.warning(f"Symbol {symbol} not found on MT5 - retrying with EURUSD")
-                            fallback_symbol = 'EURUSD'
-                            order_result = mt5_conn.place_order(
-                                symbol=fallback_symbol,
-                                order_type=order_type,
-                                volume=round(adjusted_volume, 2),
-                                comment=f'Zwesta Bot {bot_id} - {strategy_name} (fallback)'
-                            )
-                            if order_result.get('success', False):
-                                symbol = fallback_symbol  # Update symbol for further processing
-                        
-                        if order_result.get('success', False):
-                            # Get current position info after placing trade
-                            positions = mt5_conn.get_positions()
-                            if positions:
-                                # Find the position we just created
-                                for pos in positions:
-                                    if pos['symbol'] == symbol and pos['type'] == order_type:
-                                        # Use REAL data from MT5
-                                        trade = {
-                                            'ticket': pos['ticket'],
-                                            'symbol': pos['symbol'],
-                                            'type': pos['type'],
-                                            'volume': pos['volume'],
-                                            'baseVolume': trade_params['volume'],
-                                            'positionSize': position_size,
-                                            'entryPrice': pos['openPrice'],
-                                            'exitPrice': pos['currentPrice'],
-                                            'profit': pos['pnl'],
-                                            'time': datetime.now().isoformat(),
-                                            'timestamp': int(datetime.now().timestamp() * 1000),
-                                            'botId': bot_id,
-                                            'strategy': strategy_name,
-                                            'isWinning': pos['pnl'] > 0,
-                                            'source': 'REAL_MT5',
-                                        }
-                                        logger.info(f"✅ REAL TRADE: {symbol} | P&L: ${pos['pnl']:.2f}")
-                                        break
-                        else:
-                            # Real trade failed - log error but DON'T use simulated
-                            logger.error(f"❌ Failed to place real order on {symbol}: {order_result.get('error')}")
-                            logger.error(f"   Request was: {order_result.get('request')}")
-                            # Trade not placed - will be skipped (not double-counted in stats)
-                            trade = None
-                    except Exception as e:
-                        logger.error(f"❌ Exception placing REAL order on {symbol}: {e}")
-                        trade = None
-                
-                # Store trade ONCE to database (consolidating multiple save points)
-                if trade:
-                    try:
-                        trade_conn = sqlite3.connect('zwesta_trading.db')
-                        trade_cursor = trade_conn.cursor()
-                        
-                        trade_cursor.execute('''
-                            INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
-                            VALUES (?, ?, ?, ?)
-                        ''', (
-                            bot_id,
-                            bot_config.get('userId'),
-                            json.dumps(trade),
-                            int(datetime.now().timestamp() * 1000)
-                        ))
-                        
-                        trade_conn.commit()
-                        trade_conn.close()
-                        logger.info(f"✅ Trade stored for bot {bot_id}")
-                    except Exception as e:
-                        logger.error(f"Error storing trade in database: {e}")
-                    
-                    # Also keep in memory for this session (for backwards compatibility)
-                    if bot_config['accountId'] not in demo_trades_storage:
-                        demo_trades_storage[bot_config['accountId']] = []
-                    demo_trades_storage[bot_config['accountId']].append(trade)
-                    strategy_tracker.record_trade(strategy_name, trade['profit'], symbol)
-                    
-                    # Update bot stats
-                    bot_config['totalTrades'] += 1
-                    bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
-                    
-                    if trade['profit'] > 0:
-                        bot_config['winningTrades'] += 1
-                    else:
-                        bot_config['totalLosses'] += abs(trade['profit'])
-                    
-                    bot_config['totalProfit'] += trade['profit']
-                    
-                    # Update peak and drawdown
-                    if bot_config['totalProfit'] > bot_config['peakProfit']:
-                        bot_config['peakProfit'] = bot_config['totalProfit']
-                    
-                    drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
-                    if drawdown > bot_config['maxDrawdown']:
-                        bot_config['maxDrawdown'] = drawdown
-                    
-                    # Track profit history
-                    bot_config['profitHistory'].append({
-                        'timestamp': trade['timestamp'],
-                        'profit': round(bot_config['totalProfit'], 2),
-                        'trades': bot_config['totalTrades'],
-                    })
-                    
-                    # Track daily profit
-                    today = datetime.now().strftime('%Y-%m-%d')
-                    if today not in bot_config['dailyProfits']:
-                        bot_config['dailyProfits'][today] = 0
-                    bot_config['dailyProfits'][today] += trade['profit']
-                    
-                    # Add to trades_placed list for batch return
-                    trades_placed.append(trade)
-                    # NOTE: Trade is already stored in database above - NOT adding to tradeHistory to avoid duplicates
-                    
-                    # COMMISSION CALCULATION - Only for profitable trades
-                    if trade['profit'] > 0:
-                        try:
-                            distribute_trade_commissions(bot_id, user_id, trade['profit'])
-                        except Exception as e:
-                            logger.error(f"❌ Error distributing commissions: {e}")
-                        
-                        if trade.get('source') == 'REAL':
-                            logger.info(f"✅ REAL TRADE EXECUTED: {symbol} | P&L: ${trade['profit']:.2f}")
-                            logger.info(f"   Entry: ${trade['entryPrice']:.5f} | Current: ${trade['exitPrice']:.5f} | Ticket: {trade['ticket']}")
-                        else:
-                            logger.info(f"🟡 SIMULATED: {symbol} | P&L: ${trade['profit']:.2f}")
-                    
-            except Exception as e:
-                logger.error(f"Error placing trade on {symbol}: {e}")
-                continue
+        logger.info(f"✅ Bot {bot_id}: Background thread launched successfully")
         
-        # Get updated account info from MT5 (required - no fallback)
-        try:
-            if mt5_conn:
-                account_info = mt5_conn.get_account_info()
-                if account_info:
-                    bot_config['accountBalance'] = account_info.get('balance', 0)
-                    logger.info(f"📊 Account Balance (from REAL MT5): ${account_info.get('balance', 0):.2f}")
-            else:
-                logger.error(f"⚠️  MT5 connection lost - could not retrieve account info")
-        except Exception as e:
-            logger.warning(f"Could not update account info: {e}")
-        
-        logger.info(f"Bot {bot_id} ({strategy_name}) placed {len(trades_placed)} trades with dynamic sizing")
-        
+        # Return immediately - bot is running in background
         return jsonify({
             'success': True,
             'botId': bot_id,
-            'strategy': strategy_name,
-            'tradesPlaced': len(trades_placed),
-            'trades': trades_placed,
-            'positionSizing': {
-                'base': bot_config.get('basePositionSize', 1.0),
-                'current': position_sizer.calculate_position_size(bot_config, bot_config.get('volatilityLevel', 'Medium')),
-                'dynamic': bot_config.get('dynamicSizing', True),
-            },
+            'strategy': bot_config['strategy'],
+            'status': 'RUNNING',
+            'message': f'Bot {bot_id} started - continuous trading in background',
+            'tradingInterval': bot_config.get('tradingInterval', 300),
             'botStats': {
                 'totalTrades': bot_config['totalTrades'],
                 'winningTrades': bot_config['winningTrades'],
                 'totalLosses': round(bot_config['totalLosses'], 2),
                 'totalProfit': round(bot_config['totalProfit'], 2),
-                'totalInvestment': round(bot_config['totalInvestment'], 2),
-                'winRate': round((bot_config['winningTrades'] / bot_config['totalTrades'] * 100) if bot_config['totalTrades'] > 0 else 0, 2),
-                'roi': round((bot_config['totalProfit'] / max(bot_config['totalInvestment'], 1)) * 100, 2),
-                'maxDrawdown': round(bot_config['maxDrawdown'], 2),
-                'profitFactor': round((bot_config['totalProfit'] / max(bot_config['totalLosses'], 1)), 2) if bot_config['totalLosses'] > 0 else 99.99,
+                'accountBalance': bot_config.get('accountBalance', 0),
             }
         }), 200
     
@@ -4645,6 +4683,57 @@ def start_bot():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+
+
+@app.route('/api/bot/stop', methods=['POST'])
+@require_session
+def stop_bot():
+    """Stop continuous trading for a bot"""
+    try:
+        data = request.json or {}
+        bot_id = data.get('botId')
+        user_id = request.user_id
+        
+        if not bot_id:
+            return jsonify({'success': False, 'error': 'botId required'}), 400
+        
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        # Verify bot belongs to user
+        bot = active_bots[bot_id]
+        if bot.get('user_id') != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        
+        # Check if bot is running
+        if bot_id not in running_bots or not running_bots[bot_id]:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} is not running'}), 400
+        
+        # Set stop flag
+        bot_stop_flags[bot_id] = True
+        logger.info(f"🛑 Bot {bot_id}: Stop requested by user {user_id}")
+        
+        # Wait for thread to finish (max 30 seconds)
+        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+            logger.info(f"Bot {bot_id}: Waiting for background thread to stop...")
+            bot_threads[bot_id].join(timeout=30)
+        
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'status': 'STOPPED',
+            'message': f'Bot {bot_id} trading stopped',
+            'finalStats': {
+                'totalTrades': bot['totalTrades'],
+                'winningTrades': bot['winningTrades'],
+                'totalProfit': round(bot['totalProfit'], 2),
+                'accountBalance': bot.get('accountBalance', 0),
+            }
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error stopping bot: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/market/commodities', methods=['GET'])
