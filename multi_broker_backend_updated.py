@@ -4787,11 +4787,16 @@ def bot_status():
 
 @app.route('/api/bot/status-public', methods=['GET'])
 def bot_status_public():
-    """Get status of demo bots (public - no authentication required)"""
+    """Get status of RUNNING bots only (public - no authentication required)"""
     try:
         bots_list = []
-        for bot in active_bots.values():
-            # Return basic info about active bots (especially demo bots)
+        
+        # Only include ENABLED (running) bots
+        for bot_id, bot in active_bots.items():
+            # SKIP stopped/disabled bots
+            if not bot.get('enabled', True) or not running_bots.get(bot_id, False):
+                continue
+            
             # Calculate runtime
             created = datetime.fromisoformat(bot.get('createdAt', datetime.now().isoformat()))
             runtime_seconds = (datetime.now() - created).total_seconds()
@@ -4829,14 +4834,18 @@ def bot_status_public():
                 'roi': round(roi, 2),
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
-                'status': 'Active' if bot.get('enabled', True) else 'Inactive',
+                'status': 'Running',  # Only show running bots
+                'createdAt': created.isoformat(),
                 'lastTradeTime': bot.get('tradeHistory', [{}])[-1].get('time') if bot.get('tradeHistory') else bot.get('createdAt', datetime.now().isoformat()),
             }
             bots_list.append(enhanced_bot)
         
+        # Sort by creation date (latest first)
+        bots_list.sort(key=lambda x: x['createdAt'], reverse=True)
+        
         return jsonify({
             'success': True,
-            'activeBots': len([b for b in bots_list if b.get('status') == 'Active']),
+            'activeBots': len(bots_list),
             'bots': bots_list,
             'timestamp': datetime.now().isoformat(),
         }), 200
