@@ -801,6 +801,8 @@ class MT5Connection(BrokerConnection):
                             self.connected = True
                             self.get_account_info()
                             logger.info(f"✅ Connected to MT5 account {account} with password")
+                            # Subscribe to all symbols for trading
+                            self._subscribe_symbols()
                             return True
                         
                         # If password fails, try guest login
@@ -812,6 +814,8 @@ class MT5Connection(BrokerConnection):
                             self.connected = True
                             self.get_account_info()
                             logger.info(f"✅ Connected to MT5 account {account} (guest mode)")
+                            # Subscribe to all symbols for trading
+                            self._subscribe_symbols()
                             return True
                         
                         # Both login methods failed
@@ -856,6 +860,29 @@ class MT5Connection(BrokerConnection):
         except Exception as e:
             logger.error(f"MT5 disconnect error: {e}")
             return False
+
+    def _subscribe_symbols(self):
+        """Subscribe all trading symbols so they're available for order placement"""
+        if not self.connected or not self.mt5:
+            return
+        
+        subscribed = 0
+        failed = 0
+        
+        for symbol in VALID_SYMBOLS:
+            try:
+                if self.mt5.symbol_select(symbol, True):
+                    subscribed += 1
+                else:
+                    logger.debug(f"⚠️  Could not subscribe to {symbol}")
+                    failed += 1
+            except Exception as e:
+                logger.debug(f"⚠️  Error subscribing to {symbol}: {e}")
+                failed += 1
+        
+        logger.info(f"✅ Symbol subscription complete: {subscribed}/{len(VALID_SYMBOLS)} symbols ready for trading")
+        if failed > 0:
+            logger.warning(f"⚠️  {failed} symbols unavailable (account may not have access)")
 
     def wait_for_mt5_ready(self, timeout_seconds: int = 60) -> bool:
         """
