@@ -17,6 +17,64 @@ class BotConfigurationScreen extends StatefulWidget {
 }
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
+    // Dialog to input account number
+    Future<String?> _showAccountInputDialog(BuildContext context) async {
+      String? account;
+      await showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Enter Destination Account'),
+            content: TextField(
+              decoration: const InputDecoration(hintText: 'Account Number'),
+              onChanged: (value) => account = value,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return account;
+    }
+
+    // Dialog to input amount
+    Future<double?> _showAmountInputDialog(BuildContext context, {String title = 'Enter Amount'}) async {
+      String? amountStr;
+      await showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(title),
+            content: TextField(
+              decoration: const InputDecoration(hintText: 'Amount'),
+              keyboardType: TextInputType.number,
+              onChanged: (value) => amountStr = value,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      if (amountStr == null) return null;
+      final amount = double.tryParse(amountStr!);
+      return amount;
+    }
   late TextEditingController _botIdController;
   late TextEditingController _riskPerTradeController;
   late TextEditingController _maxDailyLossController;
@@ -896,10 +954,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     final amount = await _showAmountInputDialog(context, title: 'Commission Withdrawal Amount');
                     if (amount != null) {
                       // Auto-select IG or XM Global account
-                      final igXmAccount = _brokerService.credentials.firstWhere(
-                        (cred) => cred.broker.toLowerCase().contains('ig') || cred.broker.toLowerCase().contains('xm'),
-                        orElse: () => null,
-                      );
+                      BrokerCredential? igXmAccount;
+                      try {
+                        igXmAccount = _brokerService.credentials.firstWhere(
+                          (cred) => cred.broker.toLowerCase().contains('ig') || cred.broker.toLowerCase().contains('xm'),
+                        );
+                      } catch (_) {
+                        igXmAccount = null;
+                      }
                       if (igXmAccount == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('No IG or XM Global account found for withdrawal.')),
@@ -941,62 +1003,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
               ],
             ),
           ),
-          Future<String?> _showAccountInputDialog(BuildContext context) async {
-            String? account;
-            await showDialog(
-              context: context,
-              builder: (context) {
-                return AlertDialog(
-                  title: const Text('Enter Destination Account'),
-                  content: TextField(
-                    decoration: const InputDecoration(hintText: 'Account Number'),
-                    onChanged: (value) => account = value,
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('OK'),
-                    ),
-                  ],
-                );
-              },
-            );
-            return account;
-          }
-
-          Future<double?> _showAmountInputDialog(BuildContext context, {String title = 'Enter Amount'}) async {
-            String? amountStr;
-            await showDialog(
-              context: context,
-              builder: (context) {
-                return AlertDialog(
-                  title: Text(title),
-                  content: TextField(
-                    decoration: const InputDecoration(hintText: 'Amount'),
-                    keyboardType: TextInputType.number,
-                    onChanged: (value) => amountStr = value,
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('OK'),
-                    ),
-                  ],
-                );
-              },
-            );
-            if (amountStr == null) return null;
-            final amount = double.tryParse(amountStr!);
-            return amount;
-          }
         ],
         ),
       ),
