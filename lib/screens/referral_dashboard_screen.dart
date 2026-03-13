@@ -129,22 +129,37 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
     String accountDetails,
   ) async {
     try {
+      // Get session token
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      
+      if (sessionToken == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Session expired. Please login again.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
       final response = await http.post(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/withdrawal/request'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/user/commission-withdrawal'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
         body: jsonEncode({
-          'user_id': widget.userId,
           'amount': amount,
-          'method': method,
-          'account_details': accountDetails,
         }),
       ).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final responseData = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '✅ Withdrawal request submitted! You\'ll receive \$${(amount * 0.99).toStringAsFixed(2)} after 1% fee.',
+              '✅ Withdrawal request submitted! Status: ${responseData['status'] ?? 'pending'}',
             ),
             backgroundColor: Colors.green,
           ),
@@ -153,9 +168,10 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
           _earningsData = _fetchEarnings();
         });
       } else {
+        final responseData = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${jsonDecode(response.body)['error'] ?? 'Failed to submit withdrawal'}'),
+            content: Text('Error: ${responseData['error'] ?? 'Failed to submit withdrawal'}'),
             backgroundColor: Colors.red,
           ),
         );

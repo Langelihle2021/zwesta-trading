@@ -123,8 +123,27 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     if (!confirm) return;
 
     try {
+      // Get session token from preferences
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      
+      if (sessionToken == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Session expired. Please login again.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
       final response = await http.delete(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/delete/$botId'),
+        headers: {
+          'X-Session-Token': sessionToken,
+        },
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
