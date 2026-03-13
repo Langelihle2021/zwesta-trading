@@ -763,14 +763,27 @@ class MT5Connection(BrokerConnection):
             credentials = {
                 'account': MT5_CONFIG['account'],
                 'password': MT5_CONFIG['password'],
-                'server': MT5_CONFIG['server']
+                'server': MT5_CONFIG['server'],
+                'broker': 'MetaQuotes',
             }
-        
+
         super().__init__(BrokerType.METATRADER5, credentials)
+        # Dynamically launch/check MT5 terminal for this broker
+        broker = credentials.get('broker', 'MetaQuotes')
+        try:
+            import subprocess, sys
+            import os
+            # Call the terminal manager to ensure the terminal is running
+            subprocess.Popen([
+                sys.executable, os.path.join(os.path.dirname(__file__), 'mt5_terminal_manager.py'), broker
+            ])
+        except Exception as e:
+            logger.error(f"[MT5 Terminal Manager] Could not launch/check terminal for {broker}: {e}")
         try:
             import MetaTrader5 as mt5
             self.mt5 = mt5
-            self.mt5_path = MT5_CONFIG['path']
+            # Path is now managed by the terminal manager, but keep for SDK
+            self.mt5_path = None
         except ImportError:
             logger.error("MetaTrader5 not installed")
             self.mt5 = None
@@ -4484,29 +4497,38 @@ def create_bot():
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
-            if not cursor.fetchone():
+            cursor.execute('SELECT user_id, role FROM users WHERE user_id = ?', (user_id,))
+            user_row = cursor.fetchone()
+            if not user_row:
                 return jsonify({'success': False, 'error': 'User not found'}), 404
-            
+            user_role = user_row['role'] if 'role' in user_row.keys() else None
+
+            # Enforce 5-bot limit for non-admin users
+            if user_role != 'admin':
+                cursor.execute('SELECT COUNT(*) as bot_count FROM user_bots WHERE user_id = ?', (user_id,))
+                bot_count = cursor.fetchone()['bot_count']
+                if bot_count >= 5:
+                    return jsonify({'success': False, 'error': 'Bot limit reached: Each user can only have 5 robots. Please delete an existing bot to create a new one.'}), 403
+
             # Verify credential exists AND belongs to this user
             cursor.execute('''
                 SELECT credential_id, broker_name, account_number, is_live 
                 FROM broker_credentials 
                 WHERE credential_id = ? AND user_id = ?
             ''', (credential_id, user_id))
-            
+
             credential_row = cursor.fetchone()
             if not credential_row:
                 return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
-            
+
             credential_data = dict(credential_row)
             broker_name = credential_data['broker_name']
             account_number = credential_data['account_number']
             is_live = credential_data['is_live']
             mode = 'live' if is_live else 'demo'
-            
+
             print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
-            
+
             # Bot configuration
             # Generate ABSOLUTELY unique bot_id (timestamp + uuid to ensure no collisions)
             import time
@@ -4517,9 +4539,9 @@ def create_bot():
             risk_per_trade = float(data.get('riskPerTrade', 100))
             max_daily_loss = float(data.get('maxDailyLoss', 500))
             trading_enabled = data.get('enabled', True)
-            
+
             account_id = f"{broker_name}_{account_number}"
-            
+
             # Store bot in database (check if already exists first)
             created_at = datetime.now().isoformat()
             try:
@@ -4528,12 +4550,12 @@ def create_bot():
                     # Bot already exists, regenerate ID
                     logger.warning(f"Bot ID {bot_id} already exists, regenerating...")
                     bot_id = f"bot_{int(time.time() * 1000) + 1}_{uuid.uuid4().hex[:8]}"
-                
+
                 cursor.execute('''
                     INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, ','.join(symbols), created_at, created_at))
-                
+
                 # Link bot to credential for commission tracking
                 cursor.execute('''
                     INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
