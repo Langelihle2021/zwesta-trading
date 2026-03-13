@@ -38,6 +38,37 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+    void _fetchActiveBots() {
+      setState(() {
+        _botsLoading = true;
+        _botsError = null;
+      });
+      // Simulate API call or use TradingService
+      Future.delayed(const Duration(seconds: 1), () {
+        setState(() {
+          // Example: Replace with actual API call
+          _activeBotsList = [
+            {
+              'botId': 'bot_trend_1',
+              'enabled': true,
+              'runtimeFormatted': '2h 15m',
+              'dailyProfit': 120.50,
+              'totalTrades': 34,
+            },
+          ];
+          _botsLoading = false;
+        });
+      });
+    }
+
+    void _startAutoRefresh() {
+      _refreshTimer?.cancel();
+      _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
+        if (mounted) {
+          _fetchActiveBots();
+        }
+      });
+    }
   int _selectedIndex = 0;
   List<dynamic> _activeBotsList = [];
   bool _botsLoading = true;
@@ -55,7 +86,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Consumer<TradingService>(
       builder: (context, tradingService, _) {
         return Scaffold(
-          drawer: _buildDrawerMenu(context),
+          drawer: _buildDrawerMenu(),
           body: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
