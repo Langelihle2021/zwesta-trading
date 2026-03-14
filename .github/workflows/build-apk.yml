@@ -1,3 +1,17 @@
+      - name: Remove preinstalled Flutter/Dart (if any)
+        run: |
+          sudo rm -rf /opt/hostedtoolcache/flutter
+          sudo rm -rf /usr/local/bin/flutter
+          sudo rm -rf /usr/local/bin/dart
+          which flutter || true
+          which dart || true
+
+      - name: List all flutter/dart binaries and print PATH
+        run: |
+          find / -type f -name flutter 2>/dev/null || true
+          find / -type f -name dart 2>/dev/null || true
+          echo $PATH
+
 name: Build APK Release
 
 on:
