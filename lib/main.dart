@@ -17,10 +17,9 @@ import 'l10n/app_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Set environment based on build mode
-  // Release/Production builds use VPS, Debug uses localhost
   try {
+    // Set environment based on build mode
+    // Release/Production builds use VPS, Debug uses localhost
     if (kReleaseMode) {
       // Production: Use VPS IP
       EnvironmentConfig.setEnvironment(Environment.production);
@@ -33,20 +32,11 @@ void main() async {
             : Environment.development,
       );
     }
-  } catch (_) {
-    // Fallback: Production mode
-    EnvironmentConfig.setEnvironment(Environment.production);
+    runApp(const MyApp());
+  } catch (e, st) {
+    print('Main init error: $e\n$st');
+    runApp(MaterialApp(home: Scaffold(body: Center(child: Text('App failed to start: $e')))));
   }
-
-  // Notifications disabled temporarily for stability
-  // try {
-  //   await NotificationService.initialize(null);
-  // } catch (e) {
-  //   debugPrint('Notification initialization warning: $e');
-  // }
-
-  // Debug build - ready for testing
-  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -121,14 +111,19 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AuthService>(
-      builder: (context, authService, _) {
-        if (authService.isAuthenticated) {
-          return const DashboardScreen();
-        }
-        return const LoginScreen();
-      },
-    );
+    try {
+      return Consumer<AuthService>(
+        builder: (context, authService, _) {
+          if (authService.isAuthenticated) {
+            return const DashboardScreen();
+          }
+          return const LoginScreen();
+        },
+      );
+    } catch (e, st) {
+      print('AuthWrapper error: $e\n$st');
+      return Scaffold(body: Center(child: Text('Startup error: $e')));
+    }
   }
 }
 
