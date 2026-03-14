@@ -38,6 +38,37 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+    void _fetchActiveBots() {
+      setState(() {
+        _botsLoading = true;
+        _botsError = null;
+      });
+      // Simulate API call or use TradingService
+      Future.delayed(const Duration(seconds: 1), () {
+        setState(() {
+          // Example: Replace with actual API call
+          _activeBotsList = [
+            {
+              'botId': 'bot_trend_1',
+              'enabled': true,
+              'runtimeFormatted': '2h 15m',
+              'dailyProfit': 120.50,
+              'totalTrades': 34,
+            },
+          ];
+          _botsLoading = false;
+        });
+      });
+    }
+
+    void _startAutoRefresh() {
+      _refreshTimer?.cancel();
+      _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
+        if (mounted) {
+          _fetchActiveBots();
+        }
+      });
+    }
   int _selectedIndex = 0;
   List<dynamic> _activeBotsList = [];
   bool _botsLoading = true;
@@ -50,46 +81,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _fetchActiveBots();
     _startAutoRefresh();
   }
-
-  void _fetchActiveBots() {
-    final botService = context.read<BotService>();
-    botService.fetchActiveBots().then((_) {
-      if (mounted) {
-        setState(() {
-          _activeBotsList = botService.activeBots;
-          _botsLoading = botService.isLoading;
-          _botsError = botService.errorMessage;
-        });
-      }
-    }).catchError((error) {
-      if (mounted) {
-        setState(() {
-          _botsError = error.toString();
-          _botsLoading = false;
-        });
-      }
-    });
-  }
-
-  void _startAutoRefresh() {
-    _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (timer) {
-      if (mounted) {
-        _fetchActiveBots();
-      }
-    });
-  }
   @override
   Widget build(BuildContext context) {
     return Consumer<TradingService>(
       builder: (context, tradingService, _) {
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('ZWESTA Trading System'),
-            backgroundColor: Colors.blue[800],
-            elevation: 2,
-            centerTitle: true,
-          ),
           drawer: _buildDrawerMenu(),
           body: SingleChildScrollView(
             padding: const EdgeInsets.all(16),

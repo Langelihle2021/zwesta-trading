@@ -3228,6 +3228,85 @@ def get_trades_public():
             'trades': trades_list,
             'timestamp': datetime.now().isoformat(),
         })
+
+
+@app.route('/api/trades/unified', methods=['GET'])
+@require_session
+def get_unified_trades():
+    """Get unified trades from all user's brokers (IG + XM + MT5)"""
+    try:
+        user_id = request.user_id
+        trades_list = []
+        broker_summary = {}
+
+        # Fetch trades from all connected brokers
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all broker credentials for this user
+        cursor.execute('''
+            SELECT broker_name, account_number, credential_id 
+            FROM broker_credentials
+            WHERE user_id = ? AND is_active = 1
+        ''', (user_id,))
+        
+        credentials = cursor.fetchall()
+        
+        for cred in credentials:
+            broker_name = cred['broker_name']
+            account_number = cred['account_number']
+            
+            try:
+                # Get connection for this broker
+                connection = broker_manager.connections.get(f"{broker_name}_{account_number}")
+                
+                if connection and connection.connected:
+                    # Fetch trades from broker
+                    broker_trades = connection.get_trades()
+                    
+                    # Add broker info to each trade
+                    for trade in broker_trades:
+                        trade['broker'] = broker_name
+                        trade['account'] = account_number
+                        trades_list.append(trade)
+                    
+                    # Track broker summary
+                    broker_summary[broker_name] = {
+                        'account': account_number,
+                        'trades_count': len(broker_trades),
+                        'total_profit': sum(t.get('profit', 0) for t in broker_trades)
+                    }
+                    
+                    logger.info(f"✅ Fetched {len(broker_trades)} trades from {broker_name} account {account_number}")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not fetch trades from {broker_name}: {e}")
+        
+        conn.close()
+        
+        # Also get demo trades from active bots for this user
+        for bot_id, bot in active_bots.items():
+            if bot.get('user_id') == user_id and 'tradeHistory' in bot:
+                for trade in bot['tradeHistory'][-50:]:  # Last 50 trades
+                    trade['broker'] = 'DEMO'
+                    trade['bot_id'] = bot_id
+                    trades_list.append(trade)
+        
+        # Sort by time (most recent first)
+        trades_list = sorted(trades_list, key=lambda x: x.get('time', ''), reverse=True)[:500]
+        
+        logger.info(f"✅ Returning {len(trades_list)} unified trades for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'trades': trades_list,
+            'total_trades': len(trades_list),
+            'broker_summary': broker_summary,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fetching unified trades: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
     except Exception as e:
         logger.error(f"Error in get_trades_public: {e}")
         return jsonify({
