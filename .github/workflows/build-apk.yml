@@ -1,3 +1,11 @@
+            - name: Force PATH update and print which flutter/dart
+              run: |
+                export PATH="$HOME/.pub-cache/bin:$PATH"
+                echo $PATH
+                which flutter
+                which dart
+                flutter --version
+                dart --version
       - name: Remove preinstalled Flutter/Dart (if any)
         run: |
           sudo rm -rf /opt/hostedtoolcache/flutter
