@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
+// import 'package:fl_chart/fl_chart.dart'; // Disabled for compatibility
 import '../l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -472,48 +472,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             else ...[
               SizedBox(
                 height: 180,
-                child: BarChart(
-                  BarChartData(
-                    alignment: BarChartAlignment.spaceAround,
-                    maxY: barSpots.first.value.abs() * 1.2 + 1,
-                    barTouchData: BarTouchData(enabled: true),
-                    titlesData: FlTitlesData(
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(showTitles: true, reservedSize: 32),
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          getTitlesWidget: (double value, TitleMeta meta) {
-                            final idx = value.toInt();
-                            if (idx < 0 || idx >= barSpots.length) return const SizedBox();
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8.0),
-                              child: Text(
-                                barSpots[idx].key,
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    barGroups: List.generate(barSpots.length, (i) {
-                      return BarChartGroupData(
-                        x: i,
-                        barRods: [
-                          BarChartRodData(
-                            toY: barSpots[i].value,
-                            color: barColors[i % barColors.length],
-                            width: 22,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ],
-                      );
-                    }),
+                child: Container(
+                  alignment: Alignment.center,
+                  color: Colors.grey[100],
+                  child: const Text(
+                    'Price distribution chart disabled for compatibility',
+                    style: TextStyle(color: Colors.grey),
                   ),
                 ),
               ),
@@ -668,29 +632,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SizedBox(
               height: 200,
               child: activeBots > 0
-                  ? PieChart(
-                      PieChartData(
-                        sections: _realBotsList
-                            .where((bot) => bot['enabled'] == true)
-                            .toList()
-                            .take(5)
-                            .map((bot) {
-                          final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 1;
-                          final colors = [
-                            Colors.blue,
-                            Colors.green,
-                            Colors.orange,
-                            Colors.red,
-                            Colors.purple
-                          ];
-                          final idx = _realBotsList.indexOf(bot);
-                          return PieChartSectionData(
-                            color: colors[idx % colors.length],
-                            value: profit.abs() > 0 ? profit.abs() : 1,
-                            title: '${bot['botId']?.toString().split('_').first ?? 'Bot'}',
-                            radius: 50,
-                          );
-                        }).toList(),
+                  ? Container(
+                      alignment: Alignment.center,
+                      color: Colors.grey[100],
+                      child: const Text(
+                        'Portfolio overview chart disabled for compatibility',
+                        style: TextStyle(color: Colors.grey),
                       ),
                     )
                   : Center(

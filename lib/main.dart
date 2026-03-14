@@ -38,15 +38,12 @@ void main() async {
     EnvironmentConfig.setEnvironment(Environment.production);
   }
 
-  // Initialize notifications - use root navigatorKey or main context
-  try {
-    await NotificationService.initialize(
-      WidgetsBinding.instance.renderViewElement ?? 
-      (await WidgetsBinding.instance as dynamic)?.window?.views?.first?.context
-    );
-  } catch (e) {
-    debugPrint('Notification initialization warning: $e');
-  }
+  // Notifications disabled temporarily for stability
+  // try {
+  //   await NotificationService.initialize(null);
+  // } catch (e) {
+  //   debugPrint('Notification initialization warning: $e');
+  // }
 
   // Debug build - ready for testing
   runApp(const MyApp());

@@ -43,7 +43,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: build/app/outputs/flutter-app-release.apk
+          files: build/app/outputs/flutter-apk/app-release.apk
           tag_name: apk-${{ github.run_number }}
           body: |
             ## Zwesta Trading System - Production APK

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
+// import 'package:fl_chart/fl_chart.dart'; // Disabled for compatibility
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -53,43 +53,14 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     super.dispose();
   }
 
-  List<FlSpot> _getProfitChartData() {
-    final profitHistory = widget.bot['profitHistory'] as List?;
-    if (profitHistory == null || profitHistory.isEmpty) {
-      return [];
-    }
-
-    List<FlSpot> spots = [];
-    for (int i = 0; i < profitHistory.length; i++) {
-      final point = profitHistory[i];
-      spots.add(FlSpot(i.toDouble(), (point['profit'] as num).toDouble()));
-    }
-    return spots;
+  List<dynamic> _getProfitChartData() {
+    // Chart disabled for fl_chart compatibility
+    return [];
   }
 
-  List<BarChartGroupData> _getTradesChartData() {
-    final profitHistory = widget.bot['profitHistory'] as List?;
-    if (profitHistory == null || profitHistory.isEmpty) {
-      return [];
-    }
-
-    List<BarChartGroupData> groups = [];
-    for (int i = 0; i < profitHistory.length; i++) {
-      final point = profitHistory[i];
-      groups.add(
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: (point['trades'] as num).toDouble(),
-              color: Colors.blue,
-              width: 8,
-            ),
-          ],
-        ),
-      );
-    }
-    return groups;
+  List<dynamic> _getTradesChartData() {
+    // Chart disabled for fl_chart compatibility
+    return [];
   }
 
   @override
@@ -432,141 +403,27 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Widget _buildProfitChart() {
-    final data = _getProfitChartData();
-    if (data.isEmpty) {
-      return Container(
-        height: 300,
-        decoration: BoxDecoration(
-          color: Colors.grey[900],
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Center(
-          child: Text('No data yet', style: TextStyle(color: Colors.white70)),
-        ),
-      );
-    }
-
-    final maxProfit = data.fold<double>(0, (prev, spot) => spot.y > prev ? spot.y : prev);
-    final minProfit = data.fold<double>(0, (prev, spot) => spot.y < prev ? spot.y : prev);
-
     return Container(
-      padding: const EdgeInsets.all(16),
+      height: 300,
       decoration: BoxDecoration(
         color: Colors.grey[900],
         borderRadius: BorderRadius.circular(8),
       ),
-      height: 300,
-      child: LineChart(
-        LineChartData(
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (value) => FlLine(
-              color: Colors.white10,
-              strokeWidth: 1,
-            ),
-          ),
-          titlesData: FlTitlesData(
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: false,
-              ),
-            ),
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) => Text(
-                  '\$${value.toStringAsFixed(0)}',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          borderData: FlBorderData(show: false),
-          lineBarsData: [
-            LineChartBarData(
-              spots: data,
-              isCurved: true,
-              gradient: LinearGradient(
-                colors: [Colors.green.withOpacity(0.8), Colors.green.withOpacity(0.2)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-              barWidth: 3,
-              isStrokeCapRound: true,
-              dotData: FlDotData(
-                show: false,
-              ),
-            ),
-          ],
-          minY: minProfit - 100,
-          maxY: maxProfit + 100,
-        ),
+      child: const Center(
+        child: Text('Profit chart disabled for compatibility', style: TextStyle(color: Colors.white70)),
       ),
     );
   }
 
   Widget _buildTradesChart() {
-    final data = _getTradesChartData();
-    if (data.isEmpty) {
-      return Container(
-        height: 300,
-        decoration: BoxDecoration(
-          color: Colors.grey[900],
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Center(
-          child: Text('No data yet', style: TextStyle(color: Colors.white70)),
-        ),
-      );
-    }
-
     return Container(
-      padding: const EdgeInsets.all(16),
+      height: 300,
       decoration: BoxDecoration(
         color: Colors.grey[900],
         borderRadius: BorderRadius.circular(8),
       ),
-      height: 300,
-      child: BarChart(
-        BarChartData(
-          alignment: BarChartAlignment.spaceAround,
-          maxY: data.fold<double>(
-            0,
-            (prev, group) => group.barRods[0].toY > prev ? group.barRods[0].toY : prev,
-          ),
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (value) => FlLine(
-              color: Colors.white10,
-              strokeWidth: 1,
-            ),
-          ),
-          titlesData: FlTitlesData(
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: false,
-              ),
-            ),
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) => Text(
-                  '${value.toInt()}',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          barGroups: data,
-        ),
+      child: const Center(
+        child: Text('Trades chart disabled for compatibility', style: TextStyle(color: Colors.white70)),
       ),
     );
   }
@@ -576,19 +433,6 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     if (dailyProfits == null || dailyProfits.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    final entries = dailyProfits.entries.toList();
-    final pieData = entries
-        .asMap()
-        .entries
-        .map((e) => PieChartSectionData(
-          value: (e.value.value as num).toDouble().abs() + 1, // Add 1 to avoid 0
-          color: (e.value.value as num) >= 0
-              ? Colors.green.withOpacity(0.7)
-              : Colors.red.withOpacity(0.7),
-          radius: 50,
-        ))
-        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -602,19 +446,12 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
             borderRadius: BorderRadius.circular(8),
           ),
           height: 250,
-          child: pieData.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No daily data',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                )
-              : PieChart(
-                  PieChartData(
-                    sections: pieData,
-                    centerSpaceRadius: 40,
-                  ),
-                ),
+          child: const Center(
+            child: Text(
+              'Daily profits chart disabled for compatibility',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
         ),
       ],
     );
