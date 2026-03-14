@@ -5395,18 +5395,16 @@ def create_bot():
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT user_id, role FROM users WHERE user_id = ?', (user_id,))
+            cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
             user_row = cursor.fetchone()
             if not user_row:
                 return jsonify({'success': False, 'error': 'User not found'}), 404
-            user_role = user_row['role'] if 'role' in user_row.keys() else None
 
-            # Enforce 5-bot limit for non-admin users
-            if user_role != 'admin':
-                cursor.execute('SELECT COUNT(*) as bot_count FROM user_bots WHERE user_id = ?', (user_id,))
-                bot_count = cursor.fetchone()['bot_count']
-                if bot_count >= 5:
-                    return jsonify({'success': False, 'error': 'Bot limit reached: Each user can only have 5 robots. Please delete an existing bot to create a new one.'}), 403
+            # Enforce 5-bot limit for all users
+            cursor.execute('SELECT COUNT(*) as bot_count FROM user_bots WHERE user_id = ?', (user_id,))
+            bot_count = cursor.fetchone()['bot_count']
+            if bot_count >= 5:
+                return jsonify({'success': False, 'error': 'Bot limit reached: Each user can only have 5 robots. Please delete an existing bot to create a new one.'}), 403
 
             # Verify credential exists AND belongs to this user
             cursor.execute('''
@@ -8081,15 +8079,15 @@ def manual_backup():
     try:
         user_id = request.user_id
         
-        # Verify user is admin
+        # Verify user exists
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
         user = cursor.fetchone()
         conn.close()
         
-        if not user or user.get('role') != 'admin':
-            return jsonify({'success': False, 'error': 'Admin access required'}), 403
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
         
         # Create backup
         backup_path = backup_manager.create_backup()
@@ -8116,15 +8114,15 @@ def list_backups():
     try:
         user_id = request.user_id
         
-        # Admin only
+        # Verify user exists
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
         user = cursor.fetchone()
         conn.close()
         
-        if not user or user.get('role') != 'admin':
-            return jsonify({'success': False, 'error': 'Admin access required'}), 403
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 403
         
         backups = backup_manager.list_backups()
         
@@ -8153,15 +8151,15 @@ def restore_from_backup():
     try:
         user_id = request.user_id
         
-        # Admin only
+        # Verify user exists
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
         user = cursor.fetchone()
         conn.close()
         
-        if not user or user.get('role') != 'admin':
-            return jsonify({'success': False, 'error': 'Admin access required'}), 403
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 403
         
         data = request.json or {}
         backup_filename = data.get('backup_filename')

@@ -215,10 +215,173 @@ class _DashboardScreenState extends State<DashboardScreen> {
             },
           ),
           const SizedBox(height: 24),
+          // Analytics Section
+          _buildAnalyticsSection(),
+          const SizedBox(height: 24),
+          // Active Trading Bots Section
           _buildActiveBotsSection(),
           const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+
+  /// Build analytics section with stats and visualization
+  Widget _buildAnalyticsSection() {
+    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true || bot['status'] == 'Active').length;
+    final totalProfit = _realBotsList.fold<double>(
+      0,
+      (sum, bot) => sum + (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0),
+    );
+    final avgProfit = activeBots > 0 ? totalProfit / activeBots : 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'System Income & Performance',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 12),
+        // Stats row
+        Row(
+          children: [
+            Expanded(
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Active Bots',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '$activeBots',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Total Profit',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '\$${totalProfit.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: totalProfit >= 0 ? Colors.green : Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Avg Profit/Bot',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '\$${avgProfit.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: avgProfit >= 0 ? Colors.green : Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // Profit Distribution Pie Chart (Simple Box)
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Profit Distribution',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: SizedBox(
+                    height: 150,
+                    child: activeBots > 0
+                        ? PieChart(
+                            PieChartData(
+                              sections: _realBotsList
+                                  .where((bot) => bot['enabled'] == true || bot['status'] == 'Active')
+                                  .toList()
+                                  .asMap()
+                                  .entries
+                                  .map((entry) {
+                                final idx = entry.key;
+                                final bot = entry.value;
+                                final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
+                                final colors = [
+                                  Colors.blue,
+                                  Colors.green,
+                                  Colors.orange,
+                                  Colors.red,
+                                  Colors.purple
+                                ];
+                                return PieChartSectionData(
+                                  color: colors[idx % colors.length],
+                                  value: profit > 0 ? profit : 1,
+                                  title: '${bot['botId']?.toString().split('_').first ?? 'Bot'}',
+                                  radius: 50,
+                                );
+                              }).toList(),
+                            ),
+                          )
+                        : Center(
+                            child: Text(
+                              'No active bots',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -243,6 +406,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildActiveBotsSection() {
+    // Filter to show ONLY active bots
+    final activeBotsList = _realBotsList
+        .where((bot) => 
+          (bot['enabled'] == true || bot['enabled'] == 1) &&
+          (bot['status']?.toString().toLowerCase() == 'active' || bot['status'] == true)
+        )
+        .toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -250,7 +421,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'Active Trading Bots (Real)',
+              'Active Trading Bots (${activeBotsList.length} running)',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             if (!_botsLoading)
@@ -274,7 +445,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: const [
                     CircularProgressIndicator(),
                     SizedBox(height: 12),
-                    Text('Loading real trading bots...'),
+                    Text('Loading active trading bots...'),
                   ],
                 ),
               ),
@@ -301,7 +472,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           )
-        else if (_realBotsList.isEmpty)
+        else if (activeBotsList.isEmpty)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -311,10 +482,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Icon(Icons.smart_toy, size: 40, color: Colors.grey),
                     const SizedBox(height: 8),
                     Text(
-                      'No Real Trading Bots Active',
+                      'No Active Trading Bots',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Only active bots are displayed here',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 12),
                     ElevatedButton(
                       onPressed: () {
                         Navigator.push(
@@ -335,9 +511,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: _realBotsList.length,
+            itemCount: activeBotsList.length,
             itemBuilder: (context, index) {
-              final bot = _realBotsList[index];
+              final bot = activeBotsList[index];
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: Padding(
@@ -357,8 +533,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                           ),
-                          BotRunningBadge(
-                            isRunning: bot['enabled'] == true || bot['enabled'] == 1,
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              '🟢 ACTIVE',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ],
                       ),

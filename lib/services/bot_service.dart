@@ -23,7 +23,7 @@ class BotService extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   List<Map<String, dynamic>> get activeBots => _activeBots;
 
-  // Updated list with all 24 commodities
+  // Updated list with all trading symbols including crypto and tech
   final List<String> availableTradingSymbols = [
     // Forex
     'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
@@ -31,14 +31,17 @@ class BotService extends ChangeNotifier {
     // Precious Metals
     'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD',
     
+    // Cryptocurrencies
+    'BTCUSD', 'ETHUSD',
+    
     // Energy
     'WTIUSD', 'BRENTUSD', 'NATGASUS',
     
     // Agriculture  
     'CORNUSD', 'WHEATUSD', 'SOYBEANSUSD', 'COFFEEUSD', 'COCOAUSD', 'SUGARUSD',
     
-    // Indices
-    'SPX500', 'DAX40', 'FTSE100', 'NIKKEI225'
+    // Indices & Stocks
+    'SPX500', 'DAX40', 'FTSE100', 'NIKKEI225', 'TSLAUSD'
   ];
 
   final List<String> availableStrategies = [
