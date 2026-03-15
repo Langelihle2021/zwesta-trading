@@ -1081,16 +1081,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ── QUICK ACTIONS ──
   Widget _buildQuickActionsGrid() {
     final actions = [
+      _QuickAction('Create Bot', Icons.add_circle_outline, const Color(0xFF69F0AE), () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const BotConfigurationScreen()));
+      }),
+      _QuickAction('Bot Analytics', Icons.monitoring, const Color(0xFFFFD600), () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const BotAnalyticsScreen()));
+      }),
       _QuickAction('Trade Analysis', Icons.analytics_outlined, const Color(0xFF00E5FF), () {
         Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeAnalysisScreen()));
       }),
       _QuickAction('Broker Setup', Icons.account_tree, const Color(0xFF7C4DFF), () {
         Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen()));
       }),
-      _QuickAction('Bot Manager', Icons.smart_toy, const Color(0xFF69F0AE), () {
+      _QuickAction('Bot Manager', Icons.smart_toy, const Color(0xFF7C4DFF), () {
         setState(() => _selectedIndex = 3);
       }),
-      _QuickAction('Financials', Icons.bar_chart, const Color(0xFFFFD600), () {
+      _QuickAction('Financials', Icons.bar_chart, const Color(0xFFFF8A80), () {
         final tradingService = context.read<TradingService>();
         if (tradingService.primaryAccount != null) {
           Navigator.push(context, MaterialPageRoute(
@@ -1109,32 +1115,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: GoogleFonts.poppins(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600)),
         ),
         GridView.count(
-          crossAxisCount: 2,
+          crossAxisCount: 3,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: 2.2,
+          childAspectRatio: 1.1,
           children: actions.map((a) {
             return GestureDetector(
               onTap: a.onTap,
               child: _glassCard(
-                child: Row(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: a.color.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(a.icon, color: a.color, size: 22),
+                      child: Icon(a.icon, color: a.color, size: 24),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        a.label,
-                        style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                      ),
+                    const SizedBox(height: 8),
+                    Text(
+                      a.label,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
@@ -1313,6 +1319,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               Navigator.pop(context);
               setState(() => _selectedIndex = 3);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.add_circle_outline, color: Color(0xFF69F0AE)),
+            title: const Text('Create New Bot', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Strategies, symbols & risk setup', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const BotConfigurationScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.monitoring, color: Color(0xFFFFD600)),
+            title: const Text('Bot Analytics', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Monitor performance & trades', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const BotAnalyticsScreen(),
+                ),
+              );
             },
           ),
           const Divider(color: Colors.white12),
