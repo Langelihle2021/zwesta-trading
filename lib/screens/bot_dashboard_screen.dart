@@ -15,6 +15,8 @@ class BotDashboardScreen extends StatefulWidget {
 
 class _BotDashboardScreenState extends State<BotDashboardScreen> {
   Timer? _refreshTimer;
+  String _searchQuery = '';
+  String _filterStatus = 'all'; // 'all', 'active', 'inactive'
 
   @override
   void initState() {
@@ -38,13 +40,38 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     return Consumer<BotService>(
       builder: (context, botService, _) {
         // Filter out demo bots
-        final bots = botService.activeBots.where((bot) {
+        final allBots = botService.activeBots.where((bot) {
           final id = (bot['botId'] ?? '').toString().toLowerCase();
           return !id.startsWith('demobot_') && !id.startsWith('demo_');
         }).toList();
 
-        final activeBots = bots.where((b) => b['enabled'] == true).length;
-        final totalProfit = bots.fold<double>(
+        // Apply search + status filter
+        final bots = allBots.where((bot) {
+          final botId = (bot['botId'] ?? '').toString().toLowerCase();
+          final symbol = (bot['symbol'] ?? bot['symbols'] ?? '').toString().toLowerCase();
+          final strategy = (bot['strategy'] ?? '').toString().toLowerCase();
+          final matchesSearch = _searchQuery.isEmpty ||
+              botId.contains(_searchQuery.toLowerCase()) ||
+              symbol.contains(_searchQuery.toLowerCase()) ||
+              strategy.contains(_searchQuery.toLowerCase());
+          final isEnabled = bot['enabled'] == true;
+          final matchesFilter = _filterStatus == 'all' ||
+              (_filterStatus == 'active' && isEnabled) ||
+              (_filterStatus == 'inactive' && !isEnabled);
+          return matchesSearch && matchesFilter;
+        }).toList();
+
+        // Top 5 newest bots (by creation time or just last 5)
+        final newestBots = List<Map<String, dynamic>>.from(allBots);
+        newestBots.sort((a, b) {
+          final aTime = a['createdAt']?.toString() ?? a['created_at']?.toString() ?? '';
+          final bTime = b['createdAt']?.toString() ?? b['created_at']?.toString() ?? '';
+          return bTime.compareTo(aTime);
+        });
+        final top5 = newestBots.take(5).toList();
+
+        final activeBots = allBots.where((b) => b['enabled'] == true).length;
+        final totalProfit = allBots.fold<double>(
           0, (sum, b) => sum + (double.tryParse(b['profit']?.toString() ?? '0') ?? 0),
         );
 
@@ -70,7 +97,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         children: [
                           _summaryChip(Icons.smart_toy, '$activeBots Active', const Color(0xFF69F0AE)),
                           const SizedBox(width: 10),
-                          _summaryChip(Icons.list_alt, '${bots.length} Total', const Color(0xFF00E5FF)),
+                          _summaryChip(Icons.list_alt, '${allBots.length} Total', const Color(0xFF00E5FF)),
                           const SizedBox(width: 10),
                           _summaryChip(
                             totalProfit >= 0 ? Icons.trending_up : Icons.trending_down,
@@ -79,7 +106,55 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
+
+                      // Search bar
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.08)),
+                        ),
+                        child: TextField(
+                          onChanged: (v) => setState(() => _searchQuery = v),
+                          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Search bots by name, symbol, strategy...',
+                            hintStyle: GoogleFonts.poppins(color: Colors.white24, fontSize: 13),
+                            prefixIcon: const Icon(Icons.search, color: Color(0xFF00E5FF), size: 20),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Filter chips
+                      Row(
+                        children: [
+                          _filterChip('All', 'all'),
+                          const SizedBox(width: 8),
+                          _filterChip('Active', 'active'),
+                          const SizedBox(width: 8),
+                          _filterChip('Inactive', 'inactive'),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Top 5 Newest Bots (horizontal scroll)
+                      if (top5.isNotEmpty) ...[
+                        Text('Newest Bots', style: GoogleFonts.poppins(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 100,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: top5.length,
+                            itemBuilder: (_, i) => _buildMiniBot(top5[i]),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
 
                       // Create bot button
                       GestureDetector(
@@ -290,6 +365,85 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
           const SizedBox(height: 2),
           Text(label, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10)),
         ],
+      ),
+    );
+  }
+
+  Widget _filterChip(String label, String value) {
+    final isSelected = _filterStatus == value;
+    return GestureDetector(
+      onTap: () => setState(() => _filterStatus = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF00E5FF).withOpacity(0.2) : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: isSelected ? const Color(0xFF00E5FF) : Colors.white12),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            color: isSelected ? const Color(0xFF00E5FF) : Colors.white38,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMiniBot(Map<String, dynamic> bot) {
+    final botId = bot['botId'] ?? 'Unknown';
+    final isEnabled = bot['enabled'] == true;
+    final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
+
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotAnalyticsScreen(bot: bot))),
+      child: Container(
+        width: 140,
+        margin: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isEnabled
+                ? [const Color(0xFF69F0AE).withOpacity(0.1), const Color(0xFF00E5FF).withOpacity(0.1)]
+                : [Colors.grey.withOpacity(0.1), Colors.grey.withOpacity(0.05)],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isEnabled ? const Color(0xFF69F0AE).withOpacity(0.3) : Colors.white12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.smart_toy, color: isEnabled ? const Color(0xFF69F0AE) : Colors.grey, size: 16),
+                const SizedBox(width: 6),
+                Expanded(child: Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+            Text(
+              '\$${profit.toStringAsFixed(2)}',
+              style: GoogleFonts.poppins(
+                color: profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isEnabled ? const Color(0xFF69F0AE).withOpacity(0.15) : Colors.grey.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                isEnabled ? 'Active' : 'Inactive',
+                style: GoogleFonts.poppins(color: isEnabled ? const Color(0xFF69F0AE) : Colors.grey, fontSize: 9, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

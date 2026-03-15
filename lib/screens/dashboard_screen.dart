@@ -35,6 +35,8 @@ import 'referral_dashboard_screen.dart';
 import 'admin_dashboard_screen.dart';
 import 'multi_broker_management_screen.dart';
 import 'enhanced_dashboard_screen.dart';
+import 'commission_dashboard_screen.dart';
+import 'broker_analytics_dashboard.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -392,6 +394,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   if (!isConnected && !isConnecting)
                     _buildConnectButton(context, igService),
                   if (isConnected)
+                    GestureDetector(
+                      onTap: () {
+                        igService.disconnect();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text('Disconnect', style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  if (isConnected)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
@@ -440,19 +456,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
               if (hasError) ...[
                 const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () => igService.autoConnect(),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF00E5FF).withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        igService.disconnect();
+                        _showIGQuickConnect(context, igService);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF00B0FF)]),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Edit Credentials',
+                          style: GoogleFonts.poppins(color: Colors.black, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      'Tap to retry',
-                      style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 12),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: () => igService.autoConnect(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00E5FF).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Retry',
+                          style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 12),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ],
@@ -490,6 +529,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final accountIdCtrl = TextEditingController();
     bool isLive = false;
     bool saveForAutoConnect = true;
+
+    // Pre-fill from saved credentials
+    SharedPreferences.getInstance().then((prefs) {
+      apiKeyCtrl.text = prefs.getString('ig_api_key') ?? '';
+      usernameCtrl.text = prefs.getString('ig_username') ?? '';
+      passwordCtrl.text = prefs.getString('ig_password') ?? '';
+      accountIdCtrl.text = prefs.getString('ig_account_id') ?? '';
+    });
 
     showModalBottomSheet(
       context: context,
@@ -1424,6 +1471,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 );
               }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.monetization_on, color: Color(0xFF69F0AE)),
+            title: const Text('Commissions', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Earnings, withdrawals & referral income', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const CommissionDashboardScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.speed, color: Color(0xFFFFD600)),
+            title: const Text('Broker Analytics', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Connection health & performance', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerAnalyticsDashboard()));
             },
           ),
           const Divider(color: Colors.white12),

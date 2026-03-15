@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/trading_service.dart';
 import '../models/trade.dart';
 import '../utils/constants.dart';
 import '../utils/environment_config.dart';
 import '../widgets/custom_widgets.dart';
+import 'broker_integration_screen.dart';
 
 class TradesScreen extends StatefulWidget {
   const TradesScreen({Key? key}) : super(key: key);
@@ -45,6 +48,44 @@ class _TradesScreenState extends State<TradesScreen> {
       builder: (context, tradingService, _) {
         return Column(
           children: [
+            // Connected broker banner
+            FutureBuilder<SharedPreferences>(
+              future: SharedPreferences.getInstance(),
+              builder: (ctx, snap) {
+                if (!snap.hasData) return const SizedBox.shrink();
+                final prefs = snap.data!;
+                final broker = prefs.getString('broker');
+                final connected = prefs.getBool('broker_connected') == true;
+                return GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: connected ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: connected ? Colors.green.withOpacity(0.3) : Colors.orange.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(connected ? Icons.link : Icons.link_off, color: connected ? Colors.green : Colors.orange, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            connected ? 'Connected to ${broker ?? "Broker"}' : 'No broker connected',
+                            style: GoogleFonts.poppins(color: connected ? Colors.green : Colors.orange, fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        Text('Manage', style: GoogleFonts.poppins(color: AppColors.primaryColor, fontSize: 11, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.chevron_right, color: AppColors.primaryColor, size: 16),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
             // Tab Selector
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),

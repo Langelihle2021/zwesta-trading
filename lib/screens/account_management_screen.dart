@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import '../services/trading_service.dart';
 import '../utils/constants.dart';
-import '../widgets/custom_widgets.dart';
+import 'broker_integration_screen.dart';
+import 'commission_dashboard_screen.dart';
 
 class AccountManagementScreen extends StatefulWidget {
   const AccountManagementScreen({Key? key}) : super(key: key);
@@ -211,10 +213,44 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
   Widget _buildAccountsTab() {
     return Consumer<TradingService>(
       builder: (context, tradingService, _) {
-        return ListView.builder(
+        return ListView(
           padding: const EdgeInsets.all(AppSpacing.md),
-          itemCount: tradingService.accounts.length,
-          itemBuilder: (context, index) {
+          children: [
+            // Broker integration quick link
+            FutureBuilder<SharedPreferences>(
+              future: SharedPreferences.getInstance(),
+              builder: (ctx, snap) {
+                if (!snap.hasData) return const SizedBox.shrink();
+                final prefs = snap.data!;
+                final broker = prefs.getString('broker');
+                final connected = prefs.getBool('broker_connected') == true;
+                final balance = prefs.getDouble('account_balance') ?? 0;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: Icon(connected ? Icons.link : Icons.link_off, color: connected ? Colors.green : Colors.orange),
+                        title: Text(connected ? 'Broker: ${broker ?? "Unknown"}' : 'No Broker Connected'),
+                        subtitle: connected ? Text('Balance: \$${balance.toStringAsFixed(2)}') : const Text('Tap to connect your trading account'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.monetization_on, color: Colors.green),
+                        title: const Text('View Commissions'),
+                        subtitle: const Text('Earnings & withdrawal history'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CommissionDashboardScreen())),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            // Trading accounts list
+            ...List.generate(tradingService.accounts.length, (index) {
             final account = tradingService.accounts[index];
             return Card(
               margin: const EdgeInsets.only(bottom: AppSpacing.md),
@@ -316,7 +352,8 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                 ],
               ),
             );
-          },
+          }),
+          ],
         );
       },
     );

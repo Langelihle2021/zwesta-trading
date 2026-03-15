@@ -10,6 +10,7 @@ import 'services/bot_service.dart';
 import 'services/statement_service.dart';
 import 'services/financial_service.dart';
 import 'services/ig_auto_connect_service.dart';
+import 'services/commission_service.dart';
 import 'providers/currency_provider.dart';
 import 'providers/fallback_status_provider.dart';
 import 'utils/theme.dart';
@@ -101,6 +102,9 @@ void main() async {
           ),
           ChangeNotifierProvider(
             create: (_) => IGAutoConnectService()..autoConnect(),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => CommissionService(),
           ),
         ],
         child: MaterialApp(
