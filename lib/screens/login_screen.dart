@@ -66,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       return Scaffold(
         appBar: CustomAppBar(
-          title: _isLogin ? loc.translate('welcome', params: {'name': ''}) : loc.translate('Create Your Account'),
+          title: _isLogin ? 'Sign In' : 'Create Your Account',
           showBackButton: false,
         ),
         extendBodyBehindAppBar: true,
@@ -85,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Card(
                   elevation: 8,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                  color: Colors.white.withOpacity(0.04),
+                  color: const Color(0xFF232946), // dark blue background for contrast
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(

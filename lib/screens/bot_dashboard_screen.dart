@@ -256,103 +256,126 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   Widget _buildBotCard(Map<String, dynamic> bot) {
     final botId = bot['botId'] ?? 'Unknown';
     final isEnabled = bot['enabled'] == true;
-    final status = bot['status'] ?? (isEnabled ? 'Active' : 'Inactive');
+    final status = (bot['status'] ?? (isEnabled ? 'Active' : 'Inactive')).toString().toUpperCase();
     final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
     final totalTrades = int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0;
     final winRate = double.tryParse(bot['winRate']?.toString() ?? '0') ?? 0;
+    final roi = double.tryParse(bot['roi']?.toString() ?? '0') ?? 0;
+    final avgTrade = double.tryParse(bot['avgProfitPerTrade']?.toString() ?? '0') ?? 0;
+    final maxDrawdown = double.tryParse(bot['maxDrawdown']?.toString() ?? '0') ?? 0;
+    final todaysProfit = double.tryParse(bot['dailyProfit']?.toString() ?? '0') ?? 0;
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
     final symbolStr = symbols is List ? (symbols as List).join(', ') : symbols.toString();
+    final runtime = bot['runtimeFormatted'] ?? '--';
 
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(
-          builder: (_) => BotAnalyticsScreen(bot: bot),
-        ));
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.08)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header row
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isEnabled ? const Color(0xFF69F0AE).withOpacity(0.15) : Colors.grey.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.smart_toy, color: isEnabled ? const Color(0xFF69F0AE) : Colors.grey, size: 22),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(botId, style: GoogleFonts.poppins(color: Colors.black, fontSize: 17, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(strategy, style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12)),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 2),
-                      Text(strategy, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11)),
-                    ],
-                  ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isEnabled ? const Color(0xFF69F0AE) : Colors.grey,
+                  borderRadius: BorderRadius.circular(20),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isEnabled ? const Color(0xFF69F0AE).withOpacity(0.15) : Colors.grey.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    status,
-                    style: GoogleFonts.poppins(
-                      color: isEnabled ? const Color(0xFF69F0AE) : Colors.grey,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
+                child: Text(
+                  status,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            // Symbols
-            Row(
-              children: [
-                const Icon(Icons.currency_exchange, color: Color(0xFF00E5FF), size: 14),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(symbolStr, style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12), overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(symbolStr, style: GoogleFonts.poppins(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Text('Running for ', style: GoogleFonts.poppins(color: Colors.grey.shade700, fontSize: 12)),
+              Text(runtime, style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 13)),
+              const Spacer(),
+              Text("Today's Profit ", style: GoogleFonts.poppins(color: Colors.grey.shade700, fontSize: 12)),
+              Text(' 24${todaysProfit.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: const Color(0xFF388E3C), fontWeight: FontWeight.bold, fontSize: 13)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _botStat('Trades', '$totalTrades', Colors.blue.shade700),
+              _botStat('Win Rate', '${winRate.toStringAsFixed(1)}%', Colors.green.shade700),
+              _botStat('Profit', ' 24${profit.toStringAsFixed(2)}', profit >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _botStat('ROI', '${roi.toStringAsFixed(1)}%', Colors.orange.shade700),
+              _botStat('Avg/Trade', ' 24${avgTrade.toStringAsFixed(0)}', Colors.indigo.shade700),
+              _botStat('Max Drawdown', ' 24${maxDrawdown.toStringAsFixed(0)}', Colors.red.shade700),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.bar_chart),
+                  label: const Text('View Analytics'),
+                  onPressed: () {
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => BotAnalyticsScreen(bot: bot),
+                    ));
+                  },
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Stats row
-            Row(
-              children: [
-                _botStat('Profit', '\$${profit.toStringAsFixed(2)}', profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)),
-                _botStat('Trades', '$totalTrades', const Color(0xFF00E5FF)),
-                _botStat('Win Rate', '${winRate.toStringAsFixed(1)}%', const Color(0xFF7C4DFF)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            // Tap to view hint
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text('Tap for details', style: GoogleFonts.poppins(color: Colors.white24, fontSize: 10)),
-                const SizedBox(width: 4),
-                const Icon(Icons.chevron_right, color: Colors.white24, size: 14),
-              ],
-            ),
-          ],
-        ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade400,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.delete),
+                  label: const Text('Delete'),
+                  onPressed: () {
+                    // TODO: Implement delete logic
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

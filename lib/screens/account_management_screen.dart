@@ -372,9 +372,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.md),
-          Card(
+          _glassSettingsCard(
             child: ListTile(
-              leading: const Icon(Icons.lock),
+              leading: const Icon(Icons.lock, color: Colors.blueAccent),
               title: const Text('Change Password'),
               subtitle: Text(
                 'Update your password regularly',
@@ -385,9 +385,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          Card(
+          _glassSettingsCard(
             child: ListTile(
-              leading: const Icon(Icons.security),
+              leading: const Icon(Icons.security, color: Colors.deepPurple),
               title: const Text('Two-Factor Authentication'),
               subtitle: Text(
                 'Secure your account',
@@ -405,17 +405,17 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.md),
-          Card(
+          _glassSettingsCard(
             child: ListTile(
-              leading: const Icon(Icons.notifications),
+              leading: const Icon(Icons.notifications, color: Colors.orange),
               title: const Text('Notifications'),
               trailing: Switch(value: true, onChanged: (_) {}),
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          Card(
+          _glassSettingsCard(
             child: ListTile(
-              leading: const Icon(Icons.dark_mode),
+              leading: const Icon(Icons.dark_mode, color: Colors.black87),
               title: const Text('Dark Mode'),
               trailing: Switch(value: false, onChanged: (_) {}),
             ),
@@ -429,9 +429,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.md),
-          Card(
+          _glassSettingsCard(
             child: ListTile(
-              leading: const Icon(Icons.delete),
+              leading: const Icon(Icons.delete, color: Colors.redAccent),
               title: const Text('Delete Account'),
               subtitle: Text(
                 'Permanently delete your account',
@@ -448,6 +448,25 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                       'Are you sure you want to permanently delete your account? This action cannot be undone.',
                     ),
                     actions: [
+                        // Glassmorphic card for settings
+                        Widget _glassSettingsCard({required Widget child}) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: Colors.white.withOpacity(0.13)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.07),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: child,
+                          );
+                        }
                       TextButton(
                         onPressed: () => Navigator.pop(context),
                         child: const Text('Cancel'),
