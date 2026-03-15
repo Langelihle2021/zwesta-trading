@@ -908,7 +908,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             )
           else
-            ...topPairs.take(5).asMap().entries.map((entry) {
+            ...topPairs.take(5).toList().asMap().entries.map((entry) {
               final i = entry.key;
               final pair = entry.value;
               final color = pairColors[i % pairColors.length];
