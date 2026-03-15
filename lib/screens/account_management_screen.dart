@@ -33,9 +33,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Account Management'),
-        elevation: 0,
+      appBar: CustomAppBar(
+        title: 'Account Management',
+        showBackButton: true,
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

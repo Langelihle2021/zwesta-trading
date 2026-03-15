@@ -25,11 +25,9 @@ class _TradesScreenState extends State<TradesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text('Trades', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        centerTitle: true,
+      appBar: CustomAppBar(
+        title: 'Trades',
+        showBackButton: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.add),

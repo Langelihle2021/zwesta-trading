@@ -33,14 +33,12 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text(
-          'Trade Analysis',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        centerTitle: true,
+      appBar: CustomAppBar(
+        title: 'Trade Analysis',
+        showBackButton: true,
+        actions: [
+          // Add any actions if needed
+        ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: const Color(0xFF00E5FF),

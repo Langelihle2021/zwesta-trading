@@ -64,14 +64,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final loc = AppLocalizations.of(context)!;
     try {
       return Scaffold(
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          title: Text(
-            _isLogin ? loc.translate('welcome', params: {'name': ''}) : loc.translate('Create Your Account'),
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          centerTitle: true,
+        appBar: CustomAppBar(
+          title: _isLogin ? loc.translate('welcome', params: {'name': ''}) : loc.translate('Create Your Account'),
+          showBackButton: false,
         ),
         extendBodyBehindAppBar: true,
         body: Container(
@@ -114,17 +109,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         Consumer<AuthService>(
                           builder: (context, authService, _) {
                             if (authService.errorMessage != null && authService.errorMessage!.isNotEmpty) {
-                              return Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withOpacity(0.2),
-                                  border: Border.all(color: Colors.red, width: 1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  authService.errorMessage!,
-                                  style: const TextStyle(color: Colors.red, fontSize: 12),
-                                ),
+                              return ErrorBanner(
+                                message: authService.errorMessage!,
+                                onDismiss: () => authService.clearError(),
                               );
                             }
                             return const SizedBox.shrink();
