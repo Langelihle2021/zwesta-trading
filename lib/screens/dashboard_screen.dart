@@ -487,6 +487,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final apiKeyCtrl = TextEditingController();
     final usernameCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
+    final accountIdCtrl = TextEditingController();
     bool isLive = false;
     bool saveForAutoConnect = true;
 
@@ -529,6 +530,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _sheetTextField(usernameCtrl, 'IG Username', Icons.person),
                   const SizedBox(height: 14),
                   _sheetTextField(passwordCtrl, 'IG Password', Icons.lock, obscure: true),
+                  const SizedBox(height: 14),
+                  _sheetTextField(accountIdCtrl, 'Account ID', Icons.account_box),
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -605,7 +608,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     height: 50,
                     child: ElevatedButton(
                       onPressed: () async {
-                        if (apiKeyCtrl.text.isEmpty || usernameCtrl.text.isEmpty || passwordCtrl.text.isEmpty) {
+                        if (apiKeyCtrl.text.isEmpty || usernameCtrl.text.isEmpty || passwordCtrl.text.isEmpty || accountIdCtrl.text.isEmpty) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             const SnackBar(content: Text('All fields are required')),
                           );
@@ -616,6 +619,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             apiKey: apiKeyCtrl.text,
                             username: usernameCtrl.text,
                             password: passwordCtrl.text,
+                            accountId: accountIdCtrl.text,
                             isLive: isLive,
                           );
                         }
@@ -623,6 +627,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           apiKey: apiKeyCtrl.text,
                           username: usernameCtrl.text,
                           password: passwordCtrl.text,
+                          accountId: accountIdCtrl.text,
                           isLive: isLive,
                         );
                         if (ctx.mounted) Navigator.pop(ctx);

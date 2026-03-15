@@ -63,6 +63,7 @@ class IGAutoConnectService extends ChangeNotifier {
   static const String _keyIGUsername = 'ig_username';
   static const String _keyIGPassword = 'ig_password';
   static const String _keyIGIsLive = 'ig_is_live';
+  static const String _keyIGAccountId = 'ig_account_id';
   static const String _keyIGAutoConnect = 'ig_auto_connect';
 
   IGConnectionState get state => _state;
@@ -88,6 +89,7 @@ class IGAutoConnectService extends ChangeNotifier {
     required String apiKey,
     required String username,
     required String password,
+    required String accountId,
     required bool isLive,
     bool autoConnect = true,
   }) async {
@@ -96,6 +98,7 @@ class IGAutoConnectService extends ChangeNotifier {
     await prefs.setString(_keyIGApiKey, apiKey);
     await prefs.setString(_keyIGUsername, username);
     await prefs.setString(_keyIGPassword, password);
+    await prefs.setString(_keyIGAccountId, accountId);
     await prefs.setBool(_keyIGIsLive, isLive);
     await prefs.setBool(_keyIGAutoConnect, autoConnect);
     notifyListeners();
@@ -108,6 +111,7 @@ class IGAutoConnectService extends ChangeNotifier {
     await prefs.remove(_keyIGApiKey);
     await prefs.remove(_keyIGUsername);
     await prefs.remove(_keyIGPassword);
+    await prefs.remove(_keyIGAccountId);
     await prefs.remove(_keyIGIsLive);
     await prefs.remove(_keyIGAutoConnect);
     _state = IGConnectionState.disconnected;
@@ -127,11 +131,12 @@ class IGAutoConnectService extends ChangeNotifier {
     final apiKey = prefs.getString(_keyIGApiKey) ?? '';
     final username = prefs.getString(_keyIGUsername) ?? '';
     final password = prefs.getString(_keyIGPassword) ?? '';
+    final accountId = prefs.getString(_keyIGAccountId) ?? '';
     final isLive = prefs.getBool(_keyIGIsLive) ?? false;
 
-    if (apiKey.isEmpty || username.isEmpty || password.isEmpty) return;
+    if (apiKey.isEmpty || username.isEmpty || password.isEmpty || accountId.isEmpty) return;
 
-    await connect(apiKey: apiKey, username: username, password: password, isLive: isLive);
+    await connect(apiKey: apiKey, username: username, password: password, accountId: accountId, isLive: isLive);
   }
 
   /// Connect to IG API through the backend
@@ -139,6 +144,7 @@ class IGAutoConnectService extends ChangeNotifier {
     required String apiKey,
     required String username,
     required String password,
+    required String accountId,
     required bool isLive,
   }) async {
     _state = IGConnectionState.connecting;
@@ -164,11 +170,11 @@ class IGAutoConnectService extends ChangeNotifier {
         },
         body: jsonEncode({
           'broker': 'IG',
-          'account_number': username,
-          'password': password,
-          'server': isLive ? 'IG-Live' : 'IG-Demo',
-          'is_live': isLive,
           'api_key': apiKey,
+          'username': username,
+          'password': password,
+          'account_id': accountId,
+          'is_live': isLive,
         }),
       ).timeout(const Duration(seconds: 15));
 
