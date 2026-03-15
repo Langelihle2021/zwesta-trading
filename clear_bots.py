@@ -4,10 +4,21 @@ Clear all bots from the database
 This removes all user-created bots, keeping only the system initialization
 """
 
-import sqlite3
-import os
 
-DB_PATH = 'zwesta_trading.db'
+
+import os
+import sys
+import importlib.util
+
+# Dynamically import backend DB logic
+backend_path = 'multi_broker_backend_updated.py'
+spec = importlib.util.spec_from_file_location('backend', backend_path)
+backend = importlib.util.module_from_spec(spec)
+sys.modules['backend'] = backend
+spec.loader.exec_module(backend)
+
+get_db_connection = backend.get_db_connection
+DB_PATH = backend.DATABASE_PATH
 
 def clear_bots():
     """Delete all bots from the user_bots table"""
@@ -16,7 +27,7 @@ def clear_bots():
         return False
     
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         

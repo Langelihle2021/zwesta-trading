@@ -102,7 +102,8 @@ def repopulate_active_bots():
         logger.error(f"❌ Error repopulating active_bots: {e}")
 
 # Call repopulate on startup
-repopulate_active_bots()
+if __name__ == "__main__":
+    repopulate_active_bots()
 
 # ==================== CONFIGURATION ====================
 # Environment Configuration (DEMO or LIVE)
@@ -670,7 +671,8 @@ def get_db_connection():
     return conn
 
 # Initialize database on startup
-init_database()
+if __name__ == "__main__":
+    init_database()
 
 # ==================== BACKUP & RECOVERY SYSTEM ====================
 
