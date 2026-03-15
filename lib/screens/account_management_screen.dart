@@ -467,25 +467,6 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                       'Are you sure you want to permanently delete your account? This action cannot be undone.',
                     ),
                     actions: [
-                        // Glassmorphic card for settings
-                        Widget _glassSettingsCard({required Widget child}) {
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: Colors.white.withOpacity(0.13)),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.07),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: child,
-                          );
-                        }
                       TextButton(
                         onPressed: () => Navigator.pop(context),
                         child: const Text('Cancel'),
