@@ -137,6 +137,29 @@ void main() async {
       );
     }
   }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      return Consumer<AuthService>(
+        builder: (context, authService, _) {
+          if (authService.isAuthenticated) {
+            return const DashboardScreen();
+          }
+          return const LoginScreen();
+        },
+      );
+    } catch (e, st) {
+      print('AuthWrapper build error: $e\n$st');
+      return Scaffold(
+        body: Center(child: Text('Auth error: $e')),
+      );
+    }
+  }
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({Key? key}) : super(key: key);
