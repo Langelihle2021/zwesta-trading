@@ -60,8 +60,49 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 app = Flask(__name__)
 CORS(app)
+
+# ==================== BOT CLEANUP & REPOPULATION ====================
+def repopulate_active_bots():
+    """Repopulate active_bots from user_bots table on backend startup"""
+    global active_bots
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM user_bots WHERE enabled = 1')
+        rows = cursor.fetchall()
+        for row in rows:
+            bot_id = row['bot_id']
+            # Minimal config; extend as needed
+            active_bots[bot_id] = {
+                'botId': bot_id,
+                'user_id': row['user_id'],
+                'accountId': row['broker_account_id'],
+                'strategy': row['strategy'],
+                'symbols': row['symbols'].split(',') if row['symbols'] else [],
+                'enabled': row['enabled'],
+                'createdAt': row['created_at'],
+                'totalTrades': 0,
+                'winningTrades': 0,
+                'totalProfit': 0,
+                'totalLosses': 0,
+                'totalInvestment': 0,
+                'profitHistory': [],
+                'tradeHistory': [],
+                'dailyProfits': {},
+                'dailyProfit': 0,
+                'maxDrawdown': 0,
+                'peakProfit': 0,
+            }
+        conn.close()
+        logger.info(f"✅ Repopulated {len(active_bots)} bots from database on startup.")
+    except Exception as e:
+        logger.error(f"❌ Error repopulating active_bots: {e}")
+
+# Call repopulate on startup
+repopulate_active_bots()
 
 # ==================== CONFIGURATION ====================
 # Environment Configuration (DEMO or LIVE)
@@ -283,7 +324,35 @@ class BrokerType(Enum):
 
 
 # ==================== DATABASE SETUP ====================
+# ==================== DATABASE SETUP ====================
 DATABASE_PATH = 'zwesta_trading.db'
+
+# ==================== CLEANUP ENDPOINT ====================
+@app.route('/api/bots/cleanup', methods=['POST'])
+def cleanup_demo_bots():
+    """Remove all demo/test bots from database and memory (admin/protected endpoint)"""
+    # Optionally, require API key or session for security
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if api_key != API_KEY:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Remove bots with 'demo', 'test', 'sample', or 'dummy' in name or strategy
+        cursor.execute("""
+            DELETE FROM user_bots WHERE LOWER(name) LIKE '%demo%' OR LOWER(name) LIKE '%test%' OR LOWER(name) LIKE '%sample%' OR LOWER(name) LIKE '%dummy%' OR LOWER(strategy) LIKE '%demo%' OR LOWER(strategy) LIKE '%test%' OR LOWER(strategy) LIKE '%sample%' OR LOWER(strategy) LIKE '%dummy%'
+        """)
+        conn.commit()
+        conn.close()
+        # Remove from memory
+        to_remove = [bid for bid, bot in active_bots.items() if any(x in (bot.get('strategy','')+bot.get('botId','')+bot.get('accountId','')).lower() for x in ['demo','test','sample','dummy'])]
+        for bid in to_remove:
+            del active_bots[bid]
+        logger.info(f"✅ Removed {len(to_remove)} demo/test bots from memory and database.")
+        return jsonify({'success': True, 'removed': len(to_remove)}), 200
+    except Exception as e:
+        logger.error(f"❌ Error cleaning up demo/test bots: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def init_database():
     """Initialize SQLite database with referral and commission tables"""
