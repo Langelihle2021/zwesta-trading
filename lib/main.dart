@@ -159,6 +159,7 @@ class AuthWrapper extends StatelessWidget {
         body: Center(child: Text('Auth error: $e')),
       );
     }
+  }
 }
 
 
