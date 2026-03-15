@@ -35,7 +35,33 @@ void main() async {
     runApp(const MyApp());
   } catch (e, st) {
     print('Main init error: $e\n$st');
-    runApp(MaterialApp(home: Scaffold(body: Center(child: Text('App failed to start: $e')))));
+    runApp(MaterialApp(
+      home: Scaffold(
+        backgroundColor: Colors.red.shade50,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, color: Colors.red, size: 64),
+              SizedBox(height: 16),
+              Text(
+                'App failed to start',
+                style: TextStyle(fontSize: 20, color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  e.toString(),
+                  style: TextStyle(color: Colors.black87),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
   }
 }
 
