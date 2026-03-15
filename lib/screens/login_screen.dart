@@ -64,81 +64,82 @@ class _LoginScreenState extends State<LoginScreen> {
     final loc = AppLocalizations.of(context)!;
     try {
       return Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Text(
+            _isLogin ? loc.translate('welcome', params: {'name': ''}) : loc.translate('Create Your Account'),
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          centerTitle: true,
+        ),
+        extendBodyBehindAppBar: true,
         body: Container(
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                Colors.blue[900]!,
-                Colors.blue[700]!,
-                Colors.purple[400]!,
-              ],
+              colors: [Color(0xFF0A0E21), Color(0xFF1A237E), Color(0xFF512DA8)],
             ),
           ),
           child: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Logo Header
-                  SizedBox(height: MediaQuery.of(context).size.height * 0.05),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.15),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: const LogoWidget(size: 140, showText: true),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  
-                  // Title
-                  Text(
-                    _isLogin ? loc.translate('welcome', params: {'name': ''}) : loc.translate('Create Your Account'),
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  
-                  // Error Message Display
-                  Consumer<AuthService>(
-                    builder: (context, authService, _) {
-                      if (authService.errorMessage != null && authService.errorMessage!.isNotEmpty) {
-                        return Container(
-                          padding: const EdgeInsets.all(12),
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Card(
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  color: Colors.white.withOpacity(0.04),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Logo Header
+                        Container(
+                          padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.2),
-                            border: Border.all(color: Colors.red, width: 1),
-                            borderRadius: BorderRadius.circular(8),
+                            color: Colors.white.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.15),
+                              width: 1.5,
+                            ),
                           ),
-                          child: Text(
-                            authService.errorMessage!,
-                            style: const TextStyle(color: Colors.red, fontSize: 12),
-                          ),
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    },
+                          child: const LogoWidget(size: 100, showText: true),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        // Error Message Display
+                        Consumer<AuthService>(
+                          builder: (context, authService, _) {
+                            if (authService.errorMessage != null && authService.errorMessage!.isNotEmpty) {
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.2),
+                                  border: Border.all(color: Colors.red, width: 1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  authService.errorMessage!,
+                                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        // Show MFA prompt or login/register form
+                        if (_showMfaPrompt)
+                          _buildMfaForm(loc)
+                        else
+                          _buildLoginRegisterForm(loc),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  
-                  // Show MFA prompt or login/register form
-                  if (_showMfaPrompt)
-                    _buildMfaForm(loc)
-                  else
-                    _buildLoginRegisterForm(loc),
-                ],
+                ),
               ),
             ),
           ),

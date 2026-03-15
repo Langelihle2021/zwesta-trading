@@ -24,9 +24,12 @@ class _TradesScreenState extends State<TradesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Trades'),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        title: const Text('Trades', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
@@ -36,7 +39,11 @@ class _TradesScreenState extends State<TradesScreen> {
       ),
       body: Container(
         decoration: const BoxDecoration(
-          gradient: AppColors.primaryGradient,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF0A0E21), Color(0xFF1A237E), Color(0xFF512DA8)],
+          ),
         ),
         child: _buildTradesContent(),
       ),
