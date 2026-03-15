@@ -44,65 +44,72 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(
-          create: (_) => CurrencyProvider()..loadCurrency(),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => AuthService(),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => FallbackStatusProvider(),
-        ),
-        ChangeNotifierProxyProvider<AuthService, TradingService>(
-          create: (context) => TradingService(null),
-          update: (context, authService, tradingService) {
-            tradingService?.updateToken(authService.token);
-            return tradingService ?? TradingService(authService.token);
+    try {
+      return MultiProvider(
+        providers: [
+          ChangeNotifierProvider(
+            create: (_) => CurrencyProvider()..loadCurrency(),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => AuthService(),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => FallbackStatusProvider(),
+          ),
+          ChangeNotifierProxyProvider<AuthService, TradingService>(
+            create: (context) => TradingService(null),
+            update: (context, authService, tradingService) {
+              tradingService?.updateToken(authService.token);
+              return tradingService ?? TradingService(authService.token);
+            },
+          ),
+          ChangeNotifierProvider(
+            create: (_) => BotService(),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => StatementService(),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => FinancialService(),
+          ),
+        ],
+        child: MaterialApp(
+          title: 'ZWESTA TRADING SYSTEM',
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: ThemeMode.system,
+          home: const AuthWrapper(),
+          debugShowCheckedModeBanner: false,
+          supportedLocales: const [
+            Locale('en'),
+            Locale('xh'),
+            Locale('zu'),
+            Locale('nr'),
+            Locale('ve'),
+            Locale('af'),
+          ],
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            DefaultWidgetsLocalizations.delegate,
+            DefaultMaterialLocalizations.delegate,
+          ],
+          localeResolutionCallback: (locale, supportedLocales) {
+            if (locale == null) return supportedLocales.first;
+            for (var supportedLocale in supportedLocales) {
+              if (supportedLocale.languageCode == locale.languageCode) {
+                return supportedLocale;
+              }
+            }
+            return supportedLocales.first;
           },
         ),
-        ChangeNotifierProvider(
-          create: (_) => BotService(),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => StatementService(),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => FinancialService(),
-        ),
-      ],
-      child: MaterialApp(
-        title: 'ZWESTA TRADING SYSTEM',
-        theme: AppTheme.lightTheme,
-        darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.system,
-        home: const AuthWrapper(),
-        debugShowCheckedModeBanner: false,
-        supportedLocales: const [
-          Locale('en'),
-          Locale('xh'),
-          Locale('zu'),
-          Locale('nr'),
-          Locale('ve'),
-          Locale('af'),
-        ],
-        localizationsDelegates: [
-          AppLocalizations.delegate,
-          DefaultWidgetsLocalizations.delegate,
-          DefaultMaterialLocalizations.delegate,
-        ],
-        localeResolutionCallback: (locale, supportedLocales) {
-          if (locale == null) return supportedLocales.first;
-          for (var supportedLocale in supportedLocales) {
-            if (supportedLocale.languageCode == locale.languageCode) {
-              return supportedLocale;
-            }
-          }
-          return supportedLocales.first;
-        },
-      ),
-    );
+      );
+    } catch (e, st) {
+      print('MyApp build error: $e\n$st');
+      return MaterialApp(
+        home: Scaffold(body: Center(child: Text('App error: $e'))),
+      );
+    }
   }
 }
 
@@ -121,10 +128,11 @@ class AuthWrapper extends StatelessWidget {
         },
       );
     } catch (e, st) {
-      print('AuthWrapper error: $e\n$st');
-      return Scaffold(body: Center(child: Text('Startup error: $e')));
+      print('AuthWrapper build error: $e\n$st');
+      return Scaffold(
+        body: Center(child: Text('Auth error: $e')),
+      );
     }
-  }
 }
 
 
