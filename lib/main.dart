@@ -62,10 +62,10 @@ void main() async {
         ),
       ),
     ));
+    }
   }
-}
 
-class MyApp extends StatelessWidget {
+  class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
 
   @override
@@ -137,7 +137,6 @@ class MyApp extends StatelessWidget {
       );
     }
   }
-}
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({Key? key}) : super(key: key);
