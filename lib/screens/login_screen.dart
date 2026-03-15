@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../utils/constants.dart';
 import '../widgets/custom_widgets.dart';
+import 'package:provider/provider.dart';
 import '../widgets/logo_widget.dart';
 import '../l10n/app_localizations.dart';
 import 'forgot_password_screen.dart';

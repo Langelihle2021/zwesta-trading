@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/trading_service.dart';
 import '../services/bot_service.dart';
 import '../utils/constants.dart';
+import '../widgets/custom_widgets.dart';
 
 class TradeAnalysisScreen extends StatefulWidget {
   const TradeAnalysisScreen({Key? key}) : super(key: key);

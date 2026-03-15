@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import '../services/bot_service.dart';
 import '../utils/environment_config.dart';
 import '../services/broker_credentials_service.dart';
 import '../services/commission_service.dart';
@@ -328,7 +330,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         _commissionService.fetchCommissions();
 
         // Force-refresh bot list before navigating
-        final botService = context.read<BotService>();
+        final botService = Provider.of<BotService>(context, listen: false);
         await botService.fetchActiveBots();
 
         // Show success snackbar immediately

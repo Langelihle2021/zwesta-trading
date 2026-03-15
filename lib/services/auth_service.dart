@@ -7,6 +7,11 @@ import '../utils/constants.dart';
 import '../utils/environment_config.dart';
 
 class AuthService extends ChangeNotifier {
+    // Clear error message and notify listeners
+    void clearError() {
+      _errorMessage = null;
+      notifyListeners();
+    }
   late SharedPreferences _prefs;
   
   User? _currentUser;
