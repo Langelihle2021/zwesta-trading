@@ -4925,76 +4925,83 @@ def test_broker_connection():
         data = request.json
         broker = data.get('broker', '')
         is_live = data.get('is_live', False)
-        
+
         logger.info(f"🔌 Testing broker connection: {broker} | User: {user_id}")
-        
+
         # ==================== IG MARKETS ====================
         if broker.lower() in ['ig', 'ig markets', 'ig.com']:
             api_key = data.get('api_key')
             ig_username = data.get('username')
             ig_password = data.get('password')
             account_id = data.get('account_id')
-            
+
             if not all([api_key, ig_username, ig_password, account_id]):
                 return jsonify({
                     'success': False,
                     'error': 'Missing IG Markets fields: api_key, username, password, account_id'
                 }), 400
-            
-            # Test IG connection
-            ig_credentials = {
-                'api_key': api_key,
-                'username': ig_username,
-                'password': ig_password,
-                'account_id': account_id
-            }
-            
-            ig_conn = IGConnection(credentials=ig_credentials)
-            if not ig_conn.connect():
+
+            try:
+                ig_credentials = {
+                    'api_key': api_key,
+                    'username': ig_username,
+                    'password': ig_password,
+                    'account_id': account_id
+                }
+                ig_conn = IGConnection(credentials=ig_credentials)
+                if not ig_conn.connect():
+                    logger.error(f"IG authentication failed for user {user_id} (username={ig_username})")
+                    return jsonify({
+                        'success': False,
+                        'error': 'Failed to authenticate with IG Markets. Check API key and credentials.'
+                    }), 401
+
+                # Get account info
+                account_info = ig_conn.get_account_info()
+                ig_conn.disconnect()
+
+                if 'error' in account_info:
+                    logger.error(f"Failed to retrieve IG account info for user {user_id}: {account_info['error']}")
+                    return jsonify({
+                        'success': False,
+                        'error': f"Failed to retrieve IG account info: {account_info['error']}"
+                    }), 400
+
+                # Save IG credentials
+                conn = get_db_connection()
+                cursor = conn.cursor()
+
+                credential_id = str(uuid.uuid4())
+                cursor.execute('''
+                    INSERT INTO broker_credentials 
+                    (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ''', (credential_id, user_id, 'IG Markets', account_id, ig_password, 'REST-API', int(is_live), api_key, datetime.now().isoformat(), datetime.now().isoformat()))
+
+                conn.commit()
+                conn.close()
+
+                logger.info(f"✅ IG Markets credentials saved for user {user_id}")
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Successfully connected to IG Markets account {account_id}',
+                    'credential_id': credential_id,
+                    'broker': 'IG Markets',
+                    'account_number': account_id,
+                    'accountName': account_info.get('accountName', 'IG Account'),
+                    'currency': account_info.get('currency', 'USD'),
+                    'is_live': is_live,
+                    'status': 'CONNECTED',
+                    'timestamp': datetime.now().isoformat()
+                }), 200
+            except Exception as e:
+                logger.error(f"Exception during IG authentication for user {user_id}: {e}", exc_info=True)
                 return jsonify({
                     'success': False,
-                    'error': 'Failed to authenticate with IG Markets. Check API key and credentials.'
-                }), 401
-            
-            # Get account info
-            account_info = ig_conn.get_account_info()
-            ig_conn.disconnect()
-            
-            if 'error' in account_info:
-                return jsonify({
-                    'success': False,
-                    'error': f"Failed to retrieve IG account info: {account_info['error']}"
-                }), 400
-            
-            # Save IG credentials
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            credential_id = str(uuid.uuid4())
-            cursor.execute('''
-                INSERT INTO broker_credentials 
-                (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-            ''', (credential_id, user_id, 'IG Markets', account_id, ig_password, 'REST-API', int(is_live), api_key, datetime.now().isoformat(), datetime.now().isoformat()))
-            
-            conn.commit()
-            conn.close()
-            
-            logger.info(f"✅ IG Markets credentials saved for user {user_id}")
-            
-            return jsonify({
-                'success': True,
-                'message': f'Successfully connected to IG Markets account {account_id}',
-                'credential_id': credential_id,
-                'broker': 'IG Markets',
-                'account_number': account_id,
-                'accountName': account_info.get('accountName', 'IG Account'),
-                'currency': account_info.get('currency', 'USD'),
-                'is_live': is_live,
-                'status': 'CONNECTED',
-                'timestamp': datetime.now().isoformat()
-            }), 200
-        
+                    'error': f'IG authentication failed: {str(e)}'
+                }), 500
+
         # ==================== MT5 BROKERS ====================
         else:
             account = data.get('account_number', '')
