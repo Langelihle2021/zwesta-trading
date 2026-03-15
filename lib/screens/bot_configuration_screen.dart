@@ -310,48 +310,49 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
       if (startResponse.statusCode == 200) {
         final data = jsonDecode(startResponse.body);
-        
         print('✅ Bot started, trades placed: ${data['tradesPlaced']}');
         print('💰 Commission tracking enabled for this bot');
 
         setState(() {
-          _successMessage = 
-            'Bot created and started! 🎉\n'
-            'Broker: ${_brokerService.activeCredential?.broker}\n'
-            'Account: ${_brokerService.activeCredential?.accountNumber}\n'
-            'Trades placed: ${data['tradesPlaced']}\n\n'
-            '💰 Commissions will be tracked on every trade.\n'
-            '📊 Earnings appear in your Commission Dashboard.';
+          _successMessage =
+              'Bot created and started! 🎉\n'
+              'Broker: ${_brokerService.activeCredential?.broker}\n'
+              'Account: ${_brokerService.activeCredential?.accountNumber}\n'
+              'Trades placed: ${data['tradesPlaced']}\n\n'
+              '💰 Commissions will be tracked on every trade.\n'
+              '📊 Earnings appear in your Commission Dashboard.';
           _isCreating = false;
         });
-        
+
         // Refresh commission data
         _commissionService.fetchCommissions();
-        
+
+        // Force-refresh bot list before navigating
+        final botService = context.read<BotService>();
+        await botService.fetchActiveBots();
+
         // Show success snackbar immediately
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('✅ Bot "${_botIdController.text}" created and running! It will appear in the list below.'),
               backgroundColor: Colors.green,
-              duration: const Duration(seconds: 4),
+              duration: const Duration(seconds: 2),
             ),
           );
         }
-        
-        // Auto-navigate to dashboard after 2 seconds
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.of(context).pushReplacementNamed(
-              '/dashboard',
-              arguments: {
-                'botCreated': true,
-                'botId': _botIdController.text,
-                'message': '✅ Bot "${_botIdController.text}" created and running!',
-              },
-            );
-          }
-        });
+
+        // Navigate to dashboard immediately after refresh
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed(
+            '/dashboard',
+            arguments: {
+              'botCreated': true,
+              'botId': _botIdController.text,
+              'message': '✅ Bot "${_botIdController.text}" created and running!',
+            },
+          );
+        }
       } else {
         final errorData = jsonDecode(startResponse.body);
         throw Exception(errorData['error'] ?? 'Failed to start bot: ${startResponse.statusCode}');
