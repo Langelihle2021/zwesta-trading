@@ -65,6 +65,7 @@ flutter:
   
   assets:
     - assets/images/
+    - lib/l10n/app_translations.json
   #   - assets/logos/
   #
   # fonts:
