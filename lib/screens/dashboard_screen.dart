@@ -1084,8 +1084,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _QuickAction('Create Bot', Icons.add_circle_outline, const Color(0xFF69F0AE), () {
         Navigator.push(context, MaterialPageRoute(builder: (_) => const BotConfigurationScreen()));
       }),
-      _QuickAction('Bot Analytics', Icons.monitoring, const Color(0xFFFFD600), () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const BotAnalyticsScreen()));
+      _QuickAction('Bot Monitor', Icons.insights, const Color(0xFFFFD600), () {
+        setState(() => _selectedIndex = 3);
       }),
       _QuickAction('Trade Analysis', Icons.analytics_outlined, const Color(0xFF00E5FF), () {
         Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeAnalysisScreen()));
@@ -1336,17 +1336,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.monitoring, color: Color(0xFFFFD600)),
-            title: const Text('Bot Analytics', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Monitor performance & trades', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            leading: const Icon(Icons.insights, color: Color(0xFFFFD600)),
+            title: const Text('Bot Monitor', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('View active bots & performance', style: TextStyle(color: Colors.white38, fontSize: 11)),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const BotAnalyticsScreen(),
-                ),
-              );
+              setState(() => _selectedIndex = 3);
             },
           ),
           const Divider(color: Colors.white12),
