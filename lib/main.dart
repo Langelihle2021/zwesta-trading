@@ -13,7 +13,7 @@ import 'services/ig_auto_connect_service.dart';
 import 'services/commission_service.dart';
 import 'providers/currency_provider.dart';
 import 'providers/fallback_status_provider.dart';
-import 'utils/theme.dart';
+import 'theme/app_theme.dart';
 import 'utils/environment_config.dart';
 import 'l10n/app_localizations.dart';
 
