@@ -19,6 +19,23 @@ class BotConfigurationScreen extends StatefulWidget {
 }
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
+  static const List<Map<String, String>> _binanceSymbols = [
+    {'symbol': 'BTCUSDT', 'name': '₿ Bitcoin / Tether', 'category': 'Crypto'},
+    {'symbol': 'ETHUSDT', 'name': '◆ Ethereum / Tether', 'category': 'Crypto'},
+    {'symbol': 'BNBUSDT', 'name': '◈ BNB / Tether', 'category': 'Crypto'},
+    {'symbol': 'SOLUSDT', 'name': '◎ Solana / Tether', 'category': 'Crypto'},
+    {'symbol': 'XRPUSDT', 'name': '✕ XRP / Tether', 'category': 'Crypto'},
+    {'symbol': 'ADAUSDT', 'name': '◌ Cardano / Tether', 'category': 'Crypto'},
+    {'symbol': 'DOGEUSDT', 'name': '🐕 Dogecoin / Tether', 'category': 'Crypto'},
+    {'symbol': 'AVAXUSDT', 'name': '▲ Avalanche / Tether', 'category': 'Crypto'},
+    {'symbol': 'MATICUSDT', 'name': '⬟ Polygon / Tether', 'category': 'Crypto'},
+    {'symbol': 'LINKUSDT', 'name': '⛓ Chainlink / Tether', 'category': 'Crypto'},
+    {'symbol': 'LTCUSDT', 'name': 'Ł Litecoin / Tether', 'category': 'Crypto'},
+    {'symbol': 'TRXUSDT', 'name': '△ TRON / Tether', 'category': 'Crypto'},
+    {'symbol': 'DOTUSDT', 'name': '● Polkadot / Tether', 'category': 'Crypto'},
+    {'symbol': 'ATOMUSDT', 'name': '⚛ Cosmos / Tether', 'category': 'Crypto'},
+  ];
+
     // Dialog to input account number
     Future<String?> _showAccountInputDialog(BuildContext context) async {
       String? account;
@@ -100,6 +117,18 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   Map<String, dynamic> commodityMarketData = {};
   List<Map<String, String>> tradingSymbols = [];  // Will be populated from API
 
+    String get _activeBrokerName =>
+      _brokerService.activeCredential?.broker.toLowerCase().trim() ?? '';
+
+    bool get _isBinanceBroker => _activeBrokerName == 'binance';
+
+    String get _symbolSectionTitle =>
+      _isBinanceBroker ? 'Select Binance Pairs' : 'Select Trading Symbols';
+
+    String get _symbolSelectionError => _isBinanceBroker
+      ? 'Please select at least one Binance pair'
+      : 'Please select at least one trading symbol';
+
   final List<String> strategies = [
     'Trend Following',
     'Scalping',
@@ -124,12 +153,36 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _brokerService = BrokerCredentialsService();
     _commissionService = CommissionService();
     
-    _fetchCommodityData();
-    _brokerService.fetchCredentials(); // Load broker credentials on startup
+    _initializeScreen();
     _commissionService.fetchCommissions(); // Load commission data
   }
 
+  Future<void> _initializeScreen() async {
+    await _brokerService.fetchCredentials();
+    if (!mounted) {
+      return;
+    }
+    _fetchTradingData();
+  }
+
+  Future<void> _fetchTradingData() async {
+    if (_isBinanceBroker) {
+      setState(() {
+        commodityMarketData = {};
+        tradingSymbols = List<Map<String, String>>.from(_binanceSymbols);
+        _selectedSymbols = _selectedSymbols
+            .where((symbol) => _binanceSymbols.any((item) => item['symbol'] == symbol))
+            .toList();
+        _isLoadingData = false;
+      });
+      return;
+    }
+
+    await _fetchCommodityData();
+  }
+
   Future<void> _fetchCommodityData() async {
+    setState(() => _isLoadingData = true);
     try {
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/commodities/list'),
@@ -250,7 +303,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
 
     if (_selectedSymbols.isEmpty) {
-      _showError('Please select at least one trading symbol');
+      _showError(_symbolSelectionError);
       return;
     }
 
@@ -320,6 +373,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
               'Bot created and started! 🎉\n'
               'Broker: ${_brokerService.activeCredential?.broker}\n'
               'Account: ${_brokerService.activeCredential?.accountNumber}\n'
+              '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n'
               'Trades placed: ${data['tradesPlaced']}\n\n'
               '💰 Commissions will be tracked on every trade.\n'
               '📊 Earnings appear in your Commission Dashboard.';
@@ -674,9 +728,16 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
                   // Trading Symbols Selection
                   Text(
-                    'Select Trading Symbols (${_selectedSymbols.length})',
+                    '$_symbolSectionTitle (${_selectedSymbols.length})',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
+                  if (_brokerService.activeCredential != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Broker account: ${_brokerService.activeCredential!.broker} • ${_brokerService.activeCredential!.accountNumber}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Container(
                     decoration: BoxDecoration(
@@ -696,15 +757,22 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                 itemBuilder: (context, index) {
                                   final symbol = tradingSymbols[index];
                                   final symbolCode = symbol['symbol']!;
+                                    final isBinanceSymbol = _isBinanceBroker;
                                   
                                   // Get market data for this symbol directly (API now uses correct keys)
                                   final marketData = commodityMarketData[symbolCode] ?? {};
                                   final trend = marketData['trend'] ?? 'NEUTRAL';
-                                  final isBullish = trend == 'UP';
+                                    final isBullish = isBinanceSymbol ? true : trend == 'UP';
                                   final change = (marketData['change'] ?? 0).toDouble();
-                                  final signal = marketData['signal'] ?? '🟡 NEUTRAL';
-                                  final recommendation = marketData['recommendation'] ?? 'No data available';
-                                  final volatility = marketData['volatility'] ?? 'Unknown';
+                                    final signal = isBinanceSymbol
+                                      ? '🟢 CRYPTO READY'
+                                      : (marketData['signal'] ?? '🟡 NEUTRAL');
+                                    final recommendation = isBinanceSymbol
+                                      ? 'Selected Binance pairs will trade with the strategy you choose for this bot.'
+                                      : (marketData['recommendation'] ?? 'No data available');
+                                    final volatility = isBinanceSymbol
+                                      ? '24/7 Market'
+                                      : (marketData['volatility'] ?? 'Unknown');
 
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8),
@@ -782,9 +850,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                                 ),
                                                 const SizedBox(width: 8),
                                                 Text(
-                                                  '${change > 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
+                                                  isBinanceSymbol
+                                                      ? 'Binance Pair'
+                                                      : '${change > 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
                                                   style: TextStyle(
-                                                    color: change >= 0
+                                                    color: isBinanceSymbol
+                                                        ? Colors.orangeAccent
+                                                        : change >= 0
                                                         ? Colors.green
                                                         : Colors.red,
                                                     fontWeight: FontWeight.bold,

@@ -211,9 +211,13 @@ class BotService extends ChangeNotifier {
       print('📥 Response: ${response.statusCode}');
       print('  Body: ${response.body}');
       
-      if (response.statusCode == 200) {
-        await fetchActiveBots();
-        return true;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final responseData = jsonDecode(response.body);
+        if (responseData['success'] == true) {
+          await fetchActiveBots();
+          return true;
+        }
+        _errorMessage = responseData['error'] ?? 'Failed to create bot';
       } else if (response.statusCode == 401) {
         _errorMessage = 'Session expired or invalid token. Please login again.';
         print('❌ BOT CREATION 401 ERROR:');

@@ -102,9 +102,7 @@ def repopulate_active_bots():
     except Exception as e:
         logger.error(f"❌ Error repopulating active_bots: {e}")
 
-# Call repopulate on startup
-if __name__ == "__main__":
-    repopulate_active_bots()
+# Note: repopulate_active_bots() is called later after get_db_connection is defined
 
 # ==================== CONFIGURATION ====================
 # Environment Configuration (DEMO or LIVE)
@@ -313,6 +311,7 @@ class BrokerType(Enum):
     """Supported broker types"""
     METATRADER5 = "mt5"
     INTERACTIVE_BROKERS = "ib"
+    BINANCE = "binance"
     OANDA = "oanda"
     XM = "xm"
     PEPPERSTONE = "pepperstone"
@@ -687,6 +686,21 @@ def init_database():
         )
     ''')
 
+    # Shared broker withdrawal notifications table (used by OANDA/FXCM/Binance services)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS broker_withdrawal_notifications (
+            notification_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            broker_name TEXT NOT NULL,
+            amount REAL DEFAULT 0,
+            message TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT,
+            completed_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
     cursor.execute("PRAGMA table_info(broker_credentials)")
     columns = [col[1] for col in cursor.fetchall()]
     
@@ -983,21 +997,23 @@ class MT5Connection(BrokerConnection):
 
         super().__init__(BrokerType.METATRADER5, credentials)
         # Dynamically launch/check MT5 terminal for this broker
-        broker = credentials.get('broker', 'MetaQuotes')
+        broker = canonicalize_broker_name(credentials.get('broker', 'MetaQuotes'))
         try:
             import subprocess, sys
             import os
             # Call the terminal manager to ensure the terminal is running
-            subprocess.Popen([
-                sys.executable, os.path.join(os.path.dirname(__file__), 'mt5_terminal_manager.py'), broker
-            ])
+            mt5_mgr_path = os.path.join(os.path.dirname(__file__), 'mt5_terminal_manager.py')
+            if broker in ['MetaQuotes', 'XM', 'XM Global', 'MetaTrader 5'] and os.path.exists(mt5_mgr_path):
+                subprocess.Popen([sys.executable, mt5_mgr_path, broker])
+            else:
+                logger.info(f"[MT5 Terminal Manager] Skipping terminal launch for broker={broker}")
         except Exception as e:
             logger.error(f"[MT5 Terminal Manager] Could not launch/check terminal for {broker}: {e}")
         try:
             import MetaTrader5 as mt5
             self.mt5 = mt5
-            # Path is now managed by the terminal manager, but keep for SDK
-            self.mt5_path = None
+            # Use path from MT5_CONFIG or credentials
+            self.mt5_path = credentials.get('path') or MT5_CONFIG.get('path')
         except ImportError:
             logger.error("MetaTrader5 not installed")
             self.mt5 = None
@@ -1021,8 +1037,29 @@ class MT5Connection(BrokerConnection):
                 logger.info(f"MT5 connection attempt {attempt}/{max_retries}: Account={account}, Server={server}")
                 
                 try:
-                    # Shutdown any existing connection first
-                    if self.mt5.initialize(path=self.mt5_path):
+                    init_ok = False
+                    # Prefer default initialize first (more reliable on VPS when terminal is already running)
+                    init_ok = self.mt5.initialize()
+
+                    # Fallback to explicit executable only when it is a real file path
+                    if not init_ok and self.mt5_path:
+                        normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
+                        if os.path.isdir(normalized_path):
+                            candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
+                            candidate_32 = os.path.join(normalized_path, 'terminal.exe')
+                            if os.path.isfile(candidate_64):
+                                normalized_path = candidate_64
+                            elif os.path.isfile(candidate_32):
+                                normalized_path = candidate_32
+
+                        if os.path.isfile(normalized_path):
+                            init_ok = self.mt5.initialize(path=normalized_path)
+                            if init_ok:
+                                self.mt5_path = normalized_path
+                            else:
+                                logger.warning(f"  ✗ MT5 initialize with explicit path failed: {self.mt5.last_error()}")
+
+                    if init_ok:
                         # Successfully initialized, now try to login
                         logger.info(f"  ✓ MT5 SDK initialized (path: {self.mt5_path})")
                         
@@ -1467,10 +1504,25 @@ class IGConnection(BrokerConnection):
             }
         
         super().__init__(BrokerType.IG, credentials)
-        self.base_url = 'https://api.ig.com/gateway/deal'
-        self.session_token = None
-        self.client_token = None
+        demo_mode = bool(self.credentials.get('demo_mode', IG_CONFIG.get('demo_mode', True)))
+        self.base_url = 'https://demo-api.ig.com/gateway/deal' if demo_mode else 'https://api.ig.com/gateway/deal'
+        self.session_token = None  # CST
+        self.client_token = None   # X-SECURITY-TOKEN
         self.last_update = None
+
+    def _headers(self, version: str = '1', content_type: bool = True) -> Dict:
+        headers = {
+            'X-IG-API-KEY': self.credentials.get('api_key', IG_CONFIG['api_key']),
+            'Accept': 'application/json; charset=UTF-8',
+            'Version': version,
+        }
+        if self.session_token:
+            headers['CST'] = self.session_token
+        if self.client_token:
+            headers['X-SECURITY-TOKEN'] = self.client_token
+        if content_type:
+            headers['Content-Type'] = 'application/json; charset=UTF-8'
+        return headers
         
     def connect(self) -> bool:
         """Connect to IG.com via REST API"""
@@ -1487,24 +1539,21 @@ class IGConnection(BrokerConnection):
             
             # IG.com authentication endpoint
             auth_url = f"{self.base_url}/session"
-            headers = {
-                'X-IG-API-KEY': api_key,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            headers = self._headers(version='2', content_type=True)
             
             payload = {
                 'identifier': username,
                 'password': password,
-                'encryptionVersion': '2'
             }
             
             response = requests.post(auth_url, json=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
-                data = response.json()
-                self.session_token = data.get('sessionToken')
-                self.client_token = data.get('clientToken')
+                self.session_token = response.headers.get('CST')
+                self.client_token = response.headers.get('X-SECURITY-TOKEN')
+                if not self.session_token or not self.client_token:
+                    logger.error("IG.com authentication failed: CST/X-SECURITY-TOKEN headers missing")
+                    return False
                 self.connected = True
                 
                 logger.info(f"✅ Connected to IG.com account (demo: {self.credentials.get('demo_mode', True)})")
@@ -1523,15 +1572,7 @@ class IGConnection(BrokerConnection):
         try:
             if self.connected and self.session_token:
                 import requests
-                
-                api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-                headers = {
-                    'X-IG-API-KEY': api_key,
-                    'CST': self.session_token,
-                    'X-SECURITY-TOKEN': self.client_token,
-                    'Content-Type': 'application/json'
-                }
-                
+                headers = self._headers(version='1', content_type=True)
                 response = requests.delete(f"{self.base_url}/session", headers=headers, timeout=10)
                 self.connected = False
                 logger.info("Disconnected from IG.com")
@@ -1548,15 +1589,7 @@ class IGConnection(BrokerConnection):
                 return {}
             
             import requests
-            
-            api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-            headers = {
-                'X-IG-API-KEY': api_key,
-                'CST': self.session_token,
-                'X-SECURITY-TOKEN': self.client_token,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            headers = self._headers(version='1', content_type=False)
             
             response = requests.get(f"{self.base_url}/accounts", headers=headers, timeout=10)
             
@@ -1586,15 +1619,7 @@ class IGConnection(BrokerConnection):
                 return []
             
             import requests
-            
-            api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-            headers = {
-                'X-IG-API-KEY': api_key,
-                'CST': self.session_token,
-                'X-SECURITY-TOKEN': self.client_token,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            headers = self._headers(version='2', content_type=False)
             
             response = requests.get(f"{self.base_url}/positions", headers=headers, timeout=10)
             
@@ -1627,15 +1652,7 @@ class IGConnection(BrokerConnection):
                 return {'success': False, 'error': 'Not connected to IG.com'}
             
             import requests
-            
-            api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-            headers = {
-                'X-IG-API-KEY': api_key,
-                'CST': self.session_token,
-                'X-SECURITY-TOKEN': self.client_token,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            headers = self._headers(version='2', content_type=True)
             
             payload = {
                 'epic': symbol,
@@ -1679,15 +1696,8 @@ class IGConnection(BrokerConnection):
                 return {'success': False, 'error': 'Not connected to IG.com'}
             
             import requests
-            
-            api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-            headers = {
-                'X-IG-API-KEY': api_key,
-                'CST': self.session_token,
-                'X-SECURITY-TOKEN': self.client_token,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            headers = self._headers(version='1', content_type=True)
+            headers['_method'] = 'DELETE'
             
             payload = {
                 'dealId': position_id,
@@ -1724,15 +1734,7 @@ class IGConnection(BrokerConnection):
                 return []
             
             import requests
-            
-            api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-            headers = {
-                'X-IG-API-KEY': api_key,
-                'CST': self.session_token,
-                'X-SECURITY-TOKEN': self.client_token,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+            headers = self._headers(version='2', content_type=False)
             
             response = requests.get(
                 f"{self.base_url}/history/transactions?pageSize=50",
@@ -1759,6 +1761,636 @@ class IGConnection(BrokerConnection):
         except Exception as e:
             logger.error(f"Error getting IG.com trade history: {e}")
         
+        return []
+
+
+class BinanceConnection(BrokerConnection):
+    """Binance broker connection via REST API."""
+
+    def __init__(self, credentials: Dict = None):
+        if credentials is None:
+            credentials = {
+                'api_key': os.getenv('BINANCE_API_KEY', ''),
+                'api_secret': os.getenv('BINANCE_API_SECRET', ''),
+                'is_live': False,
+                'market': 'spot',
+            }
+
+        super().__init__(BrokerType.BINANCE, credentials)
+        self.market = (credentials.get('market') or credentials.get('server') or 'spot').lower()
+        is_live = bool(credentials.get('is_live', False))
+        self.base_url = 'https://api.binance.com/api' if is_live else 'https://testnet.binance.vision/api'
+        self.fapi_url = 'https://fapi.binance.com/fapi' if is_live else 'https://testnet.binancefuture.com/fapi'
+
+    def _headers(self) -> Dict:
+        return {
+            'X-MBX-APIKEY': self.credentials.get('api_key', ''),
+            'Content-Type': 'application/json',
+        }
+
+    def _sign_params(self, params: Dict) -> Dict:
+        import hmac
+        from urllib.parse import urlencode
+
+        signed_params = dict(params)
+        signed_params['timestamp'] = int(time.time() * 1000)
+        query_string = urlencode(signed_params)
+        signature = hmac.new(
+            str(self.credentials.get('api_secret', '')).encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
+        signed_params['signature'] = signature
+        return signed_params
+
+    def _normalize_symbol(self, symbol: str) -> Optional[str]:
+        if not symbol:
+            return None
+
+        symbol = symbol.upper().replace('/', '').replace('_', '')
+        symbol_map = {
+            'BTCUSD': 'BTCUSDT',
+            'ETHUSD': 'ETHUSDT',
+            'BNBUSD': 'BNBUSDT',
+            'SOLUSD': 'SOLUSDT',
+            'XRPUSD': 'XRPUSDT',
+            'ADAUSD': 'ADAUSDT',
+            'DOGEUSD': 'DOGEUSDT',
+        }
+        if symbol in symbol_map:
+            return symbol_map[symbol]
+        if symbol.endswith(('USDT', 'BUSD', 'USDC', 'BTC', 'ETH')):
+            return symbol
+        return None
+
+    def connect(self) -> bool:
+        try:
+            import requests
+
+            if not self.credentials.get('api_key') or not self.credentials.get('api_secret'):
+                logger.error('Binance: Missing API key or API secret')
+                return False
+
+            resp = requests.get(
+                f"{self.base_url}/v3/account",
+                headers=self._headers(),
+                params=self._sign_params({}),
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                self.connected = True
+                self.get_account_info()
+                return True
+
+            logger.error(f"Binance authentication failed: {resp.status_code} - {resp.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Error connecting to Binance: {e}")
+            return False
+
+    def disconnect(self) -> bool:
+        self.connected = False
+        return True
+
+    def get_account_info(self) -> Dict:
+        try:
+            import requests
+
+            if not self.connected:
+                return {}
+
+            resp = requests.get(
+                f"{self.base_url}/v3/account",
+                headers=self._headers(),
+                params=self._sign_params({}),
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                acct = resp.json()
+                balances = acct.get('balances', [])
+                usdt = next((b for b in balances if b.get('asset') == 'USDT'), {'free': '0', 'locked': '0'})
+                balance = float(usdt.get('free', 0)) + float(usdt.get('locked', 0))
+                self.account_info = {
+                    'account_id': self.credentials.get('account_id') or self.credentials.get('account_number') or 'BINANCE',
+                    'balance': balance,
+                    'equity': balance,
+                    'margin_free': float(usdt.get('free', 0)),
+                    'currency': 'USDT',
+                    'broker': 'Binance',
+                }
+                return self.account_info
+        except Exception as e:
+            logger.error(f"Error getting Binance account info: {e}")
+
+        return {}
+
+    def get_positions(self) -> List[Dict]:
+        try:
+            import requests
+
+            if not self.connected:
+                return []
+
+            if self.market == 'futures':
+                resp = requests.get(
+                    f"{self.fapi_url}/v2/positionRisk",
+                    headers=self._headers(),
+                    params=self._sign_params({}),
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    result = []
+                    for pos in resp.json():
+                        amount = float(pos.get('positionAmt', 0))
+                        if amount == 0:
+                            continue
+                        result.append({
+                            'deal_id': pos.get('symbol', ''),
+                            'symbol': pos.get('symbol', ''),
+                            'type': 'BUY' if amount > 0 else 'SELL',
+                            'size': abs(amount),
+                            'level': float(pos.get('entryPrice', 0)),
+                            'profit_loss': float(pos.get('unRealizedProfit', 0)),
+                            'broker': 'Binance',
+                        })
+                    return result
+            else:
+                resp = requests.get(
+                    f"{self.base_url}/v3/openOrders",
+                    headers=self._headers(),
+                    params=self._sign_params({}),
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    return [{
+                        'deal_id': str(order.get('orderId', '')),
+                        'symbol': order.get('symbol', ''),
+                        'type': order.get('side', ''),
+                        'size': float(order.get('origQty', 0)),
+                        'level': float(order.get('price', 0)),
+                        'profit_loss': 0,
+                        'broker': 'Binance',
+                    } for order in resp.json()]
+        except Exception as e:
+            logger.error(f"Error getting Binance positions: {e}")
+
+        return []
+
+    def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
+        try:
+            import requests
+
+            if not self.connected:
+                return {'success': False, 'error': 'Not connected to Binance'}
+
+            instrument = self._normalize_symbol(symbol)
+            if not instrument:
+                return {'success': False, 'error': f'Unsupported Binance symbol: {symbol}. Use crypto pairs like BTCUSDT.'}
+
+            quantity = max(round(float(volume), 4), 0.001)
+            params = {
+                'symbol': instrument,
+                'side': order_type.upper(),
+                'type': 'MARKET',
+                'quantity': str(quantity),
+            }
+            endpoint = f"{self.fapi_url}/v1/order" if self.market == 'futures' else f"{self.base_url}/v3/order"
+            resp = requests.post(endpoint, headers=self._headers(), params=self._sign_params(params), timeout=15)
+            if resp.status_code == 200:
+                result = resp.json()
+                return {
+                    'success': True,
+                    'orderId': result.get('orderId', ''),
+                    'symbol': instrument,
+                    'type': order_type.upper(),
+                    'broker': 'Binance',
+                }
+            return {'success': False, 'error': resp.text}
+        except Exception as e:
+            logger.error(f"Error placing Binance order: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def close_position(self, position_id: str) -> Dict:
+        return {'success': False, 'error': 'Binance close_position not implemented in bot adapter'}
+
+    def get_trades(self) -> List[Dict]:
+        return []
+
+
+class FXCMConnection(BrokerConnection):
+    """FXCM broker connection via REST API."""
+
+    def __init__(self, credentials: Dict = None):
+        if credentials is None:
+            credentials = {
+                'api_key': os.getenv('FXCM_API_TOKEN', ''),
+                'account_number': os.getenv('FXCM_ACCOUNT_ID', ''),
+                'is_live': False,
+            }
+
+        super().__init__(BrokerType.FXM, credentials)
+        is_live = bool(credentials.get('is_live', False))
+        self.base_url = 'https://api.fxcm.com' if is_live else 'https://api-demo.fxcm.com'
+
+    def _headers(self, content_type: bool = True) -> Dict:
+        headers = {
+            'Authorization': f"Bearer {self.credentials.get('api_key', '')}",
+            'Accept': 'application/json',
+        }
+        if content_type:
+            headers['Content-Type'] = 'application/json'
+        return headers
+
+    def _normalize_symbol(self, symbol: str) -> Optional[str]:
+        if not symbol:
+            return None
+
+        symbol = symbol.upper().replace('_', '').replace('/', '')
+        symbol_map = {
+            'EURUSD': 'EUR/USD',
+            'GBPUSD': 'GBP/USD',
+            'USDJPY': 'USD/JPY',
+            'USDCHF': 'USD/CHF',
+            'AUDUSD': 'AUD/USD',
+            'NZDUSD': 'NZD/USD',
+            'USDCAD': 'USD/CAD',
+            'XAUUSD': 'XAU/USD',
+            'XAGUSD': 'XAG/USD',
+        }
+        if symbol in symbol_map:
+            return symbol_map[symbol]
+        if len(symbol) == 6 and symbol.isalpha():
+            return f"{symbol[:3]}/{symbol[3:]}"
+        return None
+
+    def _display_symbol(self, instrument: str) -> str:
+        return (instrument or '').replace('/', '').upper()
+
+    def connect(self) -> bool:
+        try:
+            import requests
+
+            if not self.credentials.get('api_key'):
+                logger.error('FXCM: Missing API token')
+                return False
+
+            resp = requests.get(
+                f"{self.base_url}/trading/get_model",
+                headers=self._headers(content_type=False),
+                params={'models': 'Account'},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                self.connected = True
+                self.get_account_info()
+                return True
+            logger.error(f"FXCM authentication failed: {resp.status_code} - {resp.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Error connecting to FXCM: {e}")
+            return False
+
+    def disconnect(self) -> bool:
+        self.connected = False
+        return True
+
+    def get_account_info(self) -> Dict:
+        try:
+            import requests
+
+            if not self.connected:
+                return {}
+
+            resp = requests.get(
+                f"{self.base_url}/trading/get_model",
+                headers=self._headers(content_type=False),
+                params={'models': 'Account'},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                accounts = data.get('accounts', data.get('response', {}).get('accounts', []))
+                account_id = str(self.credentials.get('account_number', '') or '')
+                account = {}
+                if isinstance(accounts, list):
+                    for item in accounts:
+                        if str(item.get('accountId', '')) == account_id or not account_id:
+                            account = item
+                            break
+                    if not account and accounts:
+                        account = accounts[0]
+                if account and not self.credentials.get('account_number'):
+                    self.credentials['account_number'] = str(account.get('accountId', ''))
+                self.account_info = {
+                    'account_id': account.get('accountId', ''),
+                    'balance': float(account.get('balance', 0)),
+                    'equity': float(account.get('equity', 0)),
+                    'margin_free': float(account.get('usableMargin', 0)),
+                    'currency': account.get('mc', 'USD'),
+                    'broker': 'FXCM',
+                }
+                return self.account_info
+        except Exception as e:
+            logger.error(f"Error getting FXCM account info: {e}")
+
+        return {}
+
+    def get_positions(self) -> List[Dict]:
+        try:
+            import requests
+
+            if not self.connected:
+                return []
+
+            resp = requests.get(
+                f"{self.base_url}/trading/get_model",
+                headers=self._headers(content_type=False),
+                params={'models': 'OpenPosition'},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                raw = data.get('open_positions', data.get('openPositions', []))
+                return [{
+                    'deal_id': str(pos.get('tradeId', '')),
+                    'symbol': self._display_symbol(pos.get('currency', '')),
+                    'type': 'BUY' if pos.get('isBuy', False) else 'SELL',
+                    'size': abs(float(pos.get('amountK', 0))),
+                    'level': float(pos.get('open', 0)),
+                    'profit_loss': float(pos.get('grossPL', 0)),
+                    'broker': 'FXCM',
+                } for pos in (raw if isinstance(raw, list) else [])]
+        except Exception as e:
+            logger.error(f"Error getting FXCM positions: {e}")
+
+        return []
+
+    def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
+        try:
+            import requests
+
+            if not self.connected:
+                return {'success': False, 'error': 'Not connected to FXCM'}
+
+            instrument = self._normalize_symbol(symbol)
+            if not instrument:
+                return {'success': False, 'error': f'Unsupported FXCM instrument: {symbol}'}
+
+            payload = {
+                'account_id': self.credentials.get('account_number', ''),
+                'symbol': instrument,
+                'is_buy': order_type.upper() == 'BUY',
+                'amount': max(float(volume), 1.0),
+                'order_type': 'AtMarket',
+                'time_in_force': 'GTC',
+            }
+            resp = requests.post(
+                f"{self.base_url}/trading/open_trade",
+                headers=self._headers(),
+                json=payload,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                result = resp.json().get('data', {})
+                return {
+                    'success': True,
+                    'orderId': result.get('orderId', ''),
+                    'tradeId': result.get('tradeId', ''),
+                    'symbol': self._display_symbol(instrument),
+                    'type': order_type.upper(),
+                    'broker': 'FXCM',
+                }
+            return {'success': False, 'error': resp.text}
+        except Exception as e:
+            logger.error(f"Error placing FXCM order: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def close_position(self, position_id: str) -> Dict:
+        try:
+            import requests
+
+            resp = requests.post(
+                f"{self.base_url}/trading/close_trade",
+                headers=self._headers(),
+                json={'trade_id': str(position_id)},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return {'success': True, 'trade_id': position_id, 'broker': 'FXCM'}
+            return {'success': False, 'error': resp.text}
+        except Exception as e:
+            logger.error(f"Error closing FXCM position: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_trades(self) -> List[Dict]:
+        return []
+
+
+class OANDAConnection(BrokerConnection):
+    """OANDA broker connection via REST API."""
+
+    def __init__(self, credentials: Dict = None):
+        if credentials is None:
+            credentials = {
+                'api_key': os.getenv('OANDA_API_KEY', ''),
+                'account_number': os.getenv('OANDA_ACCOUNT_ID', ''),
+                'is_live': False,
+            }
+
+        super().__init__(BrokerType.OANDA, credentials)
+        is_live = bool(credentials.get('is_live', False))
+        self.base_url = 'https://api-fxtrade.oanda.com/v3' if is_live else 'https://api-fxpractice.oanda.com/v3'
+
+    def _headers(self, content_type: bool = True) -> Dict:
+        headers = {
+            'Authorization': f"Bearer {self.credentials.get('api_key', '')}",
+            'Accept': 'application/json',
+        }
+        if content_type:
+            headers['Content-Type'] = 'application/json'
+        return headers
+
+    def _normalize_symbol(self, symbol: str) -> Optional[str]:
+        if not symbol:
+            return None
+
+        symbol = symbol.upper().replace('/', '').replace('_', '')
+        if len(symbol) == 6 and symbol.isalpha():
+            return f"{symbol[:3]}_{symbol[3:]}"
+        symbol_map = {
+            'XAUUSD': 'XAU_USD',
+            'XAGUSD': 'XAG_USD',
+        }
+        return symbol_map.get(symbol)
+
+    def _display_symbol(self, instrument: str) -> str:
+        return (instrument or '').replace('_', '').upper()
+
+    def connect(self) -> bool:
+        try:
+            import requests
+
+            if not self.credentials.get('api_key'):
+                logger.error('OANDA: Missing API key')
+                return False
+
+            account_id = self.credentials.get('account_number', '')
+            if account_id:
+                resp = requests.get(
+                    f"{self.base_url}/accounts/{account_id}/summary",
+                    headers=self._headers(content_type=False),
+                    timeout=10,
+                )
+            else:
+                resp = requests.get(
+                    f"{self.base_url}/accounts",
+                    headers=self._headers(content_type=False),
+                    timeout=10,
+                )
+
+            if resp.status_code == 200:
+                if not account_id:
+                    accounts = resp.json().get('accounts', [])
+                    if accounts:
+                        self.credentials['account_number'] = accounts[0].get('id', '')
+                self.connected = True
+                self.get_account_info()
+                return True
+            logger.error(f"OANDA authentication failed: {resp.status_code} - {resp.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Error connecting to OANDA: {e}")
+            return False
+
+    def disconnect(self) -> bool:
+        self.connected = False
+        return True
+
+    def get_account_info(self) -> Dict:
+        try:
+            import requests
+
+            if not self.connected:
+                return {}
+
+            account_id = self.credentials.get('account_number', '')
+            if not account_id:
+                return {}
+
+            resp = requests.get(
+                f"{self.base_url}/accounts/{account_id}/summary",
+                headers=self._headers(content_type=False),
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                account = resp.json().get('account', {})
+                self.account_info = {
+                    'account_id': account.get('id', account_id),
+                    'balance': float(account.get('balance', 0)),
+                    'equity': float(account.get('NAV', 0)),
+                    'margin_free': float(account.get('marginAvailable', 0)),
+                    'currency': account.get('currency', 'USD'),
+                    'broker': 'OANDA',
+                }
+                return self.account_info
+        except Exception as e:
+            logger.error(f"Error getting OANDA account info: {e}")
+
+        return {}
+
+    def get_positions(self) -> List[Dict]:
+        try:
+            import requests
+
+            if not self.connected:
+                return []
+
+            account_id = self.credentials.get('account_number', '')
+            resp = requests.get(
+                f"{self.base_url}/accounts/{account_id}/openTrades",
+                headers=self._headers(content_type=False),
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return [{
+                    'deal_id': trade.get('id', ''),
+                    'symbol': self._display_symbol(trade.get('instrument', '')),
+                    'type': 'BUY' if float(trade.get('currentUnits', 0)) > 0 else 'SELL',
+                    'size': abs(float(trade.get('currentUnits', 0))),
+                    'level': float(trade.get('price', 0)),
+                    'profit_loss': float(trade.get('unrealizedPL', 0)),
+                    'broker': 'OANDA',
+                } for trade in resp.json().get('trades', [])]
+        except Exception as e:
+            logger.error(f"Error getting OANDA positions: {e}")
+
+        return []
+
+    def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
+        try:
+            import requests
+
+            if not self.connected:
+                return {'success': False, 'error': 'Not connected to OANDA'}
+
+            instrument = self._normalize_symbol(symbol)
+            if not instrument:
+                return {'success': False, 'error': f'Unsupported OANDA instrument: {symbol}'}
+
+            units = max(1, int(round(float(volume))))
+            if order_type.upper() == 'SELL':
+                units = -units
+
+            payload = {
+                'order': {
+                    'instrument': instrument,
+                    'units': str(units),
+                    'type': 'MARKET',
+                    'timeInForce': 'FOK',
+                    'positionFill': 'DEFAULT',
+                }
+            }
+            account_id = self.credentials.get('account_number', '')
+            resp = requests.post(
+                f"{self.base_url}/accounts/{account_id}/orders",
+                headers=self._headers(),
+                json=payload,
+                timeout=15,
+            )
+            if resp.status_code == 201:
+                result = resp.json().get('orderFillTransaction', {})
+                return {
+                    'success': True,
+                    'orderId': result.get('id', ''),
+                    'deal_id': result.get('tradeOpened', {}).get('tradeID', ''),
+                    'symbol': self._display_symbol(instrument),
+                    'type': order_type.upper(),
+                    'broker': 'OANDA',
+                }
+            return {'success': False, 'error': resp.text}
+        except Exception as e:
+            logger.error(f"Error placing OANDA order: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def close_position(self, position_id: str) -> Dict:
+        try:
+            import requests
+
+            account_id = self.credentials.get('account_number', '')
+            resp = requests.put(
+                f"{self.base_url}/accounts/{account_id}/trades/{position_id}/close",
+                headers=self._headers(),
+                json={'units': 'ALL'},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return {'success': True, 'trade_id': position_id, 'broker': 'OANDA'}
+            return {'success': False, 'error': resp.text}
+        except Exception as e:
+            logger.error(f"Error closing OANDA position: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_trades(self) -> List[Dict]:
         return []
 
 
@@ -1992,8 +2624,14 @@ class BrokerManager:
         try:
             if broker_type == BrokerType.METATRADER5:
                 connection = MT5Connection(credentials)
+            elif broker_type == BrokerType.BINANCE:
+                connection = BinanceConnection(credentials)
+            elif broker_type == BrokerType.OANDA:
+                connection = OANDAConnection(credentials)
             elif broker_type == BrokerType.IG:
                 connection = IGConnection(credentials)
+            elif broker_type == BrokerType.FXM:
+                connection = FXCMConnection(credentials)
             elif broker_type == BrokerType.XM:
                 connection = XMConnection(credentials)
             else:
@@ -2089,6 +2727,30 @@ class BrokerManager:
 
 # Initialize broker manager
 broker_manager = BrokerManager()
+
+
+def canonicalize_broker_name(broker_name: str) -> str:
+    normalized = (broker_name or '').strip().lower()
+    broker_map = {
+        'ig': 'IG Markets',
+        'ig markets': 'IG Markets',
+        'ig.com': 'IG Markets',
+        'metaquotes': 'MetaQuotes',
+        'metatrader 5': 'MetaTrader 5',
+        'metatrader5': 'MetaTrader 5',
+        'mt5': 'MetaTrader 5',
+        'xm': 'XM',
+        'xm global': 'XM Global',
+        'binance': 'Binance',
+        'fxcm': 'FXCM',
+        'fxm': 'FXCM',
+        'oanda': 'OANDA',
+    }
+    return broker_map.get(normalized, broker_name)
+
+
+def is_mt5_broker_name(broker_name: str) -> bool:
+    return canonicalize_broker_name(broker_name) in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']
 
 # ==================== IN-MEMORY STORAGE ====================
 # Store demo trades placed via API (temporary storage for this session)
@@ -3122,6 +3784,7 @@ def connect_broker():
         # Map broker type string to enum
         broker_type_map = {
             'mt5': BrokerType.METATRADER5,
+            'binance': BrokerType.BINANCE,
             'ib': BrokerType.INTERACTIVE_BROKERS,
             'oanda': BrokerType.OANDA,
             'xm': BrokerType.XM,
@@ -3130,6 +3793,7 @@ def connect_broker():
             'exness': BrokerType.EXNESS,
             'darwinex': BrokerType.DARWINEX,
             'ig': BrokerType.IG,
+            'fxcm': BrokerType.FXM,
             'fxm': BrokerType.FXM,
             'avatrade': BrokerType.AVATRADE,
             'fpmarkets': BrokerType.FPMARKETS,
@@ -3637,6 +4301,11 @@ VALID_SYMBOLS = {
     'US100',    # Nasdaq 100 (tech-heavy)
 }
 
+BINANCE_VALID_SYMBOLS = {
+    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT',
+    'AVAXUSDT', 'MATICUSDT', 'LINKUSDT', 'LTCUSDT', 'TRXUSDT', 'DOTUSDT', 'ATOMUSDT',
+}
+
 SYMBOL_MAPPING = {
     # OLD -> NEW SYMBOL CORRECTIONS
     # Metals
@@ -3674,8 +4343,34 @@ SYMBOL_MAPPING = {
     'ETHEREUM': 'EURUSD', 'ETH': 'EURUSD',
 }
 
-def validate_and_correct_symbols(symbols):
-    """Validate symbols and correct old/unavailable ones to valid MetaQuotes-Demo symbols"""
+def validate_and_correct_symbols(symbols, broker_name=None):
+    """Validate symbols based on broker type and correct old/unavailable ones when possible."""
+    broker_name = canonicalize_broker_name(broker_name or '')
+
+    if broker_name == 'Binance':
+        if not symbols:
+            return ['BTCUSDT']
+
+        corrected = []
+        binance_symbol_map = {
+            'BTCUSD': 'BTCUSDT', 'BTC/USDT': 'BTCUSDT', 'BTC_USDT': 'BTCUSDT',
+            'ETHUSD': 'ETHUSDT', 'ETH/USDT': 'ETHUSDT', 'ETH_USDT': 'ETHUSDT',
+            'BNBUSD': 'BNBUSDT', 'BNB/USDT': 'BNBUSDT', 'SOLUSD': 'SOLUSDT',
+            'XRPUSD': 'XRPUSDT', 'ADAUSD': 'ADAUSDT', 'DOGEUSD': 'DOGEUSDT',
+        }
+
+        for symbol in symbols:
+            normalized = str(symbol).upper().replace('/', '').replace('_', '')
+            normalized = binance_symbol_map.get(str(symbol).upper(), normalized)
+            normalized = binance_symbol_map.get(normalized, normalized)
+
+            if normalized in BINANCE_VALID_SYMBOLS and normalized not in corrected:
+                corrected.append(normalized)
+            else:
+                logger.warning(f"⚠️ Unsupported Binance symbol {symbol} - skipping")
+
+        return corrected or ['BTCUSDT']
+
     if not symbols:
         return ['EURUSD']  # Default fallback
     
@@ -4819,18 +5514,23 @@ def save_broker_credentials():
     Supports multiple brokers:
     - MetaQuotes/MT5: account_number, password, server, is_live
     - IG Markets: api_key, username, password, is_live
-    - XM Global: account_number, password, server, is_live
+    - XM Global/XM: account_number, password, server, is_live
+    - Binance: api_key, api_secret, optional market/server
+    - FXCM: token/api_key, optional account_number
+    - OANDA: api_key, account_number
     """
     try:
         user_id = request.user_id
         data = request.json
         
-        broker_name = data.get('broker_name') or data.get('broker')
+        broker_name = canonicalize_broker_name(data.get('broker_name') or data.get('broker'))
         account_number = data.get('account_number')
         password = data.get('password')
         server = data.get('server')
         api_key = data.get('api_key')  # For IG Markets
         username = data.get('username')  # For IG Markets
+        api_secret = data.get('api_secret')
+        token = data.get('token')
         is_live = data.get('is_live', False)
         
         if not broker_name:
@@ -4843,7 +5543,34 @@ def save_broker_credentials():
                     'success': False,
                     'error': 'IG Markets requires: api_key, username, password'
                 }), 400
-        elif broker_name in ['MetaQuotes', 'XM Global', 'MetaTrader 5']:
+        elif broker_name in ['Binance']:
+            password = api_secret or password
+            if not api_key or not password:
+                return jsonify({
+                    'success': False,
+                    'error': 'Binance requires: api_key, api_secret'
+                }), 400
+            server = (server or data.get('market') or 'spot').lower()
+            account_number = account_number or server.upper()
+        elif broker_name in ['FXCM']:
+            api_key = token or api_key or password
+            if not api_key:
+                return jsonify({
+                    'success': False,
+                    'error': 'FXCM requires: token'
+                }), 400
+            account_number = account_number or 'FXCM'
+            server = server or 'REST-API'
+            password = ''
+        elif broker_name in ['OANDA']:
+            if not api_key or not account_number:
+                return jsonify({
+                    'success': False,
+                    'error': 'OANDA requires: api_key, account_number'
+                }), 400
+            server = server or 'REST-API'
+            password = ''
+        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']:
             if not account_number or not password:
                 return jsonify({
                     'success': False,
@@ -4854,7 +5581,7 @@ def save_broker_credentials():
         else:
             return jsonify({
                 'success': False,
-                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, IG Markets, XM Global'
+                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, IG Markets, XM Global/XM, Binance, FXCM, OANDA'
             }), 400
         
         created_at = datetime.now().isoformat()
@@ -4888,12 +5615,18 @@ def save_broker_credentials():
                     SET api_key = ?, username = ?, password = ?, is_live = ?, updated_at = ?
                     WHERE credential_id = ?
                 ''', (api_key, username, password, 1 if is_live else 0, created_at, credential_id))
-            else:
+            elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']:
                 cursor.execute('''
                     UPDATE broker_credentials
                     SET account_number = ?, password = ?, server = ?, is_live = ?, updated_at = ?
                     WHERE credential_id = ?
                 ''', (account_number, password, server, 1 if is_live else 0, created_at, credential_id))
+            else:
+                cursor.execute('''
+                    UPDATE broker_credentials
+                    SET account_number = ?, password = ?, server = ?, api_key = ?, username = ?, is_live = ?, updated_at = ?
+                    WHERE credential_id = ?
+                ''', (account_number, password, server, api_key or '', username or '', 1 if is_live else 0, created_at, credential_id))
             
             logger.info(f"✅ Updated broker credential for user {user_id}: {broker_name} | Account: {account_id}")
         else:
@@ -4972,13 +5705,13 @@ def test_broker_connection():
     try:
         user_id = request.user_id
         data = request.json
-        broker = data.get('broker', '')
+        broker = canonicalize_broker_name(data.get('broker', ''))
         is_live = data.get('is_live', False)
 
         logger.info(f"🔌 Testing broker connection: {broker} | User: {user_id}")
 
         # ==================== IG MARKETS ====================
-        if broker.lower() in ['ig', 'ig markets', 'ig.com']:
+        if broker == 'IG Markets':
             api_key = data.get('api_key')
             ig_username = data.get('username')
             ig_password = data.get('password')
@@ -5051,6 +5784,135 @@ def test_broker_connection():
                     'error': f'IG authentication failed: {str(e)}'
                 }), 500
 
+        # ==================== BINANCE ====================
+        elif broker == 'Binance':
+            api_key = data.get('api_key')
+            api_secret = data.get('api_secret') or data.get('password')
+            market = (data.get('market') or data.get('server') or 'spot').lower()
+            account_id = data.get('account_number') or market.upper()
+
+            if not all([api_key, api_secret]):
+                return jsonify({'success': False, 'error': 'Missing Binance fields: api_key, api_secret'}), 400
+
+            binance_conn = BinanceConnection(credentials={
+                'api_key': api_key,
+                'api_secret': api_secret,
+                'account_number': account_id,
+                'server': market,
+                'is_live': is_live,
+            })
+            if not binance_conn.connect():
+                return jsonify({'success': False, 'error': 'Failed to authenticate with Binance'}), 401
+
+            account_info = binance_conn.get_account_info()
+            binance_conn.disconnect()
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            credential_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO broker_credentials 
+                (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            ''', (credential_id, user_id, 'Binance', account_id, api_secret, market, int(is_live), api_key, datetime.now().isoformat(), datetime.now().isoformat()))
+            conn.commit()
+            conn.close()
+
+            return jsonify({
+                'success': True,
+                'message': f'Successfully connected to Binance account {account_id}',
+                'credential_id': credential_id,
+                'broker': 'Binance',
+                'account_number': account_id,
+                'currency': account_info.get('currency', 'USDT'),
+                'is_live': is_live,
+                'status': 'CONNECTED',
+                'timestamp': datetime.now().isoformat()
+            }), 200
+
+        # ==================== FXCM ====================
+        elif broker == 'FXCM':
+            token = data.get('token') or data.get('api_key') or data.get('password')
+            account_id = data.get('account_number') or 'FXCM'
+            if not token:
+                return jsonify({'success': False, 'error': 'Missing FXCM field: token'}), 400
+
+            fxcm_conn = FXCMConnection(credentials={
+                'api_key': token,
+                'account_number': data.get('account_number', ''),
+                'is_live': is_live,
+            })
+            if not fxcm_conn.connect():
+                return jsonify({'success': False, 'error': 'Failed to authenticate with FXCM'}), 401
+
+            account_info = fxcm_conn.get_account_info()
+            fxcm_conn.disconnect()
+            account_id = str(account_info.get('account_id') or account_id)
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            credential_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO broker_credentials 
+                (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            ''', (credential_id, user_id, 'FXCM', account_id, '', 'REST-API', int(is_live), token, datetime.now().isoformat(), datetime.now().isoformat()))
+            conn.commit()
+            conn.close()
+
+            return jsonify({
+                'success': True,
+                'message': f'Successfully connected to FXCM account {account_id}',
+                'credential_id': credential_id,
+                'broker': 'FXCM',
+                'account_number': account_id,
+                'currency': account_info.get('currency', 'USD'),
+                'is_live': is_live,
+                'status': 'CONNECTED',
+                'timestamp': datetime.now().isoformat()
+            }), 200
+
+        # ==================== OANDA ====================
+        elif broker == 'OANDA':
+            api_key = data.get('api_key')
+            account_id = data.get('account_number') or data.get('account_id')
+            if not api_key or not account_id:
+                return jsonify({'success': False, 'error': 'Missing OANDA fields: api_key, account_number'}), 400
+
+            oanda_conn = OANDAConnection(credentials={
+                'api_key': api_key,
+                'account_number': account_id,
+                'is_live': is_live,
+            })
+            if not oanda_conn.connect():
+                return jsonify({'success': False, 'error': 'Failed to authenticate with OANDA'}), 401
+
+            account_info = oanda_conn.get_account_info()
+            oanda_conn.disconnect()
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            credential_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO broker_credentials 
+                (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            ''', (credential_id, user_id, 'OANDA', account_id, '', 'REST-API', int(is_live), api_key, datetime.now().isoformat(), datetime.now().isoformat()))
+            conn.commit()
+            conn.close()
+
+            return jsonify({
+                'success': True,
+                'message': f'Successfully connected to OANDA account {account_id}',
+                'credential_id': credential_id,
+                'broker': 'OANDA',
+                'account_number': account_id,
+                'currency': account_info.get('currency', 'USD'),
+                'is_live': is_live,
+                'status': 'CONNECTED',
+                'timestamp': datetime.now().isoformat()
+            }), 200
+
         # ==================== MT5 BROKERS ====================
         else:
             account = data.get('account_number', '')
@@ -5066,8 +5928,14 @@ def test_broker_connection():
             
             # Fix server name for MT5 brokers
             if broker.lower() in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5']:
-                if not server or server != MT5_CONFIG['server']:
-                    server = MT5_CONFIG['server']
+                broker_l = broker.lower()
+                if broker_l in ['xm', 'xm global']:
+                    expected_server = 'XMGlobal-Demo' if not is_live else 'XMGlobal-Live'
+                else:
+                    expected_server = 'MetaQuotes-Demo' if not is_live else 'MetaQuotes-Live'
+
+                if not server or server != expected_server:
+                    server = expected_server
                     logger.info(f"   Corrected server to: {server}")
             
             # Try to get actual balance from MT5 account
@@ -5647,7 +6515,7 @@ def create_bot():
 
             # Verify credential exists AND belongs to this user
             cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live 
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
                 FROM broker_credentials 
                 WHERE credential_id = ? AND user_id = ?
             ''', (credential_id, user_id))
@@ -5662,6 +6530,22 @@ def create_bot():
             is_live = credential_data['is_live']
             mode = 'live' if is_live else 'demo'
 
+            # Fail fast for Binance credentials so users don't create bots that silently fail at runtime.
+            if canonicalize_broker_name(broker_name) == 'Binance':
+                binance_conn = BinanceConnection(credentials={
+                    'api_key': credential_data.get('api_key'),
+                    'api_secret': credential_data.get('password'),
+                    'account_number': account_number,
+                    'server': credential_data.get('server') or 'spot',
+                    'is_live': bool(is_live),
+                })
+                if not binance_conn.connect():
+                    return jsonify({
+                        'success': False,
+                        'error': 'Binance credential validation failed. Please re-check API key/secret and account mode.'
+                    }), 400
+                binance_conn.disconnect()
+
             print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
 
             # Bot configuration
@@ -5669,7 +6553,7 @@ def create_bot():
             import time
             bot_id = data.get('botId') or f"bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
             raw_symbols = data.get('symbols', ['EURUSD'])
-            symbols = validate_and_correct_symbols(raw_symbols)  # ✅ AUTO-CORRECT OLD SYMBOLS
+            symbols = validate_and_correct_symbols(raw_symbols, broker_name)  # ✅ AUTO-CORRECT OLD SYMBOLS
             strategy = data.get('strategy', 'Trend Following')
             risk_per_trade = float(data.get('riskPerTrade', 100))
             max_daily_loss = float(data.get('maxDailyLoss', 500))
@@ -5866,9 +6750,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 # Detect broker type
                 broker_type = bot_config.get('broker_type', 'MT5')
                 is_ig = broker_type == 'IG Markets'
+                is_mt5 = broker_type in ['MetaTrader 5', 'MetaQuotes', 'XM Global', 'XM', 'MT5']
                 
                 mt5_conn = None
                 ig_conn = None
+                active_conn = None
                 
                 if is_ig:
                     # IG Markets broker - use REST API via IGConnection
@@ -5891,11 +6777,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 time.sleep(trading_interval)
                                 continue
                         logger.info(f"Bot {bot_id}: Connected to IG Markets for trading")
+                        active_conn = ig_conn
                     except Exception as e:
                         logger.error(f"Bot {bot_id}: IG connection exception: {e}")
                         time.sleep(trading_interval)
                         continue
-                else:
+                elif is_mt5:
                     # MT5 broker - connect via terminal SDK
                     try:
                         if bot_config.get('mode') == 'live' and bot_credentials:
@@ -5924,9 +6811,35 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
                                 time.sleep(trading_interval)
                                 continue
+                        active_conn = mt5_conn
                         
                     except Exception as e:
                         logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
+                        time.sleep(trading_interval)
+                        continue
+                else:
+                    try:
+                        active_conn = bot_config.get('broker_conn')
+                        if active_conn is None or not active_conn.connected:
+                            credential_id = bot_config.get('credentialId')
+                            if credential_id:
+                                broker_type_new, new_conn = get_broker_connection(credential_id, user_id, bot_id)
+                                if new_conn:
+                                    active_conn = new_conn
+                                    bot_config['broker_conn'] = active_conn
+                                    bot_config['broker_type'] = broker_type_new
+                                    broker_type = broker_type_new
+                                else:
+                                    logger.error(f"Bot {bot_id}: Broker reconnection failed")
+                                    time.sleep(trading_interval)
+                                    continue
+                            else:
+                                logger.error(f"Bot {bot_id}: No credentialId for broker reconnection")
+                                time.sleep(trading_interval)
+                                continue
+                        logger.info(f"Bot {bot_id}: Connected to {broker_type} for trading")
+                    except Exception as e:
+                        logger.error(f"Bot {bot_id}: Broker connection exception: {e}")
                         time.sleep(trading_interval)
                         continue
                 
@@ -5996,7 +6909,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             except Exception as e:
                                 logger.error(f"Bot {bot_id}: IG place_order exception: {e}")
                                 order_result = {'success': False, 'error': str(e)}
-                        else:
+                        elif is_mt5:
                             # MT5 - place order with retry/fallback logic
                             symbols_to_try = [symbol, 'EURUSD']
                             
@@ -6030,6 +6943,20 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     if index < len(symbols_to_try) - 1:
                                         continue
                                     break
+                        else:
+                            try:
+                                order_result = active_conn.place_order(
+                                    symbol=symbol,
+                                    order_type=order_type,
+                                    volume=round(adjusted_volume, 4),
+                                )
+                                if order_result.get('success', False):
+                                    logger.info(f"✅ Bot {bot_id}: {broker_type} order placed on {order_result.get('symbol', symbol)}")
+                                else:
+                                    logger.warning(f"Bot {bot_id}: {broker_type} order failed on {symbol}: {order_result.get('error')}")
+                            except Exception as e:
+                                logger.error(f"Bot {bot_id}: {broker_type} place_order exception: {e}")
+                                order_result = {'success': False, 'error': str(e)}
                         
                         if order_result and order_result.get('success', False):
                             # Get the order ticket/deal_id for precise matching
@@ -6039,8 +6966,10 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             positions = []
                             if is_ig and ig_conn:
                                 positions = ig_conn.get_positions()
-                            elif mt5_conn:
+                            elif is_mt5 and mt5_conn:
                                 positions = mt5_conn.get_positions()
+                            elif active_conn:
+                                positions = active_conn.get_positions()
                             
                             if positions:
                                 matched_pos = None
@@ -6058,7 +6987,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 # 2. Fallback: match by symbol+direction
                                 if not matched_pos:
                                     for pos in positions:
-                                        pos_symbol = pos.get('symbol') or pos.get('epic', '')
+                                        pos_symbol = pos.get('symbol') or pos.get('instrument') or pos.get('epic', '')
                                         pos_type = pos.get('type') or pos.get('direction', '')
                                         if (pos_symbol == symbol or symbol in pos_symbol) and pos_type.upper() == order_type.upper():
                                             matched_pos = pos
@@ -6066,13 +6995,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 
                                 if matched_pos:
                                     pos = matched_pos
-                                    pos_symbol = pos.get('symbol') or pos.get('epic', '')
+                                    pos_symbol = pos.get('symbol') or pos.get('instrument') or pos.get('epic', '')
                                     pos_type = pos.get('type') or pos.get('direction', '')
                                     
                                     # Use position PnL only if matched by ticket (exact match)
                                     # For symbol+direction fallback, PnL is ~0 since trade was just placed
                                     if matched_by_ticket:
-                                        trade_profit = pos.get('pnl') or pos.get('profit_loss', 0)
+                                        trade_profit = pos.get('pnl') or pos.get('profit_loss') or pos.get('unrealizedPL', 0)
                                     else:
                                         trade_profit = 0
                                     
@@ -6097,7 +7026,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             'isWinning': trade_profit > 0,
                                             'riskSettings': bot_config.get('riskSettings', {}),
                                             'signals': trade_params.get('signals', None),
-                                            'source': 'REAL_IG' if is_ig else 'REAL_MT5',
+                                                'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}",
                                             'broker': broker_type,
                                     }
                                     
@@ -6164,14 +7093,10 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 
                 # Update account balance (broker-aware)
                 try:
-                    if is_ig and ig_conn:
-                        account_info = ig_conn.get_account_info()
+                    if active_conn:
+                        account_info = active_conn.get_account_info()
                         if account_info:
-                            bot_config['accountBalance'] = account_info.get('balance', 0)
-                    elif mt5_conn:
-                        account_info = mt5_conn.get_account_info()
-                        if account_info:
-                            bot_config['accountBalance'] = account_info.get('balance', 0)
+                            bot_config['accountBalance'] = account_info.get('balance', account_info.get('equity', 0))
                 except Exception as e:
                     logger.warning(f"Bot {bot_id}: Could not update account balance: {e}")
                 
@@ -6201,6 +7126,9 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
     - IG Markets (REST API)
     - MetaQuotes/MT5 (Terminal SDK)
     - XM Global (MT5)
+    - Binance (REST API)
+    - FXCM (REST API)
+    - OANDA (REST API)
     
     Returns: (broker_type, connection_object) or (None, error_message)
     """
@@ -6225,7 +7153,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             return None, error_msg
         
         cred = dict(cred_row)
-        broker_name = cred['broker_name']
+        broker_name = canonicalize_broker_name(cred['broker_name'])
         
         logger.info(f"[Broker Detection] Bot {bot_id}: Detected broker type: {broker_name}")
         
@@ -6257,9 +7185,82 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 error_msg = f"Failed to connect to IG Markets for user {username}"
                 logger.error(error_msg)
                 return None, error_msg
+
+        elif broker_name == 'Binance':
+            logger.info(f"[Broker Switch] Bot {bot_id}: Using Binance REST API")
+            api_key = cred['api_key']
+            api_secret = cred['password']
+            account_number = cred['account_number']
+            server = cred['server'] or 'spot'
+            is_live = cred['is_live']
+
+            if not api_key or not api_secret:
+                error_msg = 'Binance: Missing API key or API secret'
+                logger.error(error_msg)
+                return None, error_msg
+
+            binance_conn = BinanceConnection(credentials={
+                'api_key': api_key,
+                'api_secret': api_secret,
+                'account_number': account_number,
+                'server': server,
+                'is_live': is_live,
+            })
+            if binance_conn.connect():
+                logger.info(f"✅ Bot {bot_id}: Connected to Binance ({account_number or server})")
+                return 'Binance', binance_conn
+            error_msg = 'Failed to connect to Binance'
+            logger.error(error_msg)
+            return None, error_msg
+
+        elif broker_name == 'FXCM':
+            logger.info(f"[Broker Switch] Bot {bot_id}: Using FXCM REST API")
+            token = cred['api_key'] or cred['password']
+            account_number = cred['account_number']
+            is_live = cred['is_live']
+
+            if not token:
+                error_msg = 'FXCM: Missing API token'
+                logger.error(error_msg)
+                return None, error_msg
+
+            fxcm_conn = FXCMConnection(credentials={
+                'api_key': token,
+                'account_number': account_number,
+                'is_live': is_live,
+            })
+            if fxcm_conn.connect():
+                logger.info(f"✅ Bot {bot_id}: Connected to FXCM ({account_number})")
+                return 'FXCM', fxcm_conn
+            error_msg = 'Failed to connect to FXCM'
+            logger.error(error_msg)
+            return None, error_msg
+
+        elif broker_name == 'OANDA':
+            logger.info(f"[Broker Switch] Bot {bot_id}: Using OANDA REST API")
+            api_key = cred['api_key']
+            account_number = cred['account_number']
+            is_live = cred['is_live']
+
+            if not api_key or not account_number:
+                error_msg = 'OANDA: Missing API key or account number'
+                logger.error(error_msg)
+                return None, error_msg
+
+            oanda_conn = OANDAConnection(credentials={
+                'api_key': api_key,
+                'account_number': account_number,
+                'is_live': is_live,
+            })
+            if oanda_conn.connect():
+                logger.info(f"✅ Bot {bot_id}: Connected to OANDA ({account_number})")
+                return 'OANDA', oanda_conn
+            error_msg = 'Failed to connect to OANDA'
+            logger.error(error_msg)
+            return None, error_msg
         
         # ✅ METATRADER 5 - MetaQuotes or XM Global
-        elif broker_name in ['MetaQuotes', 'XM Global', 'MetaTrader 5']:
+        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']:
             logger.info(f"[Broker Switch] Bot {bot_id}: Using MetaTrader 5 SDK")
             account_number = cred['account_number']
             password = cred['password']
@@ -6280,12 +7281,13 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             logger.info(f"Bot {bot_id}: Connecting to MT5 - Account: {account_number}, Server: {server}")
             
             # Create MT5 connection
-            mt5_conn = MT5Connection(
-                account=account_number,
-                password=password,
-                server=server,
-                mt5_path=MT5_CONFIG.get('path')
-            )
+            mt5_conn = MT5Connection(credentials={
+                'account': int(account_number),
+                'password': password,
+                'server': server,
+                'broker': 'XM' if broker_name in ['XM', 'XM Global'] else 'MetaQuotes',
+                'path': MT5_CONFIG.get('path')
+            })
             
             if mt5_conn.connect():
                 logger.info(f"✅ Bot {bot_id}: Connected to MT5 ({account_number}@{server})")
@@ -6296,7 +7298,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 return None, error_msg
         
         else:
-            error_msg = f"Unknown broker type: {broker_name}. Supported: IG Markets, MetaQuotes, XM Global"
+            error_msg = f"Unknown broker type: {broker_name}. Supported: IG Markets, MetaQuotes, XM Global/XM, Binance, FXCM, OANDA"
             logger.error(error_msg)
             return None, error_msg
     
@@ -6424,7 +7426,7 @@ def start_bot():
         # ✅ VALIDATE & CORRECT BOT SYMBOLS IMMEDIATELY (in case they're old/unavailable)
         # This prevents users from being shown old symbols and ensures trades use valid ones
         original_symbols = bot_config.get('symbols', ['EURUSD'])
-        corrected_symbols = validate_and_correct_symbols(original_symbols)
+        corrected_symbols = validate_and_correct_symbols(original_symbols, broker_type)
         if corrected_symbols != original_symbols:
             logger.info(f"📝 Bot {bot_id} symbols corrected: {original_symbols} → {corrected_symbols}")
             bot_config['symbols'] = corrected_symbols
@@ -6446,7 +7448,7 @@ def start_bot():
         logger.info(f"✅ Bot {bot_id}: All validation checks passed - ready to start trading")
         
         # Validate symbols are available
-        validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSD']))
+        validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSD']), broker_type)
         bot_config['symbols'] = validated_symbols
         logger.info(f"📍 Bot {bot_id}: Trading symbols validated: {validated_symbols}")
         
@@ -7913,24 +8915,44 @@ def approve_withdrawal(withdrawal_id):
 import random as rand
 
 # --- IG API Integration ---
-from ig_service import ig_api
-app.register_blueprint(ig_api)
+try:
+    from ig_service import ig_api
+    app.register_blueprint(ig_api)
+    logger.info("✅ IG API service loaded")
+except ImportError:
+    logger.warning("⚠️ ig_service module not found - IG integration disabled")
 
 # --- OANDA API Integration ---
-from oanda_service import oanda_api
-app.register_blueprint(oanda_api)
+try:
+    from oanda_service import oanda_api
+    app.register_blueprint(oanda_api)
+    logger.info("✅ OANDA API service loaded")
+except ImportError:
+    logger.warning("⚠️ oanda_service module not found - OANDA integration disabled")
 
 # --- FXCM API Integration ---
-from fxcm_service import fxcm_api
-app.register_blueprint(fxcm_api)
+try:
+    from fxcm_service import fxcm_api
+    app.register_blueprint(fxcm_api)
+    logger.info("✅ FXCM API service loaded")
+except ImportError:
+    logger.warning("⚠️ fxcm_service module not found - FXCM integration disabled")
 
 # --- Binance API Integration ---
-from binance_service import binance_api
-app.register_blueprint(binance_api)
+try:
+    from binance_service import binance_api
+    app.register_blueprint(binance_api)
+    logger.info("✅ Binance API service loaded")
+except ImportError:
+    logger.warning("⚠️ binance_service module not found - Binance integration disabled")
 
 # --- Unified Broker + Crypto Strategies ---
-from unified_broker_service import unified_broker_api
-app.register_blueprint(unified_broker_api)
+try:
+    from unified_broker_service import unified_broker_api
+    app.register_blueprint(unified_broker_api)
+    logger.info("✅ Unified broker service loaded")
+except ImportError:
+    logger.warning("⚠️ unified_broker_service module not found - Unified broker integration disabled")
 
 # Example: Use IG API in bot trading logic
 # (You can call these functions from your bot trading threads)
@@ -8885,6 +9907,9 @@ if __name__ == '__main__':
     # logger.info("Initializing demo trading bots...")
     # initialize_demo_bots()
     # logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
+    
+    # Repopulate active bots from database
+    repopulate_active_bots()
     
     # Load user-created bots from database
     logger.info("Loading user-created bots from database...")

@@ -1,6 +1,7 @@
 import os
 import logging
 from flask import Blueprint, jsonify, request
+import sqlite3
 import requests
 from datetime import datetime, timedelta
 
@@ -8,12 +9,8 @@ logger = logging.getLogger(__name__)
 
 ig_api = Blueprint('ig_api', __name__)
 
-# In-memory session token cache (for demo; use DB/Redis for production)
-_ig_tokens = {
-    'CST': None,
-    'XST': None,
-    'expires_at': None
-}
+# Per-user token cache; key format: user_id:username:mode.
+_ig_tokens = {}
 
 IG_API_KEY = os.getenv("IG_API_KEY")
 IG_USERNAME = os.getenv("IG_USERNAME")
@@ -21,12 +18,100 @@ IG_PASSWORD = os.getenv("IG_PASSWORD")
 IG_ACCOUNT_ID = os.getenv("IG_ACCOUNT_ID")
 IG_DEMO_MODE = os.getenv("IG_DEMO_MODE", "true").lower() == "true"
 BASE_URL = "https://demo-api.ig.com/gateway/deal" if IG_DEMO_MODE else "https://api.ig.com/gateway/deal"
+DATABASE_PATH = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
+
+
+def _get_db_connection():
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _get_base_url(credentials=None):
+    creds = credentials or getattr(request, 'ig_credentials', None)
+    if not creds:
+        return BASE_URL
+    is_live = bool(creds.get('is_live', False))
+    return "https://api.ig.com/gateway/deal" if is_live else "https://demo-api.ig.com/gateway/deal"
+
+
+def _token_cache_key(user_id, credentials):
+    mode = 'live' if bool(credentials.get('is_live', False)) else 'demo'
+    return f"{user_id}:{credentials.get('username', '')}:{mode}"
+
+
+def _get_user_ig_credentials(user_id):
+    conn = _get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT api_key, username, password, account_number, server, is_live
+            FROM broker_credentials
+            WHERE user_id = ?
+              AND is_active = 1
+              AND broker_name IN ('IG Markets', 'IG.com', 'IG')
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+        ''', (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        credentials = dict(row)
+        return {
+            'api_key': credentials.get('api_key') or IG_API_KEY,
+            'username': credentials.get('username') or IG_USERNAME,
+            'password': credentials.get('password') or IG_PASSWORD,
+            'account_id': credentials.get('account_number') or IG_ACCOUNT_ID,
+            'is_live': bool(credentials.get('is_live', 0)),
+            'server': credentials.get('server')
+        }
+    finally:
+        conn.close()
+
+
+@ig_api.before_request
+def _require_ig_session():
+    session_token = request.headers.get('X-Session-Token')
+    if not session_token:
+        return jsonify({'success': False, 'error': 'Missing session token in X-Session-Token header'}), 401
+
+    conn = _get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT user_id, expires_at
+            FROM user_sessions
+            WHERE token = ? AND is_active = 1
+        ''', (session_token,))
+        session = cursor.fetchone()
+        if not session:
+            return jsonify({'success': False, 'error': 'Invalid or inactive session token'}), 401
+
+        expires_at = datetime.fromisoformat(session['expires_at'])
+        if datetime.now() > expires_at:
+            return jsonify({'success': False, 'error': 'Session token expired'}), 401
+
+        request.user_id = session['user_id']
+        request.ig_credentials = _get_user_ig_credentials(request.user_id)
+        if not request.ig_credentials:
+            return jsonify({'success': False, 'error': 'No IG credentials configured for this user'}), 400
+    except Exception as e:
+        logger.error(f"IG session validation error: {e}")
+        return jsonify({'success': False, 'error': 'Session validation error'}), 500
+    finally:
+        conn.close()
 
 
 def _ig_headers(cst, xst, version="1", content_type=True):
     """Build standard IG API headers."""
+    if not cst or not xst:
+        raise ValueError("IG session not initialized for authenticated user")
+
+    credentials = getattr(request, 'ig_credentials', None)
+    api_key = (credentials or {}).get('api_key') or IG_API_KEY
     h = {
-        "X-IG-API-KEY": IG_API_KEY,
+        "X-IG-API-KEY": api_key,
         "CST": cst,
         "X-SECURITY-TOKEN": xst,
         "Accept": "application/json; charset=UTF-8",
@@ -36,40 +121,75 @@ def _ig_headers(cst, xst, version="1", content_type=True):
         h["Content-Type"] = "application/json; charset=UTF-8"
     return h
 
-def ig_login():
-    url = f"{BASE_URL}/session"
+def ig_login(user_id, credentials):
+    url = f"{_get_base_url(credentials)}/session"
     headers = {
-        "X-IG-API-KEY": IG_API_KEY,
+        "X-IG-API-KEY": credentials.get('api_key') or IG_API_KEY,
         "Content-Type": "application/json; charset=UTF-8",
         "Accept": "application/json; charset=UTF-8",
         "Version": "2"
     }
     data = {
-        "identifier": IG_USERNAME,
-        "password": IG_PASSWORD
+        "identifier": credentials.get('username') or IG_USERNAME,
+        "password": credentials.get('password') or IG_PASSWORD
     }
+
+    if not data['identifier'] or not data['password']:
+        return False, "IG username/password missing for this user"
+
     resp = requests.post(url, headers=headers, json=data, timeout=15)
     if resp.status_code == 200:
         cst = resp.headers.get("CST")
         xst = resp.headers.get("X-SECURITY-TOKEN")
-        _ig_tokens['CST'] = cst
-        _ig_tokens['XST'] = xst
-        _ig_tokens['expires_at'] = datetime.utcnow() + timedelta(hours=5)
+        cache_key = _token_cache_key(user_id, credentials)
+        _ig_tokens[cache_key] = {
+            'CST': cst,
+            'XST': xst,
+            'expires_at': datetime.utcnow() + timedelta(hours=5)
+        }
         return True, "Login successful"
     else:
         return False, resp.text
 
 def get_ig_tokens():
-    # Refresh if expired or missing
-    if not _ig_tokens['CST'] or not _ig_tokens['XST'] or not _ig_tokens['expires_at'] or datetime.utcnow() > _ig_tokens['expires_at']:
-        ig_login()
-    return _ig_tokens['CST'], _ig_tokens['XST']
+    user_id = getattr(request, 'user_id', None)
+    credentials = getattr(request, 'ig_credentials', None)
+
+    if user_id and credentials:
+        cache_key = _token_cache_key(user_id, credentials)
+        cached = _ig_tokens.get(cache_key)
+        if not cached or not cached.get('CST') or not cached.get('XST') or datetime.utcnow() > cached.get('expires_at'):
+            ok, msg = ig_login(user_id, credentials)
+            if not ok:
+                logger.error(f"IG login failed for user {user_id}: {msg}")
+                return None, None
+            cached = _ig_tokens.get(cache_key)
+        return cached.get('CST'), cached.get('XST')
+
+    # Compatibility fallback (legacy environment-level credentials)
+    fallback_credentials = {
+        'api_key': IG_API_KEY,
+        'username': IG_USERNAME,
+        'password': IG_PASSWORD,
+        'is_live': not IG_DEMO_MODE,
+    }
+    legacy_key = _token_cache_key('legacy', fallback_credentials)
+    cached = _ig_tokens.get(legacy_key)
+    if not cached or not cached.get('CST') or not cached.get('XST') or datetime.utcnow() > cached.get('expires_at'):
+        ok, msg = ig_login('legacy', fallback_credentials)
+        if not ok:
+            logger.error(f"Legacy IG login failed: {msg}")
+            return None, None
+        cached = _ig_tokens.get(legacy_key)
+    if not cached:
+        return None, None
+    return cached.get('CST'), cached.get('XST')
 
 # ==================== AUTH ====================
 
 @ig_api.route('/api/ig/login', methods=['POST'])
 def api_ig_login():
-    ok, msg = ig_login()
+    ok, msg = ig_login(request.user_id, request.ig_credentials)
     return jsonify({"success": ok, "message": msg})
 
 # ==================== ACCOUNTS ====================
@@ -78,7 +198,7 @@ def api_ig_login():
 def api_ig_accounts():
     cst, xst = get_ig_tokens()
     headers = _ig_headers(cst, xst, version="1", content_type=False)
-    resp = requests.get(f"{BASE_URL}/accounts", headers=headers, timeout=10)
+    resp = requests.get(f"{_get_base_url()}/accounts", headers=headers, timeout=10)
     if resp.status_code == 200:
         return jsonify({"success": True, "accounts": resp.json()})
     return jsonify({"success": False, "error": resp.text}), resp.status_code
@@ -87,11 +207,11 @@ def api_ig_accounts():
 def api_ig_funds():
     cst, xst = get_ig_tokens()
     headers = _ig_headers(cst, xst, version="1", content_type=False)
-    resp = requests.get(f"{BASE_URL}/accounts", headers=headers, timeout=10)
+    resp = requests.get(f"{_get_base_url()}/accounts", headers=headers, timeout=10)
     if resp.status_code == 200:
         accounts = resp.json().get('accounts', [])
         # Return first account or match by ID
-        target_id = request.args.get('account_id', IG_ACCOUNT_ID)
+        target_id = request.args.get('account_id', request.ig_credentials.get('account_id'))
         for acc in accounts:
             if not target_id or acc.get('accountId') == target_id:
                 bal = acc.get('balance', {})
@@ -117,10 +237,10 @@ def ig_balance():
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="1", content_type=False)
-        resp = requests.get(f"{BASE_URL}/accounts", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/accounts", headers=headers, timeout=10)
         if resp.status_code == 200:
             accounts = resp.json().get('accounts', [])
-            target_id = request.args.get('account_id', IG_ACCOUNT_ID)
+            target_id = request.args.get('account_id', request.ig_credentials.get('account_id'))
             for acc in accounts:
                 if not target_id or acc.get('accountId') == target_id:
                     bal = acc.get('balance', {})
@@ -144,7 +264,7 @@ def api_ig_positions():
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="2", content_type=False)
-        resp = requests.get(f"{BASE_URL}/positions", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/positions", headers=headers, timeout=10)
         if resp.status_code == 200:
             raw = resp.json().get('positions', [])
             positions = []
@@ -203,7 +323,7 @@ def api_ig_close_position():
             "timeInForce": "EXECUTE_AND_ELIMINATE",
         }
 
-        resp = requests.post(f"{BASE_URL}/positions/otc", headers=headers, json=payload, timeout=15)
+        resp = requests.post(f"{_get_base_url()}/positions/otc", headers=headers, json=payload, timeout=15)
 
         if resp.status_code == 200:
             result = resp.json()
@@ -226,7 +346,7 @@ def api_ig_close_all_positions():
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="2", content_type=False)
-        resp = requests.get(f"{BASE_URL}/positions", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/positions", headers=headers, timeout=10)
 
         if resp.status_code != 200:
             return jsonify({"success": False, "error": "Failed to fetch positions"}), 500
@@ -249,7 +369,7 @@ def api_ig_close_all_positions():
                 "orderType": "MARKET",
                 "timeInForce": "EXECUTE_AND_ELIMINATE",
             }
-            close_resp = requests.post(f"{BASE_URL}/positions/otc", headers=close_headers, json=payload, timeout=15)
+            close_resp = requests.post(f"{_get_base_url()}/positions/otc", headers=close_headers, json=payload, timeout=15)
             if close_resp.status_code == 200:
                 deal_ref = close_resp.json().get('dealReference', '')
                 confirm = _confirm_deal(cst, xst, deal_ref)
@@ -298,7 +418,7 @@ def api_ig_place_order():
         if data.get("limitLevel"):
             order["limitLevel"] = data["limitLevel"]
 
-        resp = requests.post(f"{BASE_URL}/positions/otc", headers=headers, json=order, timeout=15)
+        resp = requests.post(f"{_get_base_url()}/positions/otc", headers=headers, json=order, timeout=15)
 
         if resp.status_code == 200:
             result = resp.json()
@@ -333,7 +453,7 @@ def api_ig_transactions():
         page_size = request.args.get('pageSize', '50')
         params['pageSize'] = page_size
 
-        resp = requests.get(f"{BASE_URL}/history/transactions", headers=headers, params=params, timeout=15)
+        resp = requests.get(f"{_get_base_url()}/history/transactions", headers=headers, params=params, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             transactions = data.get('transactions', [])
@@ -374,7 +494,7 @@ def api_ig_activity():
         page_size = request.args.get('pageSize', '50')
         params['pageSize'] = page_size
 
-        resp = requests.get(f"{BASE_URL}/history/activity", headers=headers, params=params, timeout=15)
+        resp = requests.get(f"{_get_base_url()}/history/activity", headers=headers, params=params, timeout=15)
         if resp.status_code == 200:
             return jsonify({"success": True, "activities": resp.json().get('activities', [])})
         return jsonify({"success": False, "error": resp.text}), resp.status_code
@@ -394,7 +514,7 @@ def api_ig_market_search():
 
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="1", content_type=False)
-        resp = requests.get(f"{BASE_URL}/markets?searchTerm={search_term}", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/markets?searchTerm={search_term}", headers=headers, timeout=10)
         if resp.status_code == 200:
             markets = resp.json().get('markets', [])
             formatted = []
@@ -423,7 +543,7 @@ def api_ig_market_detail(epic):
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="3", content_type=False)
-        resp = requests.get(f"{BASE_URL}/markets/{epic}", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/markets/{epic}", headers=headers, timeout=10)
         if resp.status_code == 200:
             return jsonify({"success": True, "market": resp.json()})
         return jsonify({"success": False, "error": resp.text}), resp.status_code
@@ -437,7 +557,7 @@ def api_ig_watchlists():
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="1", content_type=False)
-        resp = requests.get(f"{BASE_URL}/watchlists", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/watchlists", headers=headers, timeout=10)
         if resp.status_code == 200:
             return jsonify({"success": True, "watchlists": resp.json().get('watchlists', [])})
         return jsonify({"success": False, "error": resp.text}), resp.status_code
@@ -450,7 +570,7 @@ def api_ig_watchlist_markets(watchlist_id):
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="1", content_type=False)
-        resp = requests.get(f"{BASE_URL}/watchlists/{watchlist_id}", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/watchlists/{watchlist_id}", headers=headers, timeout=10)
         if resp.status_code == 200:
             return jsonify({"success": True, "markets": resp.json().get('markets', [])})
         return jsonify({"success": False, "error": resp.text}), resp.status_code
@@ -477,7 +597,7 @@ def _confirm_deal(cst, xst, deal_reference):
         return None
     try:
         headers = _ig_headers(cst, xst, version="1", content_type=False)
-        resp = requests.get(f"{BASE_URL}/confirms/{deal_reference}", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/confirms/{deal_reference}", headers=headers, timeout=10)
         if resp.status_code == 200:
             return resp.json()
     except Exception as e:
@@ -492,7 +612,7 @@ def api_ig_working_orders():
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="2", content_type=False)
-        resp = requests.get(f"{BASE_URL}/workingorders", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/workingorders", headers=headers, timeout=10)
         if resp.status_code == 200:
             orders = resp.json().get('workingOrders', [])
             formatted = []
@@ -545,7 +665,7 @@ def api_ig_create_working_order():
         if data.get("goodTillDate"):
             order["goodTillDate"] = data["goodTillDate"]
 
-        resp = requests.post(f"{BASE_URL}/workingorders/otc", headers=headers, json=order, timeout=15)
+        resp = requests.post(f"{_get_base_url()}/workingorders/otc", headers=headers, json=order, timeout=15)
         if resp.status_code == 200:
             result = resp.json()
             deal_ref = result.get('dealReference', '')
@@ -561,7 +681,7 @@ def api_ig_delete_working_order(deal_id):
     try:
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="2", content_type=False)
-        resp = requests.delete(f"{BASE_URL}/workingorders/otc/{deal_id}", headers=headers, timeout=10)
+        resp = requests.delete(f"{_get_base_url()}/workingorders/otc/{deal_id}", headers=headers, timeout=10)
         if resp.status_code == 200:
             return jsonify({"success": True, "dealReference": resp.json().get('dealReference', '')})
         return jsonify({"success": False, "error": resp.text}), resp.status_code
@@ -591,7 +711,7 @@ def api_ig_profit_check():
     try:
         data = request.json or {}
         target_profit = float(data.get('target_profit', 0))
-        user_id = data.get('user_id', '')
+        user_id = request.user_id
         auto_close = data.get('auto_close', True)
 
         if target_profit <= 0:
@@ -600,7 +720,7 @@ def api_ig_profit_check():
         # 1. Fetch open positions
         cst, xst = get_ig_tokens()
         headers = _ig_headers(cst, xst, version="2", content_type=False)
-        resp = requests.get(f"{BASE_URL}/positions", headers=headers, timeout=10)
+        resp = requests.get(f"{_get_base_url()}/positions", headers=headers, timeout=10)
 
         if resp.status_code != 200:
             return jsonify({"success": False, "error": "Failed to fetch positions"}), 500
@@ -657,7 +777,7 @@ def api_ig_profit_check():
                     "timeInForce": "EXECUTE_AND_ELIMINATE",
                 }
                 close_resp = requests.post(
-                    f"{BASE_URL}/positions/otc",
+                    f"{_get_base_url()}/positions/otc",
                     headers=close_headers, json=payload, timeout=15
                 )
                 if close_resp.status_code == 200:
@@ -677,7 +797,7 @@ def api_ig_profit_check():
         balance_info = {}
         if target_reached:
             bal_headers = _ig_headers(cst, xst, version="1", content_type=False)
-            bal_resp = requests.get(f"{BASE_URL}/accounts", headers=bal_headers, timeout=10)
+            bal_resp = requests.get(f"{_get_base_url()}/accounts", headers=bal_headers, timeout=10)
             if bal_resp.status_code == 200:
                 accounts = bal_resp.json().get('accounts', [])
                 if accounts:
@@ -732,9 +852,7 @@ def api_ig_withdrawal_notifications():
     """Get all IG withdrawal-ready notifications for a user."""
     try:
         import sqlite3
-        user_id = request.args.get('user_id', '')
-        if not user_id:
-            return jsonify({"success": False, "error": "user_id required"}), 400
+        user_id = request.user_id
 
         db_path = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
         conn = sqlite3.connect(db_path, timeout=10)
@@ -762,13 +880,10 @@ def api_ig_create_withdrawal_notification():
     try:
         import sqlite3, uuid
         data = request.json or {}
-        user_id = data.get('user_id', '')
+        user_id = request.user_id
         realized_profit = float(data.get('realized_profit', 0))
         positions_closed = int(data.get('positions_closed', 0))
         balance_available = float(data.get('balance_available', 0))
-
-        if not user_id:
-            return jsonify({"success": False, "error": "user_id required"}), 400
 
         db_path = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
         conn = sqlite3.connect(db_path, timeout=10)
@@ -808,6 +923,7 @@ def api_ig_mark_withdrawal_done(notif_id):
     """Mark a withdrawal notification as completed (user confirms they withdrew on IG)."""
     try:
         import sqlite3
+        user_id = request.user_id
         db_path = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
         conn = sqlite3.connect(db_path, timeout=10)
         cursor = conn.cursor()
@@ -815,8 +931,12 @@ def api_ig_mark_withdrawal_done(notif_id):
         cursor.execute('''
             UPDATE ig_withdrawal_notifications
             SET status = 'completed', completed_at = ?
-            WHERE notification_id = ?
-        ''', (datetime.now().isoformat(), notif_id))
+            WHERE notification_id = ? AND user_id = ?
+        ''', (datetime.now().isoformat(), notif_id, user_id))
+
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({"success": False, "error": "Notification not found for this user"}), 404
 
         conn.commit()
         conn.close()
