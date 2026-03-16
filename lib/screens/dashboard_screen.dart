@@ -41,6 +41,7 @@ import 'broker_analytics_dashboard.dart';
 import 'ig_withdrawal_screen.dart';
 import 'oanda_withdrawal_screen.dart';
 import 'fxcm_withdrawal_screen.dart';
+import 'binance_withdrawal_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -1865,6 +1866,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const FxcmWithdrawalScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.currency_bitcoin, color: Color(0xFFF0B90B)),
+            title: const Text('Binance Withdrawals', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Crypto profits & USDT withdrawal', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const BinanceWithdrawalScreen()));
             },
           ),
           const Divider(color: Colors.white12),

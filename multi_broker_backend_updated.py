@@ -7924,6 +7924,10 @@ app.register_blueprint(oanda_api)
 from fxcm_service import fxcm_api
 app.register_blueprint(fxcm_api)
 
+# --- Binance API Integration ---
+from binance_service import binance_api
+app.register_blueprint(binance_api)
+
 # Example: Use IG API in bot trading logic
 # (You can call these functions from your bot trading threads)
 def place_ig_trade(epic, size, direction, currency="USD", order_type="MARKET"):
