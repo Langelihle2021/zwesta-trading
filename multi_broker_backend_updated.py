@@ -1393,6 +1393,14 @@ class MT5Connection(BrokerConnection):
             
             if result.retcode != self.mt5.TRADE_RETCODE_DONE:
                 logger.warning(f"MT5 order failed: symbol={symbol}, type={order_type}, retcode={result.retcode}, comment={result.comment}")
+                # Retcode 10027 = AutoTrading disabled in MT5 terminal
+                if result.retcode == 10027:
+                    return {
+                        'success': False,
+                        'error': 'AutoTrading is disabled in MT5 terminal. Enable it by clicking the AutoTrading button in the MT5 toolbar, or run: mt5.terminal_info().trade_allowed',
+                        'retcode': 10027,
+                        'action_required': 'Enable AutoTrading in MT5 terminal'
+                    }
                 return {'success': False, 'error': f'MT5 error: {result.comment}'}
 
             # Insert trade record into trades table
@@ -7563,37 +7571,54 @@ def start_bot():
             conn.close()
             return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
         
+        conn.close()
+
+        # ✅ FAST PATH: If bot thread is already alive (started by create_bot), return immediately
+        # This avoids the expensive broker connection + 120s MT5 readiness wait on start_bot
+        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+            logger.info(f"Bot {bot_id}: Already running via background thread - returning success immediately")
+            bot_config = active_bots[bot_id]
+            return jsonify({
+                'success': True,
+                'botId': bot_id,
+                'strategy': bot_config.get('strategy', 'unknown'),
+                'status': 'RUNNING',
+                'message': f'Bot {bot_id} is already trading in background',
+                'tradingInterval': bot_config.get('tradingInterval', 300),
+                'botStats': {
+                    'totalTrades': bot_config.get('totalTrades', 0),
+                    'winningTrades': bot_config.get('winningTrades', 0),
+                    'totalLosses': round(bot_config.get('totalLosses', 0), 2),
+                    'totalProfit': round(bot_config.get('totalProfit', 0), 2),
+                    'accountBalance': bot_config.get('accountBalance', 0),
+                }
+            }), 200
+
+        # Bot thread not running — connect to broker and start a new thread
         # ✅ AUTOMATIC BROKER DETECTION
-        # Get credential_id from bot and determine which broker to use
         credential_id = bot.get('credentialId')
-        
+
         if not credential_id:
-            conn.close()
             return jsonify({
                 'success': False,
                 'error': 'Bot missing credentialId - must link to broker credential first'
             }), 400
-        
-        # Load the correct broker connection automatically
+
         broker_type, broker_conn = get_broker_connection(credential_id, user_id, bot_id)
-        
+
         if broker_conn is None or not hasattr(broker_conn, 'connected'):
-            # Error loading broker connection
             return jsonify({
                 'success': False,
                 'error': f'Failed to connect to broker: {broker_type or broker_conn}',
                 'botId': bot_id,
                 'status': 'FAILED'
             }), 503
-        
+
         logger.info(f"✅ Bot {bot_id}: Broker connection established ({broker_type})")
-        
-        # Store bot config with broker info for trading loop
+
         bot_config = active_bots[bot_id]
         bot_config['broker_type'] = broker_type
         bot_config['broker_conn'] = broker_conn
-        
-        conn.close()
         
         import random
         
@@ -7627,28 +7652,6 @@ def start_bot():
         logger.info(f"📍 Bot {bot_id}: Trading symbols validated: {validated_symbols}")
         
         logger.info(f"Bot {bot_id}: Starting CONTINUOUS trading in background thread")
-        
-        # ✅ Check if bot thread is already running (created by /api/bot/create)
-        # If it is, don't create a duplicate - just return success
-        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
-            logger.info(f"Bot {bot_id}: Already running via background thread - returning success")
-            logger.info(f"  (Thread started by /api/bot/create, will be operational within 2 minutes)")
-            # Return immediately - bot is already trading or waiting to be ready
-            return jsonify({
-                'success': True,
-                'botId': bot_id,
-                'strategy': bot_config['strategy'],
-                'status': 'RUNNING',
-                'message': f'Bot {bot_id} is already trading in background',
-                'tradingInterval': bot_config.get('tradingInterval', 300),
-                'botStats': {
-                    'totalTrades': bot_config['totalTrades'],
-                    'winningTrades': bot_config['winningTrades'],
-                    'totalLosses': round(bot_config['totalLosses'], 2),
-                    'totalProfit': round(bot_config['totalProfit'], 2),
-                    'accountBalance': bot_config.get('accountBalance', 0),
-                }
-            }), 200
         
         # Bot thread not running or stopped - create a new one
         logger.info(f"Bot {bot_id}: No active thread found - creating new background thread")
