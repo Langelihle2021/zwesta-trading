@@ -6,8 +6,8 @@ import sys
 # Mapping of broker name to MT5 terminal path
 MT5_TERMINALS = {
     'MetaQuotes': r'C:\MT5\MetaQuotes\terminal64.exe',
-    'XM': r'C:\MT5\XMGlobal\terminal64.exe',
-    'XM Global': r'C:\MT5\XMGlobal\terminal64.exe',
+    'XM': r'C:\Program Files\XM Global MT5\terminal64.exe',
+    'XM Global': r'C:\Program Files\XM Global MT5\terminal64.exe',
 }
 
 # Track running processes
@@ -27,10 +27,42 @@ def detect_default_mt5_terminal():
             return path
     return None
 
+
+def detect_broker_mt5_terminal(broker):
+    """Detect broker-specific MT5 terminal paths before falling back to generic MT5."""
+    broker_candidates = {
+        'XM': [
+            r'C:\Program Files\XM Global MT5\terminal64.exe',
+            r'C:\Program Files\XM Global MT5\terminal.exe',
+            r'C:\MT5\XMGlobal\terminal64.exe',
+            r'C:\MT5\XMGlobal\terminal.exe',
+        ],
+        'XM Global': [
+            r'C:\Program Files\XM Global MT5\terminal64.exe',
+            r'C:\Program Files\XM Global MT5\terminal.exe',
+            r'C:\MT5\XMGlobal\terminal64.exe',
+            r'C:\MT5\XMGlobal\terminal.exe',
+        ],
+        'MetaQuotes': [
+            r'C:\Program Files\MetaTrader 5\terminal64.exe',
+            r'C:\Program Files\MetaTrader 5\terminal.exe',
+            r'C:\Program Files (x86)\MetaTrader 5\terminal64.exe',
+            r'C:\Program Files (x86)\MetaTrader 5\terminal.exe',
+            r'C:\MT5\MetaQuotes\terminal64.exe',
+            r'C:\MT5\MetaQuotes\terminal.exe',
+        ],
+    }
+
+    for path in broker_candidates.get(broker, []):
+        if os.path.exists(path):
+            return path
+
+    return detect_default_mt5_terminal()
+
 def launch_mt5_terminal(broker):
     path = MT5_TERMINALS.get(broker)
     if not path or not os.path.exists(path):
-        fallback = detect_default_mt5_terminal()
+        fallback = detect_broker_mt5_terminal(broker)
         if fallback:
             path = fallback
             print(f"[INFO] Using fallback MT5 terminal for {broker or 'default'}: {path}")
