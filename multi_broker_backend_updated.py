@@ -95,6 +95,7 @@ def repopulate_active_bots():
                 'dailyProfit': 0,
                 'maxDrawdown': 0,
                 'peakProfit': 0,
+                'profit': 0,  # Always include profit field
             }
         conn.close()
         logger.info(f"✅ Repopulated {len(active_bots)} bots from database on startup.")
@@ -230,7 +231,7 @@ def distribute_profit_split_and_commissions(user_id, profit, bot_id):
     pay_user(owner_id, owner_share, f"Owner 20% profit split from bot {bot_id}")
     # Pay referrer (if any)
     if referrer_id:
-        add_commission(referrer_id, trader_id, profit, bot_id)  # 5% commission
+        ReferralSystem.add_commission(referrer_id, trader_id, profit, bot_id)  # 5% commission
         pay_user(referrer_id, referrer_share, f"Referrer 5% commission from bot {bot_id}")
     # Pay trader
     pay_user(trader_id, trader_share, f"Trader 75% profit from bot {bot_id}")
@@ -5674,6 +5675,7 @@ def create_bot():
             'dailyProfit': 0,
             'maxDrawdown': 0,
             'peakProfit': 0,
+            'profit': 0,  # Always include profit field
         }
         
         logger.info(f"✅ Created bot {bot_id} for user {user_id}")
@@ -5789,45 +5791,72 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 trade_cycle += 1
                 logger.info(f"🔄 Bot {bot_id}: Trade cycle #{trade_cycle} starting at {datetime.now().isoformat()}")
                 
-                # Connect to MT5
-                try:
-                    if bot_config.get('mode') == 'live' and bot_credentials:
-                        mt5_conn = MT5Connection(bot_credentials)
-                    else:
-                        mt5_conn = MT5Connection()
-                    
-                    if not mt5_conn.connect():
-                        logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
+                # Detect broker type
+                broker_type = bot_config.get('broker_type', 'MT5')
+                is_ig = broker_type == 'IG Markets'
+                
+                mt5_conn = None
+                ig_conn = None
+                
+                if is_ig:
+                    # IG Markets broker - use REST API via IGConnection
+                    try:
+                        ig_conn = bot_config.get('broker_conn')
+                        if ig_conn is None or not ig_conn.connected:
+                            # Re-establish IG connection
+                            credential_id = bot_config.get('credentialId')
+                            if credential_id:
+                                broker_type_new, new_conn = get_broker_connection(credential_id, user_id, bot_id)
+                                if new_conn and broker_type_new == 'IG Markets':
+                                    ig_conn = new_conn
+                                    bot_config['broker_conn'] = ig_conn
+                                else:
+                                    logger.error(f"Bot {bot_id}: IG reconnection failed")
+                                    time.sleep(trading_interval)
+                                    continue
+                            else:
+                                logger.error(f"Bot {bot_id}: No credentialId for IG reconnection")
+                                time.sleep(trading_interval)
+                                continue
+                        logger.info(f"Bot {bot_id}: Connected to IG Markets for trading")
+                    except Exception as e:
+                        logger.error(f"Bot {bot_id}: IG connection exception: {e}")
                         time.sleep(trading_interval)
                         continue
-                    
-                    # ✅ Wait for MT5 to be fully ready to execute orders
-                    # IMPORTANT: This is critical after MT5 restart - terminal connects but needs initialization time
-                    # Especially for ORDER EXECUTION (not just reading)
-                    if trade_cycle == 1:
-                        # First cycle: be patient, MT5 may need full 2 minutes to initialize for trading
-                        logger.info(f"Bot {bot_id}: First trade cycle - waiting for MT5 to be ready for ORDER EXECUTION (up to {mt5_ready_timeout}s)...")
-                        timeout_for_this_cycle = mt5_ready_timeout
-                    else:
-                        # Subsequent cycles: faster timeouts since MT5 should be warm
-                        timeout_for_this_cycle = 15
-                    
-                    if not mt5_conn.wait_for_mt5_ready(timeout_seconds=timeout_for_this_cycle):
-                        if trade_cycle == 1:
-                            # On first cycle, be more aggressive with retries
-                            logger.warning(f"Bot {bot_id}: First cycle MT5 readiness timeout after {timeout_for_this_cycle}s")
-                            logger.warning(f"  Will retry in 30 seconds (MT5 may still be initializing)...")
-                            time.sleep(30)
-                            continue
+                else:
+                    # MT5 broker - connect via terminal SDK
+                    try:
+                        if bot_config.get('mode') == 'live' and bot_credentials:
+                            mt5_conn = MT5Connection(bot_credentials)
                         else:
-                            logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
+                            mt5_conn = MT5Connection()
+                        
+                        if not mt5_conn.connect():
+                            logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
                             time.sleep(trading_interval)
                             continue
-                    
-                except Exception as e:
-                    logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
-                    time.sleep(trading_interval)
-                    continue
+                        
+                        if trade_cycle == 1:
+                            logger.info(f"Bot {bot_id}: First trade cycle - waiting for MT5 to be ready for ORDER EXECUTION (up to {mt5_ready_timeout}s)...")
+                            timeout_for_this_cycle = mt5_ready_timeout
+                        else:
+                            timeout_for_this_cycle = 15
+                        
+                        if not mt5_conn.wait_for_mt5_ready(timeout_seconds=timeout_for_this_cycle):
+                            if trade_cycle == 1:
+                                logger.warning(f"Bot {bot_id}: First cycle MT5 readiness timeout after {timeout_for_this_cycle}s")
+                                logger.warning(f"  Will retry in 30 seconds (MT5 may still be initializing)...")
+                                time.sleep(30)
+                                continue
+                            else:
+                                logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
+                                time.sleep(trading_interval)
+                                continue
+                        
+                    except Exception as e:
+                        logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
+                        time.sleep(trading_interval)
+                        continue
                 
                 # Execute trade cycle (same logic as in start_bot endpoint)
                 strategy_name = bot_config.get('strategy', 'trend_following')
@@ -5855,133 +5884,205 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         adjusted_volume = trade_params['volume'] * position_size
                         order_type = trade_params['type']
                         
-                        # Place order on MT5 with RETRY LOGIC
-                        logger.info(f"📍 Bot {bot_id}: Placing {order_type} order on {symbol} | Cycle: {trade_cycle}")
+                        # Place order via broker with RETRY LOGIC
+                        logger.info(f"📍 Bot {bot_id}: Placing {order_type} order on {symbol} via {broker_type} | Cycle: {trade_cycle}")
                         
                         order_result = None
-                        symbols_to_try = [symbol, 'EURUSD']  # Try original symbol, then fallback
                         
-                        for index, attempt_symbol in enumerate(symbols_to_try):
+                        if is_ig:
+                            # IG Markets - place order via REST API
                             try:
-                                # Create short comment - MT5 has 31 char limit
-                                # Use bot ID suffix instead of full bot_id
-                                bot_id_short = bot_id.split('_')[-1][:8]  # Last 8 chars of timestamp
-                                comment_short = f'ZBot{bot_id_short}'
-                                order_result = mt5_conn.place_order(
-                                    symbol=attempt_symbol,
+                                # Map MT5 symbol names to IG epics if needed
+                                ig_epic = symbol
+                                # Common MT5-to-IG epic mapping
+                                ig_symbol_map = {
+                                    'EURUSD': 'CS.D.EURUSD.CFD.IP',
+                                    'GBPUSD': 'CS.D.GBPUSD.CFD.IP',
+                                    'USDJPY': 'CS.D.USDJPY.CFD.IP',
+                                    'USDCHF': 'CS.D.USDCHF.CFD.IP',
+                                    'AUDUSD': 'CS.D.AUDUSD.CFD.IP',
+                                    'NZDUSD': 'CS.D.NZDUSD.CFD.IP',
+                                    'USDCAD': 'CS.D.USDCAD.CFD.IP',
+                                    'XAUUSD': 'CS.D.USCGC.TODAY.IP',
+                                    'XAGUSD': 'CS.D.USCSI.TODAY.IP',
+                                }
+                                if symbol in ig_symbol_map:
+                                    ig_epic = ig_symbol_map[symbol]
+                                
+                                order_result = ig_conn.place_order(
+                                    symbol=ig_epic,
                                     order_type=order_type,
                                     volume=round(adjusted_volume, 2),
-                                    comment=comment_short
+                                    stop_loss=trade_params.get('stop_loss', 50),
+                                    take_profit=trade_params.get('take_profit', 100),
                                 )
                                 
                                 if order_result.get('success', False):
-                                    logger.info(f"✅ Bot {bot_id}: Order placed successfully on {attempt_symbol}")
-                                    symbol = attempt_symbol
-                                    break
+                                    logger.info(f"✅ Bot {bot_id}: IG order placed on {ig_epic}")
                                 else:
-                                    error_msg = order_result.get('error', '').lower()
-                                    is_last_attempt = (index == len(symbols_to_try) - 1)
-                                    
-                                    # Retry on: symbol not found OR terminal disconnected
-                                    if ('not found' in error_msg or 'disconnected' in error_msg or 'order_send failed' in error_msg) and not is_last_attempt:
-                                        logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol} ({order_result.get('error')}) - trying {symbols_to_try[index+1]}...")
-                                        continue
-                                    else:
-                                        # Last attempt or non-retryable error
-                                        logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
-                                        break
+                                    logger.warning(f"Bot {bot_id}: IG order failed on {ig_epic}: {order_result.get('error')}")
                             except Exception as e:
-                                logger.error(f"Bot {bot_id}: Exception placing order on {attempt_symbol}: {e}")
-                                if index < len(symbols_to_try) - 1:
-                                    # Try next symbol
-                                    continue
-                                break
+                                logger.error(f"Bot {bot_id}: IG place_order exception: {e}")
+                                order_result = {'success': False, 'error': str(e)}
+                        else:
+                            # MT5 - place order with retry/fallback logic
+                            symbols_to_try = [symbol, 'EURUSD']
+                            
+                            for index, attempt_symbol in enumerate(symbols_to_try):
+                                try:
+                                    bot_id_short = bot_id.split('_')[-1][:8]
+                                    comment_short = f'ZBot{bot_id_short}'
+                                    order_result = mt5_conn.place_order(
+                                        symbol=attempt_symbol,
+                                        order_type=order_type,
+                                        volume=round(adjusted_volume, 2),
+                                        comment=comment_short
+                                    )
+                                    
+                                    if order_result.get('success', False):
+                                        logger.info(f"✅ Bot {bot_id}: Order placed successfully on {attempt_symbol}")
+                                        symbol = attempt_symbol
+                                        break
+                                    else:
+                                        error_msg = order_result.get('error', '').lower()
+                                        is_last_attempt = (index == len(symbols_to_try) - 1)
+                                        
+                                        if ('not found' in error_msg or 'disconnected' in error_msg or 'order_send failed' in error_msg) and not is_last_attempt:
+                                            logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol} ({order_result.get('error')}) - trying {symbols_to_try[index+1]}...")
+                                            continue
+                                        else:
+                                            logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
+                                            break
+                                except Exception as e:
+                                    logger.error(f"Bot {bot_id}: Exception placing order on {attempt_symbol}: {e}")
+                                    if index < len(symbols_to_try) - 1:
+                                        continue
+                                    break
                         
                         if order_result and order_result.get('success', False):
-                            # Get current position info
-                            positions = mt5_conn.get_positions()
+                            # Get the order ticket/deal_id for precise matching
+                            order_ticket = str(order_result.get('orderId') or order_result.get('deal_id') or '')
+                            
+                            # Get current position info (broker-aware)
+                            positions = []
+                            if is_ig and ig_conn:
+                                positions = ig_conn.get_positions()
+                            elif mt5_conn:
+                                positions = mt5_conn.get_positions()
+                            
                             if positions:
-                                for pos in positions:
-                                    if pos['symbol'] == symbol and pos['type'] == order_type:
-                                        trade = {
-                                            'ticket': pos['ticket'],
-                                            'symbol': pos['symbol'],
-                                            'type': pos['type'],
-                                            'volume': pos['volume'],
+                                matched_pos = None
+                                matched_by_ticket = False
+                                
+                                # 1. Try exact ticket/deal_id match (precise)
+                                if order_ticket:
+                                    for pos in positions:
+                                        pos_ticket = str(pos.get('ticket') or pos.get('deal_id', ''))
+                                        if pos_ticket and pos_ticket == order_ticket:
+                                            matched_pos = pos
+                                            matched_by_ticket = True
+                                            break
+                                
+                                # 2. Fallback: match by symbol+direction
+                                if not matched_pos:
+                                    for pos in positions:
+                                        pos_symbol = pos.get('symbol') or pos.get('epic', '')
+                                        pos_type = pos.get('type') or pos.get('direction', '')
+                                        if (pos_symbol == symbol or symbol in pos_symbol) and pos_type.upper() == order_type.upper():
+                                            matched_pos = pos
+                                            break
+                                
+                                if matched_pos:
+                                    pos = matched_pos
+                                    pos_symbol = pos.get('symbol') or pos.get('epic', '')
+                                    pos_type = pos.get('type') or pos.get('direction', '')
+                                    
+                                    # Use position PnL only if matched by ticket (exact match)
+                                    # For symbol+direction fallback, PnL is ~0 since trade was just placed
+                                    if matched_by_ticket:
+                                        trade_profit = pos.get('pnl') or pos.get('profit_loss', 0)
+                                    else:
+                                        trade_profit = 0
+                                    
+                                    trade = {
+                                            'ticket': pos.get('ticket') or pos.get('deal_id', ''),
+                                            'symbol': pos_symbol,
+                                            'type': pos_type,
+                                            'volume': pos.get('volume') or pos.get('size', 0),
                                             'baseVolume': trade_params['volume'],
                                             'positionSize': position_size,
                                             'entryTime': trade_params.get('entry_time', pos.get('openTime', datetime.now().isoformat())),
                                             'exitTime': trade_params.get('exit_time', datetime.now().isoformat()),
-                                            'entryPrice': pos['openPrice'],
-                                            'exitPrice': pos['currentPrice'],
+                                            'entryPrice': pos.get('openPrice') or pos.get('level', 0),
+                                            'exitPrice': pos.get('currentPrice') or pos.get('level', 0),
                                             'durationSec': trade_params.get('duration_sec', None),
-                                            'profit': pos['pnl'],
+                                            'profit': trade_profit,
                                             'time': datetime.now().isoformat(),
                                             'timestamp': int(datetime.now().timestamp() * 1000),
                                             'botId': bot_id,
                                             'cycle': trade_cycle,
                                             'strategy': strategy_name,
-                                            'isWinning': pos['pnl'] > 0,
-                                            'riskSettings': bot.get('riskSettings', {}),
+                                            'isWinning': trade_profit > 0,
+                                            'riskSettings': bot_config.get('riskSettings', {}),
                                             'signals': trade_params.get('signals', None),
-                                            'source': 'REAL_MT5',
-                                        }
-                                        
-                                        # Store in database
+                                            'source': 'REAL_IG' if is_ig else 'REAL_MT5',
+                                            'broker': broker_type,
+                                    }
+                                    
+                                    # Store in database
+                                    try:
+                                        trade_conn = sqlite3.connect('zwesta_trading.db')
+                                        trade_cursor = trade_conn.cursor()
+                                        trade_cursor.execute('''
+                                            INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
+                                            VALUES (?, ?, ?, ?)
+                                        ''', (bot_id, user_id, json.dumps(trade), trade['timestamp']))
+                                        trade_conn.commit()
+                                        trade_conn.close()
+                                    except Exception as e:
+                                        logger.error(f"Bot {bot_id}: Error storing trade: {e}")
+                                    
+                                    # Update bot stats
+                                    bot_config['totalTrades'] += 1
+                                    bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
+                                    
+                                    if trade['profit'] > 0:
+                                        bot_config['winningTrades'] += 1
+                                    else:
+                                        bot_config['totalLosses'] += abs(trade['profit'])
+                                    
+                                    bot_config['totalProfit'] += trade['profit']
+                                    
+                                    # Update peak & drawdown
+                                    if bot_config['totalProfit'] > bot_config['peakProfit']:
+                                        bot_config['peakProfit'] = bot_config['totalProfit']
+                                    
+                                    drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
+                                    if drawdown > bot_config['maxDrawdown']:
+                                        bot_config['maxDrawdown'] = drawdown
+                                    
+                                    # Track profit history
+                                    bot_config['profitHistory'].append({
+                                        'timestamp': trade['timestamp'],
+                                        'profit': round(bot_config['totalProfit'], 2),
+                                        'trades': bot_config['totalTrades'],
+                                    })
+                                    
+                                    # Track daily profit
+                                    today = datetime.now().strftime('%Y-%m-%d')
+                                    if today not in bot_config['dailyProfits']:
+                                        bot_config['dailyProfits'][today] = 0
+                                    bot_config['dailyProfits'][today] += trade['profit']
+                                    
+                                    # Distribution commissions
+                                    if trade['profit'] > 0:
                                         try:
-                                            trade_conn = sqlite3.connect('zwesta_trading.db')
-                                            trade_cursor = trade_conn.cursor()
-                                            trade_cursor.execute('''
-                                                INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
-                                                VALUES (?, ?, ?, ?)
-                                            ''', (bot_id, user_id, json.dumps(trade), trade['timestamp']))
-                                            trade_conn.commit()
-                                            trade_conn.close()
+                                            distribute_trade_commissions(bot_id, user_id, trade['profit'])
                                         except Exception as e:
-                                            logger.error(f"Bot {bot_id}: Error storing trade: {e}")
-                                        
-                                        # Update bot stats
-                                        bot_config['totalTrades'] += 1
-                                        bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
-                                        
-                                        if trade['profit'] > 0:
-                                            bot_config['winningTrades'] += 1
-                                        else:
-                                            bot_config['totalLosses'] += abs(trade['profit'])
-                                        
-                                        bot_config['totalProfit'] += trade['profit']
-                                        
-                                        # Update peak & drawdown
-                                        if bot_config['totalProfit'] > bot_config['peakProfit']:
-                                            bot_config['peakProfit'] = bot_config['totalProfit']
-                                        
-                                        drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
-                                        if drawdown > bot_config['maxDrawdown']:
-                                            bot_config['maxDrawdown'] = drawdown
-                                        
-                                        # Track profit history
-                                        bot_config['profitHistory'].append({
-                                            'timestamp': trade['timestamp'],
-                                            'profit': round(bot_config['totalProfit'], 2),
-                                            'trades': bot_config['totalTrades'],
-                                        })
-                                        
-                                        # Track daily profit
-                                        today = datetime.now().strftime('%Y-%m-%d')
-                                        if today not in bot_config['dailyProfits']:
-                                            bot_config['dailyProfits'][today] = 0
-                                        bot_config['dailyProfits'][today] += trade['profit']
-                                        
-                                        # Distribution commissions
-                                        if trade['profit'] > 0:
-                                            try:
-                                                distribute_trade_commissions(bot_id, user_id, trade['profit'])
-                                            except Exception as e:
-                                                logger.error(f"Bot {bot_id}: Commission error: {e}")
-                                        
-                                        logger.info(f"✅ Bot {bot_id}: Trade executed | {symbol} {order_type} | P&L: ${trade['profit']:.2f}")
-                                        trades_placed += 1
-                                        break
+                                            logger.error(f"Bot {bot_id}: Commission error: {e}")
+                                    
+                                    logger.info(f"✅ Bot {bot_id}: Trade executed | {symbol} {order_type} | P&L: ${trade['profit']:.2f}")
+                                    trades_placed += 1
                         else:
                             logger.warning(f"Bot {bot_id}: Could not place order on {symbol} or EURUSD fallback")
                     
@@ -5989,9 +6090,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         logger.error(f"Bot {bot_id}: Error in trade cycle for {symbol}: {e}")
                         continue
                 
-                # Update account balance
+                # Update account balance (broker-aware)
                 try:
-                    if mt5_conn:
+                    if is_ig and ig_conn:
+                        account_info = ig_conn.get_account_info()
+                        if account_info:
+                            bot_config['accountBalance'] = account_info.get('balance', 0)
+                    elif mt5_conn:
                         account_info = mt5_conn.get_account_info()
                         if account_info:
                             bot_config['accountBalance'] = account_info.get('balance', 0)
@@ -6309,7 +6414,7 @@ def start_bot():
         
         bot_thread = threading.Thread(
             target=continuous_bot_trading_loop,
-            args=(bot_id, user_id, bot_credentials),
+            args=(bot_id, user_id, None),
             daemon=True,
             name=f"BotThread-{bot_id}"
         )
@@ -6417,9 +6522,15 @@ def bot_status():
             enhanced_bot = {
                 'botId': bot.get('botId', 'unknown'),
                 'symbol': symbol,
+                'symbols': symbols,
                 'strategy': bot.get('strategy', 'Unknown'),
                 'commission': round(total_profit * 0.01, 2),
                 'profit': round(total_profit, 2),
+                'totalProfit': round(total_profit, 2),
+                'totalTrades': bot.get('totalTrades', 0),
+                'winningTrades': bot.get('winningTrades', 0),
+                'winRate': round((bot.get('winningTrades', 0) / max(bot.get('totalTrades', 1), 1)) * 100, 1),
+                'maxDrawdown': round(bot.get('maxDrawdown', 0), 2),
                 'runtimeFormatted': f"{int(runtime_hours)}h {int(runtime_minutes)}m",
                 'dailyProfit': round(daily_profit, 2),
                 'roi': round(roi, 2),
@@ -6427,6 +6538,8 @@ def bot_status():
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
                 'lastTradeTime': last_trade_time,
+                'broker_type': bot.get('broker_type', 'MT5'),
+                'profitField': round(total_profit, 2),
             }
             bots_list.append(enhanced_bot)
         
@@ -6517,6 +6630,7 @@ def bot_status_public():
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': status,
                 'enabled': is_enabled,
+                'broker_type': bot.get('broker_type', 'MT5'),
                 'createdAt': created.isoformat(),
                 'lastTradeTime': bot.get('tradeHistory', [{}])[-1].get('time') if bot.get('tradeHistory') else bot.get('createdAt', datetime.now().isoformat()),
             }
@@ -6533,11 +6647,6 @@ def bot_status_public():
             'bots': bots_list,
             'timestamp': datetime.now().isoformat(),
         }), 200
-    
-    except Exception as e:
-        logger.error(f"Error getting public bot status: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
     
     except Exception as e:
         logger.error(f"Error getting public bot status: {e}")
@@ -6752,7 +6861,7 @@ def get_bot_health(bot_id):
 def set_auto_withdrawal(bot_id):
     """
     Set withdrawal mode and parameters for a bot
-    
+
     Modes:
     - 'fixed': Withdraw at user-predetermined profit level
     - 'intelligent': Robot decides intelligently based on market conditions
@@ -6761,163 +6870,121 @@ def set_auto_withdrawal(bot_id):
         data = request.get_json()
         user_id = data.get('user_id')
         withdrawal_mode = data.get('withdrawal_mode', 'fixed')  # 'fixed' or 'intelligent'
-        target_profit = data.get('target_profit')  # For fixed mode
-        
+        target_profit = data.get('target_profit')               # For fixed mode
+
         if not user_id:
             return jsonify({'success': False, 'error': 'user_id required'}), 400
-        
+
         if withdrawal_mode not in ['fixed', 'intelligent']:
             return jsonify({'success': False, 'error': "withdrawal_mode must be 'fixed' or 'intelligent'"}), 400
-        
+
         # Validate based on mode
+        min_profit = None
+        max_profit = None
+        volatility_threshold = None
+        win_rate_min = None
+        trend_strength_min = None
+        time_between_withdrawals_hours = None
+
         if withdrawal_mode == 'fixed':
             if not target_profit:
                 return jsonify({'success': False, 'error': 'target_profit required for fixed mode'}), 400
-            @require_api_key
-            def set_auto_withdrawal(bot_id):
-                """
-                Set withdrawal mode and parameters for a bot
-    
-                Modes:
-                - 'fixed': Withdraw at user-predetermined profit level
-                - 'intelligent': Robot decides intelligently based on market conditions
-                """
-                try:
-                    data = request.get_json()
-                    user_id = data.get('user_id')
-                    withdrawal_mode = data.get('withdrawal_mode', 'fixed')  # 'fixed' or 'intelligent'
-                    target_profit = data.get('target_profit')               # For fixed mode
 
-                    if not user_id:
-                        return jsonify({'success': False, 'error': 'user_id required'}), 400
+            if target_profit < 10:
+                return jsonify({'success': False, 'error': 'Minimum profit target is $10'}), 400
 
-                    if withdrawal_mode not in ['fixed', 'intelligent']:
-                        return jsonify({'success': False, 'error': "withdrawal_mode must be 'fixed' or 'intelligent'"}), 400
+            if target_profit > 50000:
+                return jsonify({'success': False, 'error': 'Maximum profit target is $50,000'}), 400
 
-                    # Validate based on mode
-                    if withdrawal_mode == 'fixed':
-                        if not target_profit:
-                            return jsonify({'success': False, 'error': 'target_profit required for fixed mode'}), 400
+        elif withdrawal_mode == 'intelligent':
+            # Intelligent mode parameters
+            min_profit                     = data.get('min_profit', 50)
+            max_profit                     = data.get('max_profit', 1000)
+            volatility_threshold           = data.get('volatility_threshold', 0.02)
+            win_rate_min                   = data.get('win_rate_min', 60)
+            trend_strength_min             = data.get('trend_strength_min', 0.5)
+            time_between_withdrawals_hours = data.get('time_between_withdrawals_hours', 24)
 
-                        if target_profit < 10:
-                            return jsonify({'success': False, 'error': 'Minimum profit target is $10'}), 400
+            # Validate parameters
+            if min_profit < 10:
+                return jsonify({'success': False, 'error': 'Minimum profit must be >= $10'}), 400
+            if volatility_threshold < 0 or volatility_threshold > 0.1:
+                return jsonify({'success': False, 'error': 'Volatility threshold must be 0-0.1'}), 400
+            if win_rate_min < 40 or win_rate_min > 100:
+                return jsonify({'success': False, 'error': 'Win rate must be 40-100%'}), 400
 
-                        if target_profit > 50000:
-                            return jsonify({'success': False, 'error': 'Maximum profit target is $50,000'}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-                    elif withdrawal_mode == 'intelligent':
-                        # Intelligent mode parameters
-                        min_profit                 = data.get('min_profit', 50)
-                        max_profit                 = data.get('max_profit', 1000)
-                        volatility_threshold       = data.get('volatility_threshold', 0.02)
-                        win_rate_min               = data.get('win_rate_min', 60)
-                        trend_strength_min         = data.get('trend_strength_min', 0.5)
-                        time_between_withdrawals_hours = data.get('time_between_withdrawals_hours', 24)
+        setting_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+        updated_at = created_at
 
-                        # Validate parameters
-                        if min_profit < 10:
-                            return jsonify({'success': False, 'error': 'Minimum profit must be >= $10'}), 400
-                        if volatility_threshold < 0 or volatility_threshold > 0.1:
-                            return jsonify({'success': False, 'error': 'Volatility threshold must be 0-0.1'}), 400
-                        if win_rate_min < 40 or win_rate_min > 100:
-                            return jsonify({'success': False, 'error': 'Win rate must be 40-100%'}), 400
+        if withdrawal_mode == 'fixed':
+            cursor.execute('''
+                INSERT OR REPLACE INTO auto_withdrawal_settings
+                (setting_id, bot_id, user_id, target_profit, is_active,
+                 withdrawal_mode, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                setting_id,
+                bot_id,
+                user_id,
+                target_profit,
+                1,
+                'fixed',
+                created_at,
+                updated_at
+            ))
 
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
+            message = f'Fixed withdrawal set: Will withdraw when profit reaches ${target_profit}'
 
-                    setting_id = str(uuid.uuid4())
-                    created_at = datetime.now().isoformat()
-                    updated_at = created_at
+        else:  # intelligent
+            cursor.execute('''
+                INSERT OR REPLACE INTO auto_withdrawal_settings
+                (setting_id, bot_id, user_id, withdrawal_mode,
+                 min_profit, max_profit, volatility_threshold,
+                 win_rate_min, trend_strength_min,
+                 time_between_withdrawals_hours,
+                 last_withdrawal_at,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                setting_id,
+                bot_id,
+                user_id,
+                'intelligent',
+                min_profit,
+                max_profit,
+                volatility_threshold,
+                win_rate_min,
+                trend_strength_min,
+                time_between_withdrawals_hours,
+                None,
+                created_at,
+                updated_at
+            ))
 
-                    if withdrawal_mode == 'fixed':
-                        cursor.execute('''
-                            INSERT OR REPLACE INTO auto_withdrawal_settings
-                            (setting_id, bot_id, user_id, target_profit, is_active,
-                             withdrawal_mode, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            setting_id,
-                            bot_id,
-                            user_id,
-                            target_profit,
-                            1,
-                            'fixed',
-                            created_at,
-                            updated_at
-                        ))
+            message = (
+                f'Intelligent withdrawal activated with min profit ${min_profit}, '
+                f'max ${max_profit}, volatility < {volatility_threshold:.2%}'
+            )
 
-                        message = f'Fixed withdrawal set: Will withdraw when profit reaches ${target_profit}'
-
-                    else:  # intelligent
-                        cursor.execute('''
-                            INSERT OR REPLACE INTO auto_withdrawal_settings
-                            (setting_id, bot_id, user_id, withdrawal_mode,
-                             min_profit, max_profit, volatility_threshold,
-                             win_rate_min, trend_strength_min,
-                             time_between_withdrawals_hours,
-                             last_withdrawal_at,
-                             created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            setting_id,
-                            bot_id,
-                            user_id,
-                            'intelligent',
-                            min_profit,
-                            max_profit,
-                            volatility_threshold,
-                            win_rate_min,
-                            trend_strength_min,
-                            time_between_withdrawals_hours,
-                            None,               # last_withdrawal_at starts NULL
-                            created_at,
-                            updated_at
-                        ))
-
-                        message = (
-                            f'Intelligent withdrawal activated with min profit ${min_profit}, '
-                            f'max ${max_profit}, volatility < {volatility_threshold:.2%}'
-                        )
-
-                    conn.commit()
-                    conn.close()
-
-                    logger.info(f"Auto-withdrawal configured for bot {bot_id}: {withdrawal_mode} mode")
-
-                    return jsonify({
-                        'success': True,
-                        'setting_id': setting_id,
-                        'bot_id': bot_id,
-                        'withdrawal_mode': withdrawal_mode,
-                        'message': message
-                    }), 200
-
-                except Exception as e:
-                    logger.error(f"Error setting auto-withdrawal: {e}")
-                    return jsonify({'success': False, 'error': str(e)}), 500
-        
         conn.commit()
         conn.close()
-        
-        logger.info(f"Intelligent withdrawal configured for bot {bot_id}")
-        
+
+        logger.info(f"Auto-withdrawal configured for bot {bot_id}: {withdrawal_mode} mode")
+
         return jsonify({
             'success': True,
+            'setting_id': setting_id,
             'bot_id': bot_id,
-            'mode': 'intelligent',
-            'parameters': {
-                'min_profit': min_profit,
-                'max_profit': max_profit,
-                'volatility_threshold': f"{volatility_threshold:.2%}",
-                'win_rate_min': f"{win_rate_min}%",
-                'trend_strength_min': trend_strength_min,
-                'time_between_withdrawals': f"{time_between_withdrawals_hours} hours"
-            },
-            'message': 'Intelligent withdrawal activated. Robot will monitor conditions and withdraw when criteria met.'
+            'withdrawal_mode': withdrawal_mode,
+            'message': message
         }), 200
-    
+
     except Exception as e:
-        logger.error(f"Error configuring intelligent withdrawal: {e}")
+        logger.error(f"Error setting auto-withdrawal: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -7642,6 +7709,53 @@ def approve_withdrawal(withdrawal_id):
 # ==================== DUPLICATE DATABASE SECTION REMOVED ====================
 import random as rand
 
+# --- IG API Integration ---
+from ig_service import ig_api
+app.register_blueprint(ig_api)
+
+# Example: Use IG API in bot trading logic
+# (You can call these functions from your bot trading threads)
+def place_ig_trade(epic, size, direction, currency="USD", order_type="MARKET"):
+    import requests
+    from flask import current_app
+    # Use the IG API endpoint via internal HTTP call or direct function call
+    url = f"http://localhost:9000/api/ig/place-order"
+    data = {
+        "epic": epic,
+        "size": size,
+        "direction": direction,
+        "currencyCode": currency,
+        "orderType": order_type
+    }
+    try:
+        resp = requests.post(url, json=data)
+        return resp.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# Example: Get IG funds for financial info display
+def get_ig_funds():
+    import requests
+    url = f"http://localhost:9000/api/ig/funds"
+    try:
+        resp = requests.get(url)
+        return resp.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# Example: Get IG open positions for bot monitoring
+def get_ig_positions():
+    import requests
+    url = f"http://localhost:9000/api/ig/positions"
+    try:
+        resp = requests.get(url)
+        return resp.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# You can now call place_ig_trade, get_ig_funds, get_ig_positions from your bot logic
+# and display the results in your dashboard endpoints.
+
 COMMODITIES = {
     # ===== FOREX (9) - MetaQuotes-Demo Available =====
     'EURUSD': {'category': 'Forex', 'emoji': '📍'},
@@ -7698,6 +7812,7 @@ def auto_withdrawal_monitor():
         try:
             current_profit = bot_config.get('totalProfit', 0)
             min_profit = settings[4]  # min_profit from DB
+            max_profit = settings[11] if len(settings) > 11 else 1000  # max_profit from DB
             
             # Don't withdraw if profit below minimum threshold
             if current_profit < min_profit:
@@ -7705,45 +7820,39 @@ def auto_withdrawal_monitor():
             
             # Get bot performance metrics
             win_rate = bot_config.get('winRate', 50)
-            trades_count = bot_config.get('tradesCount', 0)
+            trades_count = bot_config.get('totalTrades', 0)
             
             # Need at least 5 trades to make intelligent decision
-            # Update trade stats
-            bot_config['totalTrades'] = bot_config.get('totalTrades', 0) + 1
-            if trade['profit'] > 0:
-                bot_config['winningTrades'] = bot_config.get('winningTrades', 0) + 1
+            if trades_count < 5:
+                return False, None
+            
+            # Calculate win rate from bot stats
+            winning_trades = bot_config.get('winningTrades', 0)
+            if trades_count > 0:
+                actual_win_rate = (winning_trades / trades_count) * 100
             else:
-                bot_config['losingTrades'] = bot_config.get('losingTrades', 0) + 1
-                bot_config['totalLosses'] = bot_config.get('totalLosses', 0) + abs(trade['profit'])
-            bot_config['totalProfit'] = bot_config.get('totalProfit', 0) + trade['profit']
-            # Update peak & drawdown
-            if bot_config['totalProfit'] > bot_config.get('peakProfit', 0):
-                bot_config['peakProfit'] = bot_config['totalProfit']
-            drawdown = bot_config.get('peakProfit', 0) - bot_config['totalProfit']
-            if drawdown > bot_config.get('maxDrawdown', 0):
-                bot_config['maxDrawdown'] = drawdown
-            # Track profit history
-            bot_config.setdefault('profitHistory', []).append({
-                'timestamp': trade['timestamp'],
-                'profit': round(bot_config['totalProfit'], 2),
-                'trades': bot_config['totalTrades'],
-            })
-            # Track trade history
-            bot_config.setdefault('tradeHistory', []).append(trade)
-            # Track daily profit
-            today = datetime.now().strftime('%Y-%m-%d')
-            bot_config.setdefault('dailyProfits', {})
-            if today not in bot_config['dailyProfits']:
-                bot_config['dailyProfits'][today] = 0
-            bot_config['dailyProfits'][today] += trade['profit']
-            # Distribution commissions
-            if trade['profit'] > 0:
+                actual_win_rate = 0
+            
+            win_rate_min = settings[6] if len(settings) > 6 else 60  # win_rate_min from DB
+            
+            # Don't withdraw if win rate is too low (bot is struggling)
+            if actual_win_rate < win_rate_min:
+                return False, None
+            
+            # Calculate withdrawal amount (cap at max_profit)
+            withdrawal_amount = min(current_profit, max_profit)
+            
+            # Check time between withdrawals
+            hours_interval = settings[9] if len(settings) > 9 else 24
+            last_withdrawal = settings[10] if len(settings) > 10 else None
+            if last_withdrawal:
                 try:
-                    distribute_trade_commissions(bot_id, user_id, trade['profit'])
-                except Exception as e:
-                    logger.error(f"Bot {bot_id}: Commission error: {e}")
-            logger.info(f"✅ Bot {bot_id}: Trade executed | {symbol} {order_type} | P&L: ${trade['profit']:.2f}")
-            trades_placed += 1
+                    last_dt = datetime.fromisoformat(last_withdrawal)
+                    hours_since = (datetime.now() - last_dt).total_seconds() / 3600
+                    if hours_since < hours_interval:
+                        return False, None
+                except Exception:
+                    pass
             
             return True, withdrawal_amount
         
@@ -8395,16 +8504,24 @@ def restore_from_backup():
         # DANGEROUS - require confirmation
         confirmation = data.get('confirm_restore')
         if not confirmation:
-            result = {
+            return jsonify({
+                'success': False,
+                'error': 'This is a destructive operation. Set confirm_restore=true to proceed.',
+                'backup_filename': backup_filename
+            }), 400
+        
+        # Perform restore
+        result = backup_manager.restore_backup(backup_filename)
+        if result:
+            return jsonify({
                 'success': True,
-                'bot_id': bot_id,
-                'current_setting': dict(settings) if settings else None,
-                'history': history,
-                'total_auto_withdrawals': len(history),
-                'total_amount_withdrawn': sum([float(h['withdrawal_amount']) for h in history])
-            }
-            print("\n=== Auto-Withdrawal Status ===\n", result)
-            return jsonify(result), 200
+                'message': f'Database restored from backup: {backup_filename}',
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to restore from backup: {backup_filename}'
+            }), 500
             
     except Exception as e:
         logger.error(f"Restore backup error: {e}")

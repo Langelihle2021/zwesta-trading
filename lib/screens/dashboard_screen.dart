@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-// import 'package:fl_chart/fl_chart.dart'; // Disabled for compatibility
+import 'package:fl_chart/fl_chart.dart';
 import '../l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -161,6 +161,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _buildQuickStatsRow(),
             const SizedBox(height: 20),
             _buildProfitOverviewCard(),
+            const SizedBox(height: 20),
+            _buildPortfolioPieChart(),
+            const SizedBox(height: 20),
+            _buildWinLossDonutChart(),
+            const SizedBox(height: 20),
+            _buildProfitLineChart(),
             const SizedBox(height: 20),
             _buildTradeAnalysisPreview(),
             const SizedBox(height: 20),
@@ -870,6 +876,345 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── PORTFOLIO DISTRIBUTION PIE CHART ──
+  Widget _buildPortfolioPieChart() {
+    final symbolProfits = <String, double>{};
+    for (final bot in _realBotsList) {
+      final symbols = bot['symbol']?.toString() ?? 'EURUSD';
+      final profit = (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0).abs();
+      if (profit > 0) {
+        symbolProfits[symbols] = (symbolProfits[symbols] ?? 0) + profit;
+      }
+    }
+
+    if (symbolProfits.isEmpty) {
+      return _glassCard(
+        child: Column(
+          children: [
+            Text('Portfolio Distribution',
+                style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 20),
+            const Icon(Icons.pie_chart_outline, color: Colors.white24, size: 48),
+            const SizedBox(height: 8),
+            Text('No trading data yet', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    final chartColors = [
+      const Color(0xFF00E5FF),
+      const Color(0xFF69F0AE),
+      const Color(0xFFFFD600),
+      const Color(0xFFFF8A80),
+      const Color(0xFF7C4DFF),
+      const Color(0xFFFF6E40),
+      const Color(0xFF40C4FF),
+      const Color(0xFFB388FF),
+    ];
+
+    final total = symbolProfits.values.fold<double>(0, (s, v) => s + v);
+    final entries = symbolProfits.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Portfolio Distribution',
+              style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 200,
+            child: PieChart(
+              PieChartData(
+                sectionsSpace: 3,
+                centerSpaceRadius: 45,
+                sections: entries.asMap().entries.map((e) {
+                  final i = e.key;
+                  final pair = e.value;
+                  final pct = (pair.value / total * 100);
+                  final color = chartColors[i % chartColors.length];
+                  return PieChartSectionData(
+                    value: pair.value,
+                    color: color,
+                    radius: 55,
+                    title: '${pct.toStringAsFixed(0)}%',
+                    titleStyle: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: entries.asMap().entries.map((e) {
+              final i = e.key;
+              final pair = e.value;
+              final color = chartColors[i % chartColors.length];
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+                  const SizedBox(width: 6),
+                  Text(pair.key, style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11)),
+                ],
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── WIN / LOSS DONUT CHART ──
+  Widget _buildWinLossDonutChart() {
+    final winningBots = _realBotsList.where((b) => (double.tryParse(b['profit']?.toString() ?? '0') ?? 0) > 0).length;
+    final losingBots = _realBotsList.where((b) => (double.tryParse(b['profit']?.toString() ?? '0') ?? 0) < 0).length;
+    final breakEven = _realBotsList.length - winningBots - losingBots;
+    final total = _realBotsList.length;
+
+    if (total == 0) {
+      return _glassCard(
+        child: Column(
+          children: [
+            Text('Win / Loss Ratio',
+                style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 20),
+            const Icon(Icons.donut_large, color: Colors.white24, size: 48),
+            const SizedBox(height: 8),
+            Text('No bots running', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Win / Loss Ratio',
+              style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 160,
+                  child: PieChart(
+                    PieChartData(
+                      sectionsSpace: 2,
+                      centerSpaceRadius: 35,
+                      sections: [
+                        if (winningBots > 0)
+                          PieChartSectionData(
+                            value: winningBots.toDouble(),
+                            color: const Color(0xFF69F0AE),
+                            radius: 40,
+                            title: '$winningBots',
+                            titleStyle: GoogleFonts.poppins(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                        if (losingBots > 0)
+                          PieChartSectionData(
+                            value: losingBots.toDouble(),
+                            color: const Color(0xFFFF8A80),
+                            radius: 40,
+                            title: '$losingBots',
+                            titleStyle: GoogleFonts.poppins(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                        if (breakEven > 0)
+                          PieChartSectionData(
+                            value: breakEven.toDouble(),
+                            color: Colors.white30,
+                            radius: 40,
+                            title: '$breakEven',
+                            titleStyle: GoogleFonts.poppins(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _chartLegendItem(const Color(0xFF69F0AE), 'Winning', winningBots),
+                  const SizedBox(height: 10),
+                  _chartLegendItem(const Color(0xFFFF8A80), 'Losing', losingBots),
+                  const SizedBox(height: 10),
+                  _chartLegendItem(Colors.white30, 'Break Even', breakEven),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chartLegendItem(Color color, String label, int count) {
+    return Row(
+      children: [
+        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+        const SizedBox(width: 8),
+        Text('$label ($count)', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
+      ],
+    );
+  }
+
+  // ── PROFIT TREND LINE CHART ──
+  Widget _buildProfitLineChart() {
+    // Gather profit per bot as data points
+    final profitPoints = <FlSpot>[];
+    double cumulative = 0;
+    for (int i = 0; i < _realBotsList.length; i++) {
+      final profit = double.tryParse(_realBotsList[i]['profit']?.toString() ?? '0') ?? 0;
+      cumulative += profit;
+      profitPoints.add(FlSpot(i.toDouble(), cumulative));
+    }
+
+    if (profitPoints.isEmpty) {
+      return _glassCard(
+        child: Column(
+          children: [
+            Text('Cumulative Profit Trend',
+                style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 20),
+            const Icon(Icons.show_chart, color: Colors.white24, size: 48),
+            const SizedBox(height: 8),
+            Text('No data yet', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    final maxY = profitPoints.map((p) => p.y).reduce(max);
+    final minY = profitPoints.map((p) => p.y).reduce(min);
+    final range = (maxY - minY).abs();
+    final padding = range > 0 ? range * 0.2 : 10.0;
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Cumulative Profit Trend',
+              style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(
+            'Across ${_realBotsList.length} bot(s)',
+            style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 200,
+            child: LineChart(
+              LineChartData(
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: range > 0 ? range / 4 : 5,
+                  getDrawingHorizontalLine: (value) =>
+                      FlLine(color: Colors.white10, strokeWidth: 1),
+                ),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 50,
+                      getTitlesWidget: (value, meta) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Text(
+                          '\$${value.toStringAsFixed(0)}',
+                          style: GoogleFonts.poppins(color: Colors.white38, fontSize: 9),
+                        ),
+                      ),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (value, meta) {
+                        final idx = value.toInt();
+                        if (idx >= 0 && idx < _realBotsList.length) {
+                          final botId = (_realBotsList[idx]['botId'] ?? '').toString();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              botId.length > 5 ? botId.substring(0, 5) : botId,
+                              style: GoogleFonts.poppins(color: Colors.white38, fontSize: 8),
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                borderData: FlBorderData(show: false),
+                minY: minY - padding,
+                maxY: maxY + padding,
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: profitPoints,
+                    isCurved: true,
+                    curveSmoothness: 0.3,
+                    color: const Color(0xFF00E5FF),
+                    barWidth: 3,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, bar, index) =>
+                          FlDotCirclePainter(
+                        radius: 4,
+                        color: spot.y >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                        strokeColor: Colors.white,
+                        strokeWidth: 1.5,
+                      ),
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          const Color(0xFF00E5FF).withOpacity(0.25),
+                          const Color(0xFF00E5FF).withOpacity(0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (touchedSpots) {
+                      return touchedSpots.map((spot) {
+                        return LineTooltipItem(
+                          '\$${spot.y.toStringAsFixed(2)}',
+                          GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),

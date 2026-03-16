@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'bot_configuration_screen.dart';
 import 'bot_dashboard_screen.dart';
+import '../services/ig_trading_service.dart';
 
 class BotAnalyticsScreen extends StatefulWidget {
   final Map<String, dynamic> bot;
@@ -22,9 +23,20 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   late Future<void> _analyticsLoad;
   Timer? _refreshTimer;
 
+  // IG state
+  bool _isIG = false;
+  bool _igLoading = false;
+  Map<String, dynamic>? _igBalance;
+  List<dynamic> _igPositions = [];
+  List<dynamic> _igTransactions = [];
+  String? _igError;
+
   @override
   void initState() {
     super.initState();
+    final brokerType = widget.bot['broker_type'] ?? widget.bot['broker'] ?? 'MT5';
+    _isIG = brokerType.toString().toUpperCase().contains('IG');
+
     _analyticsLoad = _refreshAnalytics();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (mounted) {
@@ -33,6 +45,49 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         });
       }
     });
+
+    if (_isIG) {
+      _loadIGData();
+    }
+  }
+
+  Future<void> _loadIGData() async {
+    if (!_isIG) return;
+    setState(() {
+      _igLoading = true;
+      _igError = null;
+    });
+    try {
+      final results = await Future.wait([
+        IGTradingService.getBalance(),
+        IGTradingService.getPositions(),
+        IGTradingService.getTransactions(pageSize: 20),
+      ]);
+      if (mounted) {
+        setState(() {
+          _igLoading = false;
+          final balData = results[0];
+          if (balData['success'] == true) {
+            _igBalance = balData;
+          }
+          final posData = results[1];
+          if (posData['success'] == true) {
+            _igPositions = posData['positions'] ?? [];
+          }
+          final txData = results[2];
+          if (txData['success'] == true) {
+            _igTransactions = txData['transactions'] ?? [];
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _igLoading = false;
+          _igError = e.toString();
+        });
+      }
+    }
   }
 
   Future<void> _refreshAnalytics() async {
@@ -141,6 +196,18 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
               // Daily Profit Distribution
               if (widget.bot['dailyProfits'] != null && (widget.bot['dailyProfits'] as Map).isNotEmpty)
                 _buildDailyProfitsSection(),
+
+              // IG Controls & Data (only for IG bots)
+              if (_isIG) ...[
+                const SizedBox(height: 24),
+                _buildIGControlPanel(),
+                const SizedBox(height: 16),
+                _buildIGBalanceCard(),
+                const SizedBox(height: 16),
+                _buildIGPositionsSection(),
+                const SizedBox(height: 16),
+                _buildIGTransactionsSection(),
+              ],
 
               // Trade History
               const SizedBox(height: 24),
@@ -454,6 +521,585 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // ==================== IG WIDGETS ====================
+
+  Widget _buildIGControlPanel() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE91E63).withOpacity(0.08),
+        border: Border.all(color: const Color(0xFFE91E63).withOpacity(0.4)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance, color: Color(0xFFE91E63), size: 22),
+              const SizedBox(width: 8),
+              const Text(
+                'IG Trading Controls',
+                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              if (_igLoading)
+                const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFE91E63))),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _igActionButton(
+                icon: Icons.refresh,
+                label: 'Refresh',
+                color: Colors.blue,
+                onTap: _loadIGData,
+              ),
+              _igActionButton(
+                icon: Icons.account_balance_wallet,
+                label: 'Balance',
+                color: Colors.green,
+                onTap: () async {
+                  final data = await IGTradingService.getBalance();
+                  if (mounted) {
+                    setState(() => _igBalance = data['success'] == true ? data : _igBalance);
+                    _showIGSnackBar(data['success'] == true
+                        ? 'Balance: \$${data['balance']?.toStringAsFixed(2) ?? '?'}'
+                        : 'Error: ${data['error']}');
+                  }
+                },
+              ),
+              _igActionButton(
+                icon: Icons.list_alt,
+                label: 'Positions',
+                color: Colors.orange,
+                onTap: () async {
+                  final data = await IGTradingService.getPositions();
+                  if (mounted) {
+                    setState(() {
+                      if (data['success'] == true) _igPositions = data['positions'] ?? [];
+                    });
+                    _showIGSnackBar('${_igPositions.length} open position(s)');
+                  }
+                },
+              ),
+              _igActionButton(
+                icon: Icons.history,
+                label: 'History',
+                color: Colors.purple,
+                onTap: () async {
+                  final data = await IGTradingService.getTransactions();
+                  if (mounted) {
+                    setState(() {
+                      if (data['success'] == true) _igTransactions = data['transactions'] ?? [];
+                    });
+                    _showIGSnackBar('${_igTransactions.length} transaction(s) loaded');
+                  }
+                },
+              ),
+              _igActionButton(
+                icon: Icons.close_fullscreen,
+                label: 'Close All',
+                color: Colors.red,
+                onTap: _confirmCloseAllPositions,
+              ),
+              _igActionButton(
+                icon: Icons.add_chart,
+                label: 'Place Trade',
+                color: Colors.teal,
+                onTap: _showPlaceTradeDialog,
+              ),
+              _igActionButton(
+                icon: Icons.search,
+                label: 'Markets',
+                color: Colors.indigo,
+                onTap: _showMarketSearchDialog,
+              ),
+            ],
+          ),
+          if (_igError != null) ...[
+            const SizedBox(height: 8),
+            Text(_igError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _igActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIGBalanceCard() {
+    if (_igBalance == null) {
+      return const SizedBox.shrink();
+    }
+    final balance = (_igBalance!['balance'] ?? 0).toDouble();
+    final available = (_igBalance!['available'] ?? 0).toDouble();
+    final pnl = (_igBalance!['profitLoss'] ?? 0).toDouble();
+    final currency = _igBalance!['currency'] ?? 'USD';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.green.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('IG Account Balance', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _balanceStat('Balance', '\$${balance.toStringAsFixed(2)}', Colors.white),
+              _balanceStat('Available', '\$${available.toStringAsFixed(2)}', Colors.blue),
+              _balanceStat('P&L', '\$${pnl.toStringAsFixed(2)}', pnl >= 0 ? Colors.green : Colors.red),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('Currency: $currency', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  Widget _balanceStat(String label, String value, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIGPositionsSection() {
+    if (_igPositions.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.grey[900], borderRadius: BorderRadius.circular(8)),
+        child: const Center(child: Text('No open IG positions', style: TextStyle(color: Colors.white54))),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader('IG Open Positions (${_igPositions.length})'),
+        const SizedBox(height: 8),
+        ..._igPositions.map((pos) {
+          final direction = pos['direction'] ?? '';
+          final isBuy = direction == 'BUY';
+          final pnl = (pos['profitLoss'] ?? 0).toDouble();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: isBuy ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (isBuy ? Colors.green : Colors.red).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(direction, style: TextStyle(color: isBuy ? Colors.green : Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(pos['instrumentName'] ?? pos['epic'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                      Text('Size: ${pos['size']}  |  Level: ${pos['level']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '\$${pnl.toStringAsFixed(2)}',
+                      style: TextStyle(color: pnl >= 0 ? Colors.green : Colors.red, fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () => _closeIGPosition(pos),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('Close', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildIGTransactionsSection() {
+    if (_igTransactions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final recent = _igTransactions.length > 10 ? _igTransactions.sublist(0, 10) : _igTransactions;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader('IG Transaction History'),
+        const SizedBox(height: 8),
+        ...recent.map((tx) {
+          final pnlStr = tx['profitAndLoss']?.toString() ?? '0';
+          final pnlNum = double.tryParse(pnlStr.replaceAll(RegExp(r'[^0-9.\-]'), '')) ?? 0;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tx['instrumentName'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text('${tx['type'] ?? ''} | ${tx['date'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                    ],
+                  ),
+                ),
+                Text(
+                  pnlStr,
+                  style: TextStyle(color: pnlNum >= 0 ? Colors.green : Colors.red, fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ==================== IG ACTIONS ====================
+
+  Future<void> _closeIGPosition(Map<String, dynamic> pos) async {
+    final dealId = pos['dealId'] ?? '';
+    final direction = pos['direction'] ?? 'BUY';
+    final size = (pos['size'] ?? 0).toDouble();
+    final closeDirection = direction == 'BUY' ? 'SELL' : 'BUY';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text('Close Position?', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Close ${pos['instrumentName'] ?? pos['epic']} ($direction, size: $size)?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Close', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final result = await IGTradingService.closePosition(dealId: dealId, direction: closeDirection, size: size);
+    _showIGSnackBar(result['success'] == true ? 'Position closed' : 'Error: ${result['error']}');
+    if (result['success'] == true) _loadIGData();
+  }
+
+  Future<void> _confirmCloseAllPositions() async {
+    if (_igPositions.isEmpty) {
+      _showIGSnackBar('No open positions to close');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text('Close ALL Positions?', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'This will close all ${_igPositions.length} open IG position(s). Are you sure?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Close All', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final result = await IGTradingService.closeAllPositions();
+    _showIGSnackBar(result['success'] == true
+        ? 'Closed ${result['closed']}/${result['total']} positions'
+        : 'Error: ${result['error']}');
+    if (result['success'] == true) _loadIGData();
+  }
+
+  Future<void> _showPlaceTradeDialog() async {
+    String epic = '';
+    String direction = 'BUY';
+    String sizeStr = '1';
+    String? stopStr;
+    String? limitStr;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.grey[900],
+              title: const Text('Place IG Trade', style: TextStyle(color: Colors.white)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Epic (e.g. CS.D.EURUSD.CFD.IP)',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      ),
+                      style: const TextStyle(color: Colors.white),
+                      onChanged: (v) => epic = v,
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Text('Direction: ', style: TextStyle(color: Colors.white54)),
+                        ChoiceChip(
+                          label: const Text('BUY'),
+                          selected: direction == 'BUY',
+                          selectedColor: Colors.green,
+                          onSelected: (_) => setDialogState(() => direction = 'BUY'),
+                        ),
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: const Text('SELL'),
+                          selected: direction == 'SELL',
+                          selectedColor: Colors.red,
+                          onSelected: (_) => setDialogState(() => direction = 'SELL'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Size',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      ),
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: Colors.white),
+                      controller: TextEditingController(text: sizeStr),
+                      onChanged: (v) => sizeStr = v,
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Stop Distance (optional)',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      ),
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: Colors.white),
+                      onChanged: (v) => stopStr = v,
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Limit Distance (optional)',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      ),
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: Colors.white),
+                      onChanged: (v) => limitStr = v,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                  onPressed: () {
+                    if (epic.isEmpty) return;
+                    Navigator.pop(ctx, {
+                      'epic': epic,
+                      'direction': direction,
+                      'size': double.tryParse(sizeStr) ?? 1,
+                      'stopDistance': stopStr != null ? double.tryParse(stopStr!) : null,
+                      'limitDistance': limitStr != null ? double.tryParse(limitStr!) : null,
+                    });
+                  },
+                  child: const Text('Place Order'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return;
+    final orderResult = await IGTradingService.placeOrder(
+      epic: result['epic'],
+      direction: result['direction'],
+      size: result['size'],
+      stopDistance: result['stopDistance'],
+      limitDistance: result['limitDistance'],
+    );
+    _showIGSnackBar(orderResult['success'] == true
+        ? 'Order placed! Ref: ${orderResult['dealReference']}'
+        : 'Error: ${orderResult['error']}');
+    if (orderResult['success'] == true) _loadIGData();
+  }
+
+  Future<void> _showMarketSearchDialog() async {
+    String searchTerm = '';
+    List<dynamic> searchResults = [];
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.grey[900],
+              title: const Text('Search IG Markets', style: TextStyle(color: Colors.white)),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Search (e.g. EUR, Gold, Apple)',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        suffixIcon: Icon(Icons.search, color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      ),
+                      style: const TextStyle(color: Colors.white),
+                      onChanged: (v) => searchTerm = v,
+                      onSubmitted: (_) async {
+                        if (searchTerm.isEmpty) return;
+                        final data = await IGTradingService.searchMarkets(searchTerm);
+                        setDialogState(() {
+                          searchResults = data['success'] == true ? (data['markets'] ?? []) : [];
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+                      onPressed: () async {
+                        if (searchTerm.isEmpty) return;
+                        final data = await IGTradingService.searchMarkets(searchTerm);
+                        setDialogState(() {
+                          searchResults = data['success'] == true ? (data['markets'] ?? []) : [];
+                        });
+                      },
+                      child: const Text('Search'),
+                    ),
+                    if (searchResults.isNotEmpty)
+                      SizedBox(
+                        height: 250,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: searchResults.length,
+                          itemBuilder: (ctx, i) {
+                            final m = searchResults[i];
+                            return ListTile(
+                              dense: true,
+                              title: Text(m['instrumentName'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                              subtitle: Text(
+                                '${m['epic']} | ${m['instrumentType'] ?? ''} | Bid: ${m['bid']} / Offer: ${m['offer']}',
+                                style: const TextStyle(color: Colors.white38, fontSize: 10),
+                              ),
+                              onTap: () => Navigator.pop(ctx),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showIGSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 3),
+        backgroundColor: Colors.grey[800],
+      ),
     );
   }
 

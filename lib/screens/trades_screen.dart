@@ -51,7 +51,8 @@ class _TradesScreenState extends State<TradesScreen> {
   Widget _buildTradesContent() {
     return Consumer<TradingService>(
       builder: (context, tradingService, _) {
-        return Column(
+        return SafeArea(
+          child: Column(
           children: [
             // Connected broker banner
             FutureBuilder<SharedPreferences>(
@@ -130,6 +131,7 @@ class _TradesScreenState extends State<TradesScreen> {
               ),
             ),
           ],
+        ),
         );
       },
     );

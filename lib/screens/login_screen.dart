@@ -167,11 +167,14 @@ class _LoginScreenState extends State<LoginScreen> {
           controller: _mfaController,
           keyboardType: TextInputType.number,
           maxLength: 6,
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          cursorColor: Colors.white,
           decoration: InputDecoration(
             hintText: '2FA Code',
             hintStyle: const TextStyle(color: Colors.white54),
             prefixIcon: const Icon(Icons.password, color: Colors.white70),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.08),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Colors.white30),
@@ -182,7 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Colors.white),
+              borderSide: const BorderSide(color: Colors.white, width: 1.5),
             ),
           ),
         ),
@@ -237,11 +240,14 @@ class _LoginScreenState extends State<LoginScreen> {
           // Registration fields
           TextFormField(
             controller: _firstNameController,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+            cursorColor: Colors.white,
             decoration: InputDecoration(
               hintText: loc.translate('First Name'),
               hintStyle: const TextStyle(color: Colors.white54),
               prefixIcon: const Icon(Icons.person, color: Colors.white70),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.08),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Colors.white30),
@@ -249,17 +255,24 @@ class _LoginScreenState extends State<LoginScreen> {
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Colors.white30),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.white, width: 1.5),
               ),
             ),
           ),
           const SizedBox(height: AppSpacing.md),
           TextFormField(
             controller: _lastNameController,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+            cursorColor: Colors.white,
             decoration: InputDecoration(
               hintText: loc.translate('Last Name'),
               hintStyle: const TextStyle(color: Colors.white54),
               prefixIcon: const Icon(Icons.person, color: Colors.white70),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.08),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Colors.white30),
@@ -267,17 +280,24 @@ class _LoginScreenState extends State<LoginScreen> {
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Colors.white30),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.white, width: 1.5),
               ),
             ),
           ),
           const SizedBox(height: AppSpacing.md),
           TextFormField(
             controller: _emailController,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+            cursorColor: Colors.white,
             decoration: InputDecoration(
               hintText: loc.translate('Email'),
               hintStyle: const TextStyle(color: Colors.white54),
               prefixIcon: const Icon(Icons.email, color: Colors.white70),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.08),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Colors.white30),
@@ -285,6 +305,10 @@ class _LoginScreenState extends State<LoginScreen> {
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Colors.white30),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.white, width: 1.5),
               ),
             ),
           ),
@@ -294,11 +318,14 @@ class _LoginScreenState extends State<LoginScreen> {
         // Username field
         TextFormField(
           controller: _usernameController,
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          cursorColor: Colors.white,
           decoration: InputDecoration(
             hintText: loc.translate('Email'),
             hintStyle: const TextStyle(color: Colors.white54),
             prefixIcon: const Icon(Icons.person, color: Colors.white70),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.08),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Colors.white30),
@@ -307,6 +334,10 @@ class _LoginScreenState extends State<LoginScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Colors.white30),
             ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.white, width: 1.5),
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -314,7 +345,8 @@ class _LoginScreenState extends State<LoginScreen> {
         // Password field
         TextFormField(
           controller: _passwordController,
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          cursorColor: Colors.white,
           obscureText: _obscurePassword,
           decoration: InputDecoration(
             hintText: loc.translate('Password'),
@@ -329,6 +361,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 color: Colors.white70,
               ),
             ),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.08),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Colors.white30),
@@ -336,6 +370,10 @@ class _LoginScreenState extends State<LoginScreen> {
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Colors.white30),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.white, width: 1.5),
             ),
           ),
         ),

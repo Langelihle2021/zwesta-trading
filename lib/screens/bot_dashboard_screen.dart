@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import '../services/bot_service.dart';
+import '../services/ig_trading_service.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
 
@@ -266,6 +267,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final todaysProfit = double.tryParse(bot['dailyProfit']?.toString() ?? '0') ?? 0;
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
+    final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
     final symbolStr = symbols is List ? (symbols as List).join(', ') : symbols.toString();
     final runtime = bot['runtimeFormatted'] ?? '--';
 
@@ -290,7 +292,27 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   children: [
                     Text(botId, style: GoogleFonts.poppins(color: Colors.black, fontSize: 17, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 2),
-                    Text(strategy, style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12)),
+                    Row(
+                      children: [
+                        Text(strategy, style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12)),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: brokerType.toString().contains('IG') ? const Color(0xFFE91E63).withOpacity(0.15) : const Color(0xFF2196F3).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            brokerType.toString().contains('IG') ? 'IG' : 'MT5',
+                            style: GoogleFonts.poppins(
+                              color: brokerType.toString().contains('IG') ? const Color(0xFFE91E63) : const Color(0xFF2196F3),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -375,6 +397,56 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               ),
             ],
           ),
+          // IG Quick Actions (only for IG bots)
+          if (brokerType.toString().toUpperCase().contains('IG')) ...[            const SizedBox(height: 10),
+            Row(
+              children: [
+                _igQuickBtn(Icons.account_balance_wallet, 'Balance', Colors.green, () async {
+                  final data = await IGTradingService.getBalance();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(data['success'] == true
+                        ? 'IG Balance: \$${(data['balance'] ?? 0).toStringAsFixed(2)}'
+                        : 'Error: ${data['error']}'),
+                    backgroundColor: Colors.grey[800],
+                  ));
+                }),
+                const SizedBox(width: 8),
+                _igQuickBtn(Icons.list_alt, 'Positions', Colors.orange, () async {
+                  final data = await IGTradingService.getPositions();
+                  if (!mounted) return;
+                  final count = (data['positions'] as List?)?.length ?? 0;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('$count open IG position(s)'),
+                    backgroundColor: Colors.grey[800],
+                  ));
+                }),
+                const SizedBox(width: 8),
+                _igQuickBtn(Icons.close_fullscreen, 'Close All', Colors.red, () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Close All IG Positions?'),
+                      content: const Text('This will close all open positions on your IG account.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm', style: TextStyle(color: Colors.red))),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true) return;
+                  final data = await IGTradingService.closeAllPositions();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(data['success'] == true
+                        ? 'Closed ${data['closed']}/${data['total']} positions'
+                        : 'Error: ${data['error']}'),
+                    backgroundColor: Colors.grey[800],
+                  ));
+                }),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -388,6 +460,30 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
           const SizedBox(height: 2),
           Text(label, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10)),
         ],
+      ),
+    );
+  }
+
+  Widget _igQuickBtn(IconData icon, String label, Color color, VoidCallback onTap) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withOpacity(0.3)),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(height: 2),
+              Text(label, style: GoogleFonts.poppins(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
       ),
     );
   }

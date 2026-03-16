@@ -25,7 +25,7 @@ dependencies:
   intl: ^0.20.2
   
   # Charts
-  # fl_chart: ^0.60.0 # Temporarily disabled due to Flutter compatibility issues
+  fl_chart: ^0.68.0
   
   # Material Design 3
   cupertino_icons: ^1.0.2
