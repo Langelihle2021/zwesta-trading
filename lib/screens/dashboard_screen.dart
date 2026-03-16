@@ -33,6 +33,7 @@ import 'multi_account_management_screen.dart';
 import 'consolidated_reports_screen.dart';
 import 'referral_dashboard_screen.dart';
 import 'admin_dashboard_screen.dart';
+import 'commission_config_screen.dart';
 import 'multi_broker_management_screen.dart';
 import 'enhanced_dashboard_screen.dart';
 import 'commission_dashboard_screen.dart';
@@ -1872,6 +1873,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const AdminDashboardScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.tune, color: Color(0xFFFF6E40)),
+            title: const Text('Commission Config', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Manage commission splits', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CommissionConfigScreen(),
                 ),
               );
             },

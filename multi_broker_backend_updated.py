@@ -642,6 +642,36 @@ def init_database():
     # ✅ MIGRATION: Add IG Markets specific columns if they don't exist
     # Check if api_key and username columns exist in broker_credentials table
 
+    # Commission Configuration table — dynamic commission rates
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commission_config (
+            config_id TEXT PRIMARY KEY,
+            developer_id TEXT DEFAULT 'developer',
+            developer_direct_rate REAL DEFAULT 0.25,
+            developer_referral_rate REAL DEFAULT 0.20,
+            recruiter_rate REAL DEFAULT 0.05,
+            ig_commission_enabled BOOLEAN DEFAULT 1,
+            ig_developer_rate REAL DEFAULT 0.20,
+            ig_recruiter_rate REAL DEFAULT 0.05,
+            multi_tier_enabled BOOLEAN DEFAULT 0,
+            tier2_rate REAL DEFAULT 0.02,
+            updated_at TEXT,
+            updated_by TEXT
+        )
+    ''')
+
+    # Seed default config if empty
+    cursor.execute('SELECT COUNT(*) FROM commission_config')
+    if cursor.fetchone()[0] == 0:
+        cursor.execute('''
+            INSERT INTO commission_config
+            (config_id, developer_id, developer_direct_rate, developer_referral_rate,
+             recruiter_rate, ig_commission_enabled, ig_developer_rate, ig_recruiter_rate,
+             multi_tier_enabled, tier2_rate, updated_at)
+            VALUES ('default', 'developer', 0.25, 0.20, 0.05, 1, 0.20, 0.05, 0, 0.02, ?)
+        ''', (datetime.now().isoformat(),))
+        logger.info("✅ Seeded default commission config")
+
     # IG Withdrawal Notifications table — tracks when profit targets are hit
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS ig_withdrawal_notifications (
@@ -5282,30 +5312,58 @@ def request_commission_withdrawal():
 
 # ==================== COMMISSION DISTRIBUTION HELPER ====================
 
-def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float):
+def _get_commission_config(cursor):
+    """Load commission rates from DB. Returns dict with all config fields."""
+    cursor.execute('SELECT * FROM commission_config WHERE config_id = ?', ('default',))
+    row = cursor.fetchone()
+    if row:
+        return dict(row)
+    # Fallback defaults
+    return {
+        'developer_id': 'developer',
+        'developer_direct_rate': 0.25,
+        'developer_referral_rate': 0.20,
+        'recruiter_rate': 0.05,
+        'ig_commission_enabled': 1,
+        'ig_developer_rate': 0.20,
+        'ig_recruiter_rate': 0.05,
+        'multi_tier_enabled': 0,
+        'tier2_rate': 0.02,
+    }
+
+
+def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float, source: str = 'MT5'):
     """
-    Distribute commissions for profitable trades
-    
-    IMPORTANT: Commission is ONLY earned from YOUR DOWNLINERS (referrals)
-    NOT from your own trades!
-    
-    Flow:
-    1. Check if THIS USER (bot_id owner) has a REFERRER (upline)
-    2. If YES: Referrer gets 5% commission from this user's bot profit
-    3. If NO: No commission (only own downliners would pay you commission)
-    4. Separately: Check how many downliners THIS USER has and they will get commissions
+    Distribute commissions for profitable trades.
+    Reads rates from commission_config DB table (admin-editable).
+    source: 'MT5' or 'IG' — uses matching rate set.
     """
     try:
         if profit_amount <= 0:
             return  # Only commission on profits
-        
-        DEVELOPER_ID = 'developer'  # Replace with actual developer user_id if needed
-        DEVELOPER_DIRECT_RATE = 0.25
-        DEVELOPER_REFERRAL_RATE = 0.20
-        RECRUITER_RATE = 0.05
 
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        cfg = _get_commission_config(cursor)
+
+        DEVELOPER_ID = cfg['developer_id']
+
+        if source == 'IG':
+            if not cfg.get('ig_commission_enabled', 1):
+                conn.close()
+                logger.info(f"IG commission disabled — skipping for profit ${profit_amount:.2f}")
+                return
+            DEV_REFERRAL_RATE = float(cfg.get('ig_developer_rate', 0.20))
+            RECRUITER_RATE = float(cfg.get('ig_recruiter_rate', 0.05))
+            DEV_DIRECT_RATE = DEV_REFERRAL_RATE + RECRUITER_RATE
+        else:
+            DEV_DIRECT_RATE = float(cfg.get('developer_direct_rate', 0.25))
+            DEV_REFERRAL_RATE = float(cfg.get('developer_referral_rate', 0.20))
+            RECRUITER_RATE = float(cfg.get('recruiter_rate', 0.05))
+
+        MULTI_TIER = bool(cfg.get('multi_tier_enabled', 0))
+        TIER2_RATE = float(cfg.get('tier2_rate', 0.02))
 
         # Check if bot owner has a referrer (upline)
         cursor.execute('''
@@ -5316,65 +5374,63 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
         has_referrer = referrer_row is not None
         referrer_id = referrer_row[0] if has_referrer else None
 
+        now = datetime.now().isoformat()
+
         if has_referrer:
-            # 20% to developer
-            developer_commission = profit_amount * DEVELOPER_REFERRAL_RATE
-            developer_commission_id = str(uuid.uuid4())
+            # Developer portion (reduced rate)
+            developer_commission = profit_amount * DEV_REFERRAL_RATE
             cursor.execute('''
                 INSERT INTO commissions
                 (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                developer_commission_id,
-                DEVELOPER_ID,
-                user_id,
-                bot_id,
-                profit_amount,
-                DEVELOPER_REFERRAL_RATE,
-                developer_commission,
-                datetime.now().isoformat()
-            ))
-            # 5% to recruiter
+            ''', (str(uuid.uuid4()), DEVELOPER_ID, user_id, bot_id,
+                  profit_amount, DEV_REFERRAL_RATE, developer_commission, now))
+
+            # Recruiter portion
             recruiter_commission = profit_amount * RECRUITER_RATE
-            recruiter_commission_id = str(uuid.uuid4())
             cursor.execute('''
                 INSERT INTO commissions
                 (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                recruiter_commission_id,
-                referrer_id,
-                user_id,
-                bot_id,
-                profit_amount,
-                RECRUITER_RATE,
-                recruiter_commission,
-                datetime.now().isoformat()
-            ))
-            logger.info(f"💰 Commission split: Developer {DEVELOPER_ID} gets ${developer_commission:.2f} (20%), Recruiter {referrer_id} gets ${recruiter_commission:.2f} (5%) from ${profit_amount:.2f}")
+            ''', (str(uuid.uuid4()), referrer_id, user_id, bot_id,
+                  profit_amount, RECRUITER_RATE, recruiter_commission, now))
+
+            logger.info(
+                f"💰 [{source}] Commission split: Developer gets ${developer_commission:.2f} ({DEV_REFERRAL_RATE*100:.0f}%), "
+                f"Recruiter {referrer_id} gets ${recruiter_commission:.2f} ({RECRUITER_RATE*100:.0f}%) from ${profit_amount:.2f}"
+            )
+
+            # Multi-tier: recruiter's recruiter gets tier2_rate
+            if MULTI_TIER and TIER2_RATE > 0:
+                cursor.execute('''
+                    SELECT referrer_id FROM referrals
+                    WHERE referred_user_id = ? AND status = 'active'
+                ''', (referrer_id,))
+                tier2_row = cursor.fetchone()
+                if tier2_row:
+                    tier2_id = tier2_row[0]
+                    tier2_commission = profit_amount * TIER2_RATE
+                    cursor.execute('''
+                        INSERT INTO commissions
+                        (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (str(uuid.uuid4()), tier2_id, user_id, bot_id,
+                          profit_amount, TIER2_RATE, tier2_commission, now))
+                    logger.info(f"💰 [{source}] Tier-2: {tier2_id} gets ${tier2_commission:.2f} ({TIER2_RATE*100:.0f}%)")
         else:
-            # 25% to developer
-            developer_commission = profit_amount * DEVELOPER_DIRECT_RATE
-            developer_commission_id = str(uuid.uuid4())
+            # Full developer rate (no recruiter)
+            developer_commission = profit_amount * DEV_DIRECT_RATE
             cursor.execute('''
                 INSERT INTO commissions
                 (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                developer_commission_id,
-                DEVELOPER_ID,
-                user_id,
-                bot_id,
-                profit_amount,
-                DEVELOPER_DIRECT_RATE,
-                developer_commission,
-                datetime.now().isoformat()
-            ))
-            logger.info(f"💰 Commission: Developer {DEVELOPER_ID} gets ${developer_commission:.2f} (25%) from ${profit_amount:.2f} [Direct signup]")
+            ''', (str(uuid.uuid4()), DEVELOPER_ID, user_id, bot_id,
+                  profit_amount, DEV_DIRECT_RATE, developer_commission, now))
+            logger.info(f"💰 [{source}] Commission: Developer gets ${developer_commission:.2f} ({DEV_DIRECT_RATE*100:.0f}%) from ${profit_amount:.2f} [Direct signup]")
 
         conn.commit()
         conn.close()
-        
+
     except Exception as e:
         logger.error(f"❌ Error in distribute_trade_commissions: {e}")
         # Don't raise - don't break trading if commission fails
@@ -7467,6 +7523,137 @@ def regenerate_referral_code(user_id):
     
     except Exception as e:
         logger.error(f"Error regenerating referral code: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== ADMIN COMMISSION CONFIG ====================
+
+@app.route('/api/admin/commission-config', methods=['GET'])
+@require_api_key
+def get_commission_config():
+    """Get current commission rate configuration"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cfg = _get_commission_config(cursor)
+        conn.close()
+        return jsonify({'success': True, 'config': cfg}), 200
+    except Exception as e:
+        logger.error(f"Error getting commission config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/commission-config', methods=['POST'])
+@require_api_key
+def update_commission_config():
+    """Update commission rate configuration (admin only)"""
+    try:
+        data = request.get_json()
+
+        # Validate rates are between 0 and 1
+        rate_fields = [
+            'developer_direct_rate', 'developer_referral_rate', 'recruiter_rate',
+            'ig_developer_rate', 'ig_recruiter_rate', 'tier2_rate'
+        ]
+        for field in rate_fields:
+            if field in data:
+                val = float(data[field])
+                if val < 0 or val > 1:
+                    return jsonify({'success': False, 'error': f'{field} must be between 0 and 1'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Build dynamic UPDATE
+        updates = []
+        values = []
+        allowed = rate_fields + ['developer_id', 'ig_commission_enabled', 'multi_tier_enabled']
+        for key in allowed:
+            if key in data:
+                updates.append(f'{key} = ?')
+                values.append(data[key])
+
+        if not updates:
+            conn.close()
+            return jsonify({'success': False, 'error': 'No valid fields to update'}), 400
+
+        updates.append('updated_at = ?')
+        values.append(datetime.now().isoformat())
+        values.append('default')
+
+        cursor.execute(
+            f"UPDATE commission_config SET {', '.join(updates)} WHERE config_id = ?",
+            values
+        )
+        conn.commit()
+
+        # Return updated config
+        cfg = _get_commission_config(cursor)
+        conn.close()
+
+        logger.info(f"✅ Commission config updated: {data}")
+
+        return jsonify({'success': True, 'config': cfg, 'message': 'Commission rates updated successfully'}), 200
+    except Exception as e:
+        logger.error(f"Error updating commission config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/commission-config/preview', methods=['POST'])
+@require_api_key
+def preview_commission_split():
+    """Preview how a profit amount would be split with given rates"""
+    try:
+        data = request.get_json()
+        profit = float(data.get('profit_amount', 100))
+        has_referrer = data.get('has_referrer', True)
+        source = data.get('source', 'MT5')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cfg = _get_commission_config(cursor)
+        conn.close()
+
+        if source == 'IG':
+            dev_rate = float(cfg.get('ig_developer_rate', 0.20))
+            rec_rate = float(cfg.get('ig_recruiter_rate', 0.05))
+            direct_rate = dev_rate + rec_rate
+        else:
+            direct_rate = float(cfg.get('developer_direct_rate', 0.25))
+            dev_rate = float(cfg.get('developer_referral_rate', 0.20))
+            rec_rate = float(cfg.get('recruiter_rate', 0.05))
+
+        tier2_rate = float(cfg.get('tier2_rate', 0.02))
+        multi_tier = bool(cfg.get('multi_tier_enabled', 0))
+
+        if has_referrer:
+            dev_amount = profit * dev_rate
+            rec_amount = profit * rec_rate
+            tier2_amount = profit * tier2_rate if multi_tier else 0
+            trader_keeps = profit - dev_amount - rec_amount - tier2_amount
+            breakdown = {
+                'developer': {'rate': dev_rate, 'amount': round(dev_amount, 2)},
+                'recruiter': {'rate': rec_rate, 'amount': round(rec_amount, 2)},
+            }
+            if multi_tier:
+                breakdown['tier2'] = {'rate': tier2_rate, 'amount': round(tier2_amount, 2)}
+        else:
+            dev_amount = profit * direct_rate
+            trader_keeps = profit - dev_amount
+            breakdown = {
+                'developer': {'rate': direct_rate, 'amount': round(dev_amount, 2)},
+            }
+
+        return jsonify({
+            'success': True,
+            'profit_amount': profit,
+            'source': source,
+            'has_referrer': has_referrer,
+            'breakdown': breakdown,
+            'total_commission': round(profit - trader_keeps, 2),
+            'trader_keeps': round(trader_keeps, 2),
+        }), 200
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

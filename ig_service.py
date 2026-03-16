@@ -689,6 +689,20 @@ def api_ig_profit_check():
                         'profitLoss': bal.get('profitLoss', 0),
                     }
 
+            # 4. Distribute IG commissions on realized profit
+            if total_pnl > 0 and user_id:
+                try:
+                    from multi_broker_backend_updated import distribute_trade_commissions
+                    distribute_trade_commissions(
+                        bot_id=f'ig_profit_{user_id}',
+                        user_id=user_id,
+                        profit_amount=total_pnl,
+                        source='IG'
+                    )
+                    logger.info(f"IG commission distributed for user {user_id}: ${total_pnl:.2f}")
+                except Exception as comm_err:
+                    logger.error(f"IG commission distribution error: {comm_err}")
+
         return jsonify({
             "success": True,
             "target_profit": target_profit,
