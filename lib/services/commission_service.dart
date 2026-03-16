@@ -71,11 +71,17 @@ class CommissionService extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   String? _apiUrl;
+  Map<String, dynamic>? _summary;
 
   List<Commission> get commissions => _commissions;
   CommissionStats? get stats => _stats;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  Map<String, dynamic>? get summary => _summary;
+  List<Map<String, dynamic>> get topEarningBots =>
+      (_summary?['top_earning_bots'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+  double get last30DaysEarned =>
+      (_summary?['summary']?['last_30_days_earned'] ?? 0).toDouble();
 
   CommissionService() {
     _apiUrl = EnvironmentConfig.apiUrl;
@@ -128,6 +134,9 @@ class CommissionService extends ChangeNotifier {
         _errorMessage = 'Failed to load commissions: ${response.statusCode}';
         print('❌ Error: ${response.statusCode}');
       }
+
+      // Also fetch the detailed summary
+      await fetchCommissionSummary();
     } catch (e) {
       _errorMessage = 'Error loading commissions: $e';
       print('❌ Error: $e');
@@ -200,6 +209,30 @@ class CommissionService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Fetch detailed commission summary (top bots, 30-day earnings)
+  Future<void> fetchCommissionSummary() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      if (sessionToken == null) return;
+
+      final response = await http.get(
+        Uri.parse('$_apiUrl/api/user/commission-summary'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        _summary = jsonDecode(response.body);
+        notifyListeners();
+      }
+    } catch (e) {
+      print('⚠️ Error fetching commission summary: $e');
     }
   }
 

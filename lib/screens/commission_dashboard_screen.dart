@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../services/commission_service.dart';
 
 class CommissionDashboardScreen extends StatefulWidget {
@@ -56,11 +57,25 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
                     children: [
                       _statCard('Withdrawn', '\$${stats.totalWithdrawn.toStringAsFixed(2)}', const Color(0xFF00E5FF), Icons.account_balance_wallet),
                       const SizedBox(width: 12),
+                      _statCard('Last 30 Days', '\$${service.last30DaysEarned.toStringAsFixed(2)}', const Color(0xFFFF6E40), Icons.calendar_today),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
                       _statCard('Referrals', '${stats.referralCommissions}', const Color(0xFF7C4DFF), Icons.group),
+                      const SizedBox(width: 12),
+                      _statCard('Trades', '${stats.tradeCommissions}', const Color(0xFF40C4FF), Icons.swap_horiz),
                     ],
                   ),
                   const SizedBox(height: 20),
                 ],
+
+                // Top Earning Bots Pie Chart
+                if (service.topEarningBots.isNotEmpty)
+                  _buildTopBotsPieChart(service.topEarningBots),
+                if (service.topEarningBots.isNotEmpty)
+                  const SizedBox(height: 20),
 
                 // Withdraw button
                 if (stats != null && stats.totalPending > 0)
@@ -213,6 +228,82 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
             Text(label, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11)),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildTopBotsPieChart(List<Map<String, dynamic>> topBots) {
+    final chartColors = [
+      const Color(0xFF00E5FF),
+      const Color(0xFF69F0AE),
+      const Color(0xFFFFD600),
+      const Color(0xFFFF8A80),
+      const Color(0xFF7C4DFF),
+      const Color(0xFFFF6E40),
+      const Color(0xFF40C4FF),
+      const Color(0xFFB388FF),
+    ];
+
+    final total = topBots.fold<double>(0, (s, b) => s + ((b['total_commission'] ?? 0) as num).toDouble());
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Top Earning Bots',
+              style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 180,
+            child: PieChart(
+              PieChartData(
+                sectionsSpace: 3,
+                centerSpaceRadius: 40,
+                sections: topBots.asMap().entries.map((e) {
+                  final i = e.key;
+                  final bot = e.value;
+                  final commission = ((bot['total_commission'] ?? 0) as num).toDouble();
+                  final pct = total > 0 ? (commission / total * 100) : 0.0;
+                  final color = chartColors[i % chartColors.length];
+                  return PieChartSectionData(
+                    value: commission,
+                    color: color,
+                    radius: 50,
+                    title: '${pct.toStringAsFixed(0)}%',
+                    titleStyle: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...topBots.asMap().entries.map((e) {
+            final i = e.key;
+            final bot = e.value;
+            final color = chartColors[i % chartColors.length];
+            final commission = ((bot['total_commission'] ?? 0) as num).toDouble();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(bot['bot_id'] ?? 'Unknown', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
+                  ),
+                  Text('\$${commission.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 12, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
   }
