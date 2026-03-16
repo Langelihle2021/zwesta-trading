@@ -188,7 +188,7 @@ class BotService extends ChangeNotifier {
       final requestBody = {
         'botId': botId,
         'user_id': userId,
-        'accountId': accountId,
+        'credentialId': accountId,
         'symbols': symbols,
         'strategy': strategy,
         'riskPerTrade': riskPerTrade,
@@ -506,29 +506,28 @@ class BotService extends ChangeNotifier {
   }
 
   void _loadBotStats() {
-    // Use actual stats or mock data
+    // Initialize with empty stats; real data comes from backend via _updateBotFromData
     if (_stats == null) {
       _stats = BotStats(
-        totalTrades: _bot?.isActive == true ? 125 : 0,
-        winningTrades: _bot?.isActive == true ? 87 : 0,
-        losingTrades: _bot?.isActive == true ? 38 : 0,
-        winRate: _bot?.isActive == true ? 0.696 : 0,
-        grossProfit: _bot?.isActive == true ? 4500.00 : 0,
-        commission: _bot?.isActive == true ? 675.00 : 0,
-        netProfit: _bot?.isActive == true ? 3825.00 : 0,
-        dailyPnL: _bot?.isActive == true ? 325.50 : 0,
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        winRate: 0,
+        grossProfit: 0,
+        commission: 0,
+        netProfit: 0,
+        dailyPnL: 0,
       );
     }
     notifyListeners();
   }
 
   void _loadBotBilling() {
-    // Mock data - R1000/month + 15% commission
     _billing = BotBilling(
       monthlyFee: 1000.00,
       commissionRate: 0.15,
-      totalEarnings: 3825.00,
-      totalBilled: 1000.00 + (3825.00 * 0.15),
+      totalEarnings: _stats?.netProfit ?? 0,
+      totalBilled: 1000.00 + ((_stats?.netProfit ?? 0) * 0.15),
       billingCycle: DateTime.now(),
     );
     notifyListeners();

@@ -25,6 +25,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   late TextEditingController _serverController;
   late TextEditingController _accountController;
   late TextEditingController _passwordController;
+  late TextEditingController _apiKeyController;
+  late TextEditingController _usernameController;
   String _selectedBroker = 'XM';
   bool _showSuccess = false;
   bool _isTestingConnection = false;
@@ -37,13 +39,15 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   BrokerAccount? _activeAccount;
 
   final List<String> brokers = [
+    'Binance',
+    'OANDA',
     'XM',
     'Pepperstone',
     'FxOpen',
     'Exness',
     'Darwinex',
     'IC Markets',
-    'IG',
+    'IG Markets',
     'FXM',
     'AvaTrade',
     'FP Markets',
@@ -55,13 +59,15 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   ];
 
   final Map<String, String> brokerServers = {
+    'Binance': 'spot',
+    'OANDA': 'REST-API',
     'XM': 'XMGlobal-MT5',
     'Pepperstone': 'Pepperstone MT5 Live',
     'FxOpen': 'FxOpen-MT5',
     'Exness': 'Exness-MT5',
     'Darwinex': 'Darwinex MT5',
     'IC Markets': 'ICMarkets-MT5',
-    'IG': 'IG-Live',
+    'IG Markets': 'REST-API',
     'FXM': 'FXM-Live',
     'AvaTrade': 'Ava-Real',
     'FP Markets': 'FPMarkets-Live',
@@ -78,9 +84,16 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     _serverController = TextEditingController();
     _accountController = TextEditingController();
     _passwordController = TextEditingController();
+    _apiKeyController = TextEditingController();
+    _usernameController = TextEditingController();
     _loadSavedCredentials();
     _loadSavedAccounts();
   }
+
+  bool get _isIgBroker => _selectedBroker.toLowerCase().contains('ig');
+  bool get _isBinanceBroker => _selectedBroker.toLowerCase() == 'binance';
+  bool get _isOandaBroker => _selectedBroker.toLowerCase() == 'oanda';
+  bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
 
   void _loadSavedAccounts() async {
     final accounts = BrokerConnectionService.getSavedAccounts();
@@ -93,6 +106,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _selectedBroker = prefs.getString('broker') ?? 'XM';
       _accountController.text = prefs.getString('mt5_account') ?? '';
       _passwordController.text = prefs.getString('mt5_password') ?? '';
+      _apiKeyController.text = prefs.getString('broker_api_key') ?? '';
+      _usernameController.text = prefs.getString('broker_username') ?? '';
       _serverController.text = brokerServers[_selectedBroker] ?? '';
       _isConnected = prefs.getBool('broker_connected') ?? false;
       _accountBalance = prefs.getDouble('account_balance') ?? 0;
@@ -106,9 +121,14 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   }
 
   void _saveCredentials() async {
-    if (_accountController.text.isEmpty || _passwordController.text.isEmpty) {
+    final missingMt5 = _isMt5Broker && (_accountController.text.isEmpty || _passwordController.text.isEmpty);
+    final missingIg = _isIgBroker && (_apiKeyController.text.isEmpty || _usernameController.text.isEmpty || _passwordController.text.isEmpty || _accountController.text.isEmpty);
+    final missingBinance = _isBinanceBroker && (_apiKeyController.text.isEmpty || _passwordController.text.isEmpty);
+    final missingOanda = _isOandaBroker && (_apiKeyController.text.isEmpty || _accountController.text.isEmpty);
+
+    if (missingMt5 || missingIg || missingBinance || missingOanda) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields')),
+        const SnackBar(content: Text('Please fill all required broker fields')),
       );
       return;
     }
@@ -118,6 +138,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     await prefs.setString('mt5_account', _accountController.text);
     await prefs.setString('mt5_password', _passwordController.text);
     await prefs.setString('mt5_server', _serverController.text);
+    await prefs.setString('broker_api_key', _apiKeyController.text);
+    await prefs.setString('broker_username', _usernameController.text);
 
     if (_isConnected) {
       await prefs.setBool('broker_connected', true);
@@ -141,9 +163,14 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   }
 
   void _testConnection() async {
-    if (_accountController.text.isEmpty || _passwordController.text.isEmpty) {
+    final missingMt5 = _isMt5Broker && (_accountController.text.isEmpty || _passwordController.text.isEmpty);
+    final missingIg = _isIgBroker && (_apiKeyController.text.isEmpty || _usernameController.text.isEmpty || _passwordController.text.isEmpty || _accountController.text.isEmpty);
+    final missingBinance = _isBinanceBroker && (_apiKeyController.text.isEmpty || _passwordController.text.isEmpty);
+    final missingOanda = _isOandaBroker && (_apiKeyController.text.isEmpty || _accountController.text.isEmpty);
+
+    if (missingMt5 || missingIg || missingBinance || missingOanda) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill account and password')),
+        const SnackBar(content: Text('Please fill all required connection fields')),
       );
       return;
     }
@@ -154,8 +181,15 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       final result = await BrokerConnectionService.testConnection(
         broker: _selectedBroker,
         accountNumber: _accountController.text,
-        password: _passwordController.text,
+        password: _isOandaBroker ? '' : _passwordController.text,
         server: _serverController.text,
+        apiKey: (_isIgBroker || _isBinanceBroker || _isOandaBroker)
+            ? (_apiKeyController.text.isEmpty ? null : _apiKeyController.text)
+            : null,
+        apiSecret: _isBinanceBroker ? _passwordController.text : null,
+        username: _usernameController.text.isEmpty ? null : _usernameController.text,
+        accountId: _accountController.text,
+        market: _isBinanceBroker ? _serverController.text : null,
         isLive: _isLiveMode,
       );
 
@@ -268,6 +302,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     _serverController.dispose();
     _accountController.dispose();
     _passwordController.dispose();
+    _apiKeyController.dispose();
+    _usernameController.dispose();
     BrokerConnectionService.dispose();
     super.dispose();
   }
@@ -324,7 +360,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'MT5 credentials saved successfully!',
+                      'Broker credentials saved successfully!',
                       style: TextStyle(color: Colors.white),
                     ),
                   ),
@@ -333,12 +369,24 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             ),
           const SizedBox(height: 20),
           Text(
-            'MT5 Broker Connection',
+            _isBinanceBroker
+                ? 'Binance API Connection'
+                : _isOandaBroker
+                    ? 'OANDA API Connection'
+                    : _isIgBroker
+                        ? 'IG Markets API Connection'
+                        : 'MT5 Broker Connection',
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
           Text(
-            'Connect your MetaTrader 5 account for automated trading',
+            _isBinanceBroker
+                ? 'Connect your funded Binance account for crypto bot trading'
+                : _isOandaBroker
+                    ? 'Connect your OANDA account — trade Forex, Gold, Oil and Indices'
+                    : _isIgBroker
+                        ? 'Connect your IG Markets account with the official API credentials'
+                        : 'Connect your MetaTrader 5 account for automated trading',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 24),
@@ -372,54 +420,178 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          Text(
-            'MT5 Server',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _serverController,
-            readOnly: true,
-            decoration: InputDecoration(
-              labelText: 'Server',
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.storage),
-              filled: true,
-              fillColor: Colors.grey[900],
+          if (_isMt5Broker) ...[
+            Text(
+              'MT5 Server',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'MT5 Account Number',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _accountController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: 'Account Number (your MT5 account ID)',
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.account_circle),
-              hintText: 'demo or 136372035',
+            const SizedBox(height: 12),
+            TextField(
+              controller: _serverController,
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: 'Server',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.storage),
+                filled: true,
+                fillColor: Colors.grey[900],
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'MT5 Password',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _passwordController,
-            obscureText: true,
-            decoration: InputDecoration(
-              labelText: 'MT5 Password (your broker password)',
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.lock),
-              hintText: 'demo123',
+            const SizedBox(height: 24),
+            Text(
+              'MT5 Account Number',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-          ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _accountController,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Account Number (your MT5 account ID)',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.account_circle),
+                hintText: 'demo or 136372035',
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'MT5 Password',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'MT5 Password (your broker password)',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.lock),
+                hintText: 'demo123',
+              ),
+            ),
+          ],
+          if (_isIgBroker) ...[
+            Text('IG API Key', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKeyController,
+              decoration: const InputDecoration(
+                labelText: 'IG API Key',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.vpn_key),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('IG Username', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _usernameController,
+              decoration: const InputDecoration(
+                labelText: 'IG Username',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.person),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('IG Password', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'IG Password',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('IG Account ID', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _accountController,
+              decoration: const InputDecoration(
+                labelText: 'IG Account ID',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.account_circle),
+                hintText: 'Demo account IDs usually start with D',
+              ),
+            ),
+          ],
+          if (_isOandaBroker) ...[
+            Text('OANDA API Token', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKeyController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'API Token (Bearer token from OANDA portal)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.vpn_key),
+                hintText: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-yyyyyyyy',
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('OANDA Account ID', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _accountController,
+              decoration: const InputDecoration(
+                labelText: 'Account ID (e.g. 001-001-1234567-001)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.account_circle),
+                hintText: '001-001-1234567-001',
+              ),
+            ),
+          ],
+          if (_isBinanceBroker) ...[
+            Text('Binance API Key', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKeyController,
+              decoration: const InputDecoration(
+                labelText: 'Binance API Key',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.vpn_key),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('Binance API Secret', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Binance API Secret',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('Trading Market', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: DropdownButton<String>(
+                  value: _serverController.text.isEmpty ? 'spot' : _serverController.text,
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  onChanged: (String? value) {
+                    if (value != null) {
+                      setState(() {
+                        _serverController.text = value;
+                        // Do not overwrite account — Binance has no account number
+                      });
+                    }
+                  },
+                  items: const [
+                    DropdownMenuItem(value: 'spot', child: Text('Spot')),
+                    DropdownMenuItem(value: 'futures', child: Text('Futures')),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           Text(
             'Account Mode',
@@ -649,21 +821,29 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  '📱 How to get your MT5 credentials:',
-                  style: TextStyle(
+                Text(
+                  _isBinanceBroker
+                      ? '📱 How to get your Binance API credentials:'
+                      : _isOandaBroker
+                          ? '📱 How to get your OANDA API credentials:'
+                          : _isIgBroker
+                              ? '📱 How to get your IG API credentials:'
+                              : '📱 How to get your MT5 credentials:',
+                  style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  '1. Open your MetaTrader 5 terminal\n'
-                  '2. Login with your broker account\n'
-                  '3. Your account number appears at the top\n'
-                  '4. Use your MT5 login password\n'
-                  '5. Server will auto-populate',
-                  style: TextStyle(fontSize: 12, color: Colors.white70),
+                Text(
+                  _isBinanceBroker
+                      ? '1. Open Binance and create an API key\n2. Enable trading permission for the key\n3. Copy the API key and secret\n4. Choose Spot or Futures\n5. Fund that Binance account before starting the bot'
+                      : _isOandaBroker
+                          ? '1. Go to oanda.com → My Account → Manage API Access\n2. Click "Generate" to create a Personal Access Token\n3. Copy the full token (shown once — save it!)\n4. Find your Account ID on the OANDA dashboard\n   (format: 001-001-XXXXXXX-001)\n5. Choose DEMO (fxpractice) or LIVE (fxtrade) mode'
+                          : _isIgBroker
+                              ? '1. Open the IG developer portal and create an API key\n2. Use your IG login username and password\n3. Copy the correct Account ID from IG\n4. Match DEMO/LIVE to the same IG environment\n5. Test connection before creating bots'
+                              : '1. Open your MetaTrader 5 terminal\n2. Login with your broker account\n3. Your account number appears at the top\n4. Use your MT5 login password\n5. Server will auto-populate',
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
                 ),
                 const SizedBox(height: 16),
                 const Text(
@@ -678,14 +858,22 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(color: Colors.grey[700]!),
                   ),
-                  child: const Column(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Account: demo or 136372035',
-                          style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
-                      SizedBox(height: 4),
-                      Text('Password: demo123',
-                          style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
+                      Text(
+                        _isBinanceBroker
+                            ? 'API Key: paste your Binance API key'
+                            : (_isIgBroker ? 'API Key: paste your IG API key' : 'Account: demo or 136372035'),
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _isBinanceBroker
+                            ? 'Secret: paste your Binance API secret'
+                            : (_isIgBroker ? 'Account ID: D... or live account ID' : 'Password: demo123'),
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                      ),
                     ],
                   ),
                 ),

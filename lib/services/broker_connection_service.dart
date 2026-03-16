@@ -66,6 +66,11 @@ class BrokerConnectionService {
     required String accountNumber,
     required String password,
     required String server,
+    String? apiKey,
+    String? apiSecret,
+    String? username,
+    String? accountId,
+    String? market,
     bool isLive = false,  // DEMO by default
   }) async {
     try {
@@ -85,6 +90,37 @@ class BrokerConnectionService {
         };
       }
       
+      final normalizedBroker = broker.trim().toLowerCase();
+      final Map<String, dynamic> payload;
+
+      if (normalizedBroker == 'ig' || normalizedBroker == 'ig markets' || normalizedBroker == 'ig.com') {
+        payload = {
+          'broker': 'IG Markets',
+          'api_key': apiKey,
+          'username': username,
+          'password': password,
+          'account_id': accountId ?? accountNumber,
+          'is_live': isLive,
+        };
+      } else if (normalizedBroker == 'binance') {
+        payload = {
+          'broker': 'Binance',
+          'api_key': apiKey,
+          'api_secret': apiSecret ?? password,
+          'market': market ?? server,
+          'account_number': accountNumber,
+          'is_live': isLive,
+        };
+      } else {
+        payload = {
+          'broker': broker,
+          'account_number': accountNumber,
+          'password': password,
+          'server': server,
+          'is_live': isLive,
+        };
+      }
+
       // Call backend API with session token and is_live flag
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
@@ -92,13 +128,7 @@ class BrokerConnectionService {
           'Content-Type': 'application/json',
           'X-Session-Token': sessionToken,
         },
-        body: jsonEncode({
-          'broker': broker,
-          'account_number': accountNumber,
-          'password': password,
-          'server': server,
-          'is_live': isLive,  // Include DEMO/LIVE selection
-        }),
+        body: jsonEncode(payload),
       ).timeout(const Duration(seconds: 15));
 
       print('📥 Backend response: ${response.statusCode}');

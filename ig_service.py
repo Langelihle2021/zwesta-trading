@@ -59,9 +59,9 @@ def _get_user_ig_credentials(user_id):
 
         credentials = dict(row)
         return {
-            'api_key': credentials.get('api_key') or IG_API_KEY,
-            'username': credentials.get('username') or IG_USERNAME,
-            'password': credentials.get('password') or IG_PASSWORD,
+            'api_key': credentials.get('api_key'),
+            'username': credentials.get('username'),
+            'password': credentials.get('password'),
             'account_id': credentials.get('account_number') or IG_ACCOUNT_ID,
             'is_live': bool(credentials.get('is_live', 0)),
             'server': credentials.get('server')
@@ -96,6 +96,15 @@ def _require_ig_session():
         request.ig_credentials = _get_user_ig_credentials(request.user_id)
         if not request.ig_credentials:
             return jsonify({'success': False, 'error': 'No IG credentials configured for this user'}), 400
+        missing_fields = [
+            field for field in ('api_key', 'username', 'password')
+            if not request.ig_credentials.get(field)
+        ]
+        if missing_fields:
+            return jsonify({
+                'success': False,
+                'error': f"IG credentials incomplete for this user. Missing: {', '.join(missing_fields)}"
+            }), 400
     except Exception as e:
         logger.error(f"IG session validation error: {e}")
         return jsonify({'success': False, 'error': 'Session validation error'}), 500

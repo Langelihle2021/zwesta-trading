@@ -7,6 +7,7 @@ This removes all user-created bots, keeping only the system initialization
 
 
 import os
+import sqlite3
 import sys
 import importlib.util
 

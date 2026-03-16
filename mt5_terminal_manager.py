@@ -1,26 +1,42 @@
 import os
 import subprocess
 import time
+import sys
 
 # Mapping of broker name to MT5 terminal path
 MT5_TERMINALS = {
     'MetaQuotes': r'C:\MT5\MetaQuotes\terminal64.exe',
     'XM': r'C:\MT5\XMGlobal\terminal64.exe',
-    'IG': r'C:\MT5\IG\terminal64.exe',
-    'FXM': r'C:\MT5\FXM\terminal64.exe',
-    'AvaTrade': r'C:\MT5\AvaTrade\terminal64.exe',
-    'FP Markets': r'C:\MT5\FPMarkets\terminal64.exe',
-    # Add more as needed
+    'XM Global': r'C:\MT5\XMGlobal\terminal64.exe',
 }
 
 # Track running processes
 running_terminals = {}
 
+
+def detect_default_mt5_terminal():
+    """Detect a standard local MT5 terminal path as fallback."""
+    candidates = [
+        r'C:\Program Files\MetaTrader 5\terminal64.exe',
+        r'C:\Program Files\MetaTrader 5\terminal.exe',
+        r'C:\Program Files (x86)\MetaTrader 5\terminal64.exe',
+        r'C:\Program Files (x86)\MetaTrader 5\terminal.exe',
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
 def launch_mt5_terminal(broker):
     path = MT5_TERMINALS.get(broker)
     if not path or not os.path.exists(path):
-        print(f"[ERROR] Terminal for {broker} not found at {path}")
-        return None
+        fallback = detect_default_mt5_terminal()
+        if fallback:
+            path = fallback
+            print(f"[INFO] Using fallback MT5 terminal for {broker or 'default'}: {path}")
+        else:
+            print(f"[WARN] Terminal for {broker} not found at {path}")
+            return None
     # Launch with /portable to keep data/config isolated
     proc = subprocess.Popen([path, '/portable'])
     running_terminals[broker] = proc
@@ -43,10 +59,11 @@ def stop_mt5_terminal(broker):
         print(f"[INFO] No running terminal for {broker}")
 
 if __name__ == "__main__":
-    # Example usage: launch all terminals
-    for broker in MT5_TERMINALS:
-        ensure_mt5_running(broker)
-        time.sleep(2)  # Stagger launches
+    # Launch only when an explicit broker name is provided.
+    if len(sys.argv) > 1 and str(sys.argv[1]).strip():
+        ensure_mt5_running(sys.argv[1].strip())
+    else:
+        print('[INFO] No broker specified for mt5_terminal_manager.py; skipping terminal launch.')
     # ...
     # To stop all terminals:
     # for broker in list(running_terminals.keys()):

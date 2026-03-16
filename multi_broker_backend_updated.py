@@ -161,7 +161,7 @@ if ENVIRONMENT == 'LIVE':
 
 # IG.com Broker Configuration
 IG_CONFIG = {
-    'api_key': os.getenv('IG_API_KEY', '9bbc3ef9ad291acec96dc409d80e50c4c805161a'),  # From screenshot
+    'api_key': os.getenv('IG_API_KEY', ''),
     'username': os.getenv('IG_USERNAME', ''),
     'password': os.getenv('IG_PASSWORD', ''),
     'account_id': os.getenv('IG_ACCOUNT_ID', ''),
@@ -171,7 +171,7 @@ IG_CONFIG = {
 # IG.com LIVE Configuration (override with environment variables if needed)
 if ENVIRONMENT == 'LIVE':
     IG_CONFIG = {
-        'api_key': os.getenv('IG_API_KEY', '9bbc3ef9ad291acec96dc409d80e50c4c805161a'),
+        'api_key': os.getenv('IG_API_KEY', ''),
         'username': os.getenv('IG_USERNAME', ''),
         'password': os.getenv('IG_PASSWORD', ''),
         'account_id': os.getenv('IG_ACCOUNT_ID', ''),
@@ -1504,11 +1504,18 @@ class IGConnection(BrokerConnection):
             }
         
         super().__init__(BrokerType.IG, credentials)
-        demo_mode = bool(self.credentials.get('demo_mode', IG_CONFIG.get('demo_mode', True)))
+        # Prefer explicit demo_mode; otherwise derive from is_live for per-user credential rows.
+        if 'demo_mode' in self.credentials:
+            demo_mode = bool(self.credentials.get('demo_mode'))
+        elif 'is_live' in self.credentials:
+            demo_mode = not bool(self.credentials.get('is_live'))
+        else:
+            demo_mode = bool(IG_CONFIG.get('demo_mode', True))
         self.base_url = 'https://demo-api.ig.com/gateway/deal' if demo_mode else 'https://api.ig.com/gateway/deal'
         self.session_token = None  # CST
         self.client_token = None   # X-SECURITY-TOKEN
         self.last_update = None
+        self.last_error = ''
 
     def _headers(self, version: str = '1', content_type: bool = True) -> Dict:
         headers = {
@@ -1535,6 +1542,7 @@ class IGConnection(BrokerConnection):
             
             if not api_key or not username or not password:
                 logger.error("IG.com: Missing API key, username, or password")
+                self.last_error = 'IG credentials incomplete: api_key/username/password required'
                 return False
             
             # IG.com authentication endpoint
@@ -1553,18 +1561,22 @@ class IGConnection(BrokerConnection):
                 self.client_token = response.headers.get('X-SECURITY-TOKEN')
                 if not self.session_token or not self.client_token:
                     logger.error("IG.com authentication failed: CST/X-SECURITY-TOKEN headers missing")
+                    self.last_error = 'IG auth succeeded but CST/X-SECURITY-TOKEN headers missing'
                     return False
                 self.connected = True
+                self.last_error = ''
                 
                 logger.info(f"✅ Connected to IG.com account (demo: {self.credentials.get('demo_mode', True)})")
                 self.get_account_info()
                 return True
             else:
                 logger.error(f"IG.com authentication failed: {response.status_code} - {response.text}")
+                self.last_error = f"{response.status_code}: {response.text}"
                 return False
                 
         except Exception as e:
             logger.error(f"Error connecting to IG.com: {e}")
+            self.last_error = str(e)
             return False
     
     def disconnect(self) -> bool:
@@ -1971,10 +1983,78 @@ class BinanceConnection(BrokerConnection):
             return {'success': False, 'error': str(e)}
 
     def close_position(self, position_id: str) -> Dict:
-        return {'success': False, 'error': 'Binance close_position not implemented in bot adapter'}
+        try:
+            import requests
+            if not self.connected:
+                return {'success': False, 'error': 'Not connected to Binance'}
+            if self.market == 'futures':
+                positions = self.get_positions()
+                pos = next((p for p in positions if str(p.get('deal_id')) == str(position_id)), None)
+                if not pos:
+                    return {'success': False, 'error': f'Futures position {position_id} not found'}
+                close_side = 'SELL' if pos['type'] == 'BUY' else 'BUY'
+                params = {
+                    'symbol': pos['symbol'],
+                    'side': close_side,
+                    'type': 'MARKET',
+                    'quantity': str(pos['size']),
+                    'reduceOnly': 'true',
+                }
+                resp = requests.post(
+                    f'{self.fapi_url}/v1/order',
+                    headers=self._headers(),
+                    params=self._sign_params(params),
+                    timeout=15,
+                )
+            else:
+                params = self._sign_params({'orderId': position_id})
+                resp = requests.delete(
+                    f'{self.base_url}/v3/openOrders',
+                    headers=self._headers(),
+                    params=params,
+                    timeout=15,
+                )
+            if resp.status_code in (200, 201):
+                return {'success': True, 'position_id': position_id, 'broker': 'Binance'}
+            return {'success': False, 'error': resp.text}
+        except Exception as e:
+            logger.error(f'Error closing Binance position: {e}')
+            return {'success': False, 'error': str(e)}
 
     def get_trades(self) -> List[Dict]:
-        return []
+        try:
+            import requests
+            if not self.connected:
+                return []
+            result = []
+            endpoint = f'{self.fapi_url}/v1/userTrades' if self.market == 'futures' else f'{self.base_url}/v3/myTrades'
+            watch_symbols = getattr(self, '_active_symbols', ['BTCUSDT', 'ETHUSDT', 'BNBUSDT'])
+            for symbol in watch_symbols[:5]:  # limit to avoid rate limits
+                try:
+                    resp = requests.get(
+                        endpoint,
+                        headers=self._headers(),
+                        params=self._sign_params({'symbol': symbol, 'limit': 20}),
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        for trade in resp.json():
+                            result.append({
+                                'deal_id': str(trade.get('id', '')),
+                                'symbol': trade.get('symbol', ''),
+                                'type': 'BUY' if trade.get('isBuyer') else 'SELL',
+                                'volume': float(trade.get('qty', 0)),
+                                'price': float(trade.get('price', 0)),
+                                'profit': float(trade.get('realizedPnl', 0)),
+                                'time': trade.get('time'),
+                                'broker': 'Binance',
+                            })
+                except Exception:
+                    pass
+            return result
+        except Exception as e:
+            logger.error(f'Error getting Binance trades: {e}')
+            return []
 
 
 class FXCMConnection(BrokerConnection):
@@ -2487,6 +2567,9 @@ class XMConnection(BrokerConnection):
             import MetaTrader5 as mt5
             
             positions = mt5.positions_get()
+            if positions is None:
+                logger.warning(f'XM: mt5.positions_get() returned None: {mt5.last_error()}')
+                return []
             result = []
             
             for pos in positions:
@@ -2590,7 +2673,11 @@ class XMConnection(BrokerConnection):
             
             import MetaTrader5 as mt5
             
-            deals = mt5.history_deals_get(position=0)
+            date_from = datetime.now() - timedelta(days=30)
+            deals = mt5.history_deals_get(date_from, datetime.now())
+            if deals is None:
+                logger.warning(f'XM: history_deals_get returned None: {mt5.last_error()}')
+                return []
             result = []
             
             for deal in deals[-50:]:
@@ -4302,8 +4389,15 @@ VALID_SYMBOLS = {
 }
 
 BINANCE_VALID_SYMBOLS = {
+    # Tier 1 — Large Cap
     'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT',
+    # Tier 2 — High Volume Alt-coins
     'AVAXUSDT', 'MATICUSDT', 'LINKUSDT', 'LTCUSDT', 'TRXUSDT', 'DOTUSDT', 'ATOMUSDT',
+    # Tier 3 — DeFi & Layer-2 (high volatility / liquidity)
+    'SHIBUSDT', 'UNIUSDT', 'NEARUSDT', 'ARBUSDT', 'OPUSDT', 'APTUSDT',
+    'INJUSDT',  'SUIUSDT',  'FTMUSDT',  'AAVEUSDT',
+    # Tier 4 — Gaming / Metaverse / Cross-chain
+    'SANDUSDT', 'MANAUSDT', 'RUNEUSDT', 'ALGOUSDT',
 }
 
 SYMBOL_MAPPING = {
@@ -4353,10 +4447,28 @@ def validate_and_correct_symbols(symbols, broker_name=None):
 
         corrected = []
         binance_symbol_map = {
-            'BTCUSD': 'BTCUSDT', 'BTC/USDT': 'BTCUSDT', 'BTC_USDT': 'BTCUSDT',
-            'ETHUSD': 'ETHUSDT', 'ETH/USDT': 'ETHUSDT', 'ETH_USDT': 'ETHUSDT',
-            'BNBUSD': 'BNBUSDT', 'BNB/USDT': 'BNBUSDT', 'SOLUSD': 'SOLUSDT',
-            'XRPUSD': 'XRPUSDT', 'ADAUSD': 'ADAUSDT', 'DOGEUSD': 'DOGEUSDT',
+            # BTC / ETH / BNB
+            'BTCUSD': 'BTCUSDT', 'BTC/USDT': 'BTCUSDT', 'BTC_USDT': 'BTCUSDT', 'BITCOIN': 'BTCUSDT',
+            'ETHUSD': 'ETHUSDT', 'ETH/USDT': 'ETHUSDT', 'ETH_USDT': 'ETHUSDT', 'ETHEREUM': 'ETHUSDT',
+            'BNBUSD': 'BNBUSDT', 'BNB/USDT': 'BNBUSDT',
+            # SOL / XRP / ADA / DOGE
+            'SOLUSD': 'SOLUSDT', 'SOL/USDT': 'SOLUSDT',
+            'XRPUSD': 'XRPUSDT', 'XRP/USDT': 'XRPUSDT',
+            'ADAUSD': 'ADAUSDT', 'ADA/USDT': 'ADAUSDT',
+            'DOGEUSD': 'DOGEUSDT', 'DOGE/USDT': 'DOGEUSDT',
+            # Tier 2
+            'AVAXUSD': 'AVAXUSDT', 'MATICS': 'MATICUSDT', 'MATIC/USDT': 'MATICUSDT', 'POLUSD': 'MATICUSDT',
+            'LINKUSD': 'LINKUSDT', 'LTCUSD': 'LTCUSDT', 'TRXUSD': 'TRXUSDT',
+            'DOTUSD': 'DOTUSDT', 'ATOMUSD': 'ATOMUSDT',
+            # Tier 3
+            'SHIBUSD': 'SHIBUSDT', 'SHIB/USDT': 'SHIBUSDT',
+            'UNIUSD': 'UNIUSDT',  'UNI/USDT': 'UNIUSDT',
+            'NEARUSD': 'NEARUSDT', 'ARBUSD': 'ARBUSDT', 'OPUSD': 'OPUSDT',
+            'APTUSD': 'APTUSDT',  'INJUSD': 'INJUSDT', 'SUIUSD': 'SUIUSDT',
+            'FTMUSD': 'FTMUSDT',  'AAVEUSD': 'AAVEUSDT',
+            # Tier 4
+            'SANDUSD': 'SANDUSDT', 'MANAUSD': 'MANAUSDT',
+            'RUNEUSD': 'RUNEUSDT', 'ALGOUSD': 'ALGOUSDT',
         }
 
         for symbol in symbols:
@@ -4370,6 +4482,27 @@ def validate_and_correct_symbols(symbols, broker_name=None):
                 logger.warning(f"⚠️ Unsupported Binance symbol {symbol} - skipping")
 
         return corrected or ['BTCUSDT']
+
+    if broker_name in ('XM', 'XM Global'):
+        if not symbols:
+            return ['EURUSD']
+        corrected = []
+        for symbol in symbols:
+            # Strip XM server suffixes (.r, .stp, .ecn, etc.)
+            base = str(symbol).split('.')[0].upper()
+            if base in VALID_SYMBOLS and base not in corrected:
+                corrected.append(base)
+            elif base in SYMBOL_MAPPING:
+                mapped = SYMBOL_MAPPING[base]
+                if mapped not in corrected:
+                    corrected.append(mapped)
+            elif symbol in VALID_SYMBOLS and symbol not in corrected:
+                corrected.append(symbol)
+            else:
+                logger.warning(f'⚠️ Unknown XM symbol {symbol} -> defaulting to EURUSD')
+                if 'EURUSD' not in corrected:
+                    corrected.append('EURUSD')
+        return corrected[:5] or ['EURUSD']
 
     if not symbols:
         return ['EURUSD']  # Default fallback
@@ -5733,6 +5866,12 @@ def test_broker_connection():
                 ig_conn = IGConnection(credentials=ig_credentials)
                 if not ig_conn.connect():
                     logger.error(f"IG authentication failed for user {user_id} (username={ig_username})")
+                    failure_detail = (ig_conn.last_error or '').lower()
+                    if 'api-key-invalid' in failure_detail:
+                        return jsonify({
+                            'success': False,
+                            'error': 'IG API key is invalid for this environment. Generate a valid IG Labs key for DEMO/LIVE, enable trading scopes, and retry.'
+                        }), 401
                     return jsonify({
                         'success': False,
                         'error': 'Failed to authenticate with IG Markets. Check API key and credentials.'
@@ -5753,12 +5892,32 @@ def test_broker_connection():
                 conn = get_db_connection()
                 cursor = conn.cursor()
 
-                credential_id = str(uuid.uuid4())
+                # Upsert IG credential by user + username so each user can keep distinct IG identities.
                 cursor.execute('''
-                    INSERT INTO broker_credentials 
-                    (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-                ''', (credential_id, user_id, 'IG Markets', account_id, ig_password, 'REST-API', int(is_live), api_key, datetime.now().isoformat(), datetime.now().isoformat()))
+                    SELECT credential_id FROM broker_credentials
+                    WHERE user_id = ? AND broker_name = 'IG Markets' AND username = ?
+                    ORDER BY updated_at DESC, created_at DESC
+                    LIMIT 1
+                ''', (user_id, ig_username))
+                existing_ig_credential = cursor.fetchone()
+                now_iso = datetime.now().isoformat()
+
+                if existing_ig_credential:
+                    credential_id = existing_ig_credential[0]
+                    cursor.execute('''
+                        UPDATE broker_credentials
+                        SET account_number = ?, password = ?, server = ?, is_live = ?, is_active = 1,
+                            api_key = ?, username = ?, updated_at = ?
+                        WHERE credential_id = ?
+                    ''', (account_id, ig_password, 'REST-API', int(is_live), api_key, ig_username, now_iso, credential_id))
+                else:
+                    credential_id = str(uuid.uuid4())
+                    cursor.execute('''
+                        INSERT INTO broker_credentials
+                        (credential_id, user_id, broker_name, account_number, password, server, is_live,
+                         is_active, api_key, username, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                    ''', (credential_id, user_id, 'IG Markets', account_id, ig_password, 'REST-API', int(is_live), api_key, ig_username, now_iso, now_iso))
 
                 conn.commit()
                 conn.close()
@@ -5779,6 +5938,11 @@ def test_broker_connection():
                 }), 200
             except Exception as e:
                 logger.error(f"Exception during IG authentication for user {user_id}: {e}", exc_info=True)
+                if 'api-key-invalid' in str(e):
+                    return jsonify({
+                        'success': False,
+                        'error': 'IG API key is invalid for the selected environment (demo/live). Create or use a valid key in IG Labs, and ensure it is enabled.'
+                    }), 401
                 return jsonify({
                     'success': False,
                     'error': f'IG authentication failed: {str(e)}'
@@ -5824,6 +5988,7 @@ def test_broker_connection():
                 'credential_id': credential_id,
                 'broker': 'Binance',
                 'account_number': account_id,
+                'balance': account_info.get('balance', 0),
                 'currency': account_info.get('currency', 'USDT'),
                 'is_live': is_live,
                 'status': 'CONNECTED',
@@ -6610,6 +6775,7 @@ def create_bot():
             'user_id': user_id,
             'accountId': account_id,
             'brokerName': broker_name,
+            'broker_type': broker_name,  # alias so trading loop reads correct broker
             'mode': mode,  # 'demo' or 'live'
             'credentialId': credential_id,
             'symbols': symbols,
@@ -6657,7 +6823,7 @@ def create_bot():
                         conn = get_db_connection()
                         cursor = conn.cursor()
                         cursor.execute('''
-                            SELECT password, server 
+                            SELECT api_key, password, server, account_number
                             FROM broker_credentials 
                             WHERE credential_id = ? AND user_id = ?
                         ''', (credential_id, user_id))
@@ -6665,14 +6831,22 @@ def create_bot():
                         conn.close()
                         
                         if cred_row:
-                            bot_credentials = {
-                                'account_number': account_number,
-                                'password': cred_row['password'],
-                                'server': cred_row['server'],
-                                'is_live': True
-                            }
+                            if canonicalize_broker_name(broker_name) == 'Binance':
+                                bot_credentials = {
+                                    'api_key': cred_row['api_key'],
+                                    'api_secret': cred_row['password'],
+                                    'server': cred_row['server'] or 'spot',
+                                    'is_live': True,
+                                }
+                            else:
+                                bot_credentials = {
+                                    'account_number': cred_row['account_number'] or account_number,
+                                    'password': cred_row['password'],
+                                    'server': cred_row['server'],
+                                    'is_live': True,
+                                }
                     except Exception as e:
-                        logger.warning(f"Could not fetch MT5 credentials for live bot: {e}")
+                        logger.warning(f'Could not fetch broker credentials for live bot: {e}')
                 
                 # Launch background trading thread
                 if bot_id not in bot_threads or not bot_threads[bot_id].is_alive():
@@ -6765,11 +6939,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             credential_id = bot_config.get('credentialId')
                             if credential_id:
                                 broker_type_new, new_conn = get_broker_connection(credential_id, user_id, bot_id)
-                                if new_conn and broker_type_new == 'IG Markets':
+                                if broker_type_new == 'IG Markets' and hasattr(new_conn, 'connected'):
                                     ig_conn = new_conn
                                     bot_config['broker_conn'] = ig_conn
                                 else:
-                                    logger.error(f"Bot {bot_id}: IG reconnection failed")
+                                    logger.error(f"Bot {bot_id}: IG reconnection failed: {new_conn}")
                                     time.sleep(trading_interval)
                                     continue
                             else:
@@ -6824,13 +6998,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             credential_id = bot_config.get('credentialId')
                             if credential_id:
                                 broker_type_new, new_conn = get_broker_connection(credential_id, user_id, bot_id)
-                                if new_conn:
+                                if hasattr(new_conn, 'connected'):
                                     active_conn = new_conn
                                     bot_config['broker_conn'] = active_conn
                                     bot_config['broker_type'] = broker_type_new
                                     broker_type = broker_type_new
                                 else:
-                                    logger.error(f"Bot {bot_id}: Broker reconnection failed")
+                                    logger.error(f"Bot {bot_id}: Broker reconnection failed: {new_conn}")
                                     time.sleep(trading_interval)
                                     continue
                             else:
@@ -7403,11 +7577,11 @@ def start_bot():
         # Load the correct broker connection automatically
         broker_type, broker_conn = get_broker_connection(credential_id, user_id, bot_id)
         
-        if broker_conn is None:
+        if broker_conn is None or not hasattr(broker_conn, 'connected'):
             # Error loading broker connection
             return jsonify({
                 'success': False,
-                'error': f'Failed to connect to broker: {broker_type}',
+                'error': f'Failed to connect to broker: {broker_type or broker_conn}',
                 'botId': bot_id,
                 'status': 'FAILED'
             }), 503
@@ -8733,6 +8907,108 @@ def admin_dashboard():
     
     except Exception as e:
         logger.error(f"Error getting admin dashboard: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/ig-credentials/health', methods=['GET'])
+@require_api_key
+def admin_ig_credentials_health():
+    """Admin view of IG credential readiness by user without returning secrets."""
+    try:
+        include_all = str(request.args.get('include_all', 'true')).lower() in ('1', 'true', 'yes')
+        limit = int(request.args.get('limit', 200))
+        if limit < 1:
+            limit = 1
+        if limit > 1000:
+            limit = 1000
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT
+                u.user_id,
+                u.email,
+                u.name,
+                bc.credential_id,
+                bc.username AS ig_username,
+                bc.account_number AS ig_account_id,
+                bc.is_live,
+                bc.api_key,
+                bc.password,
+                bc.updated_at,
+                bc.created_at
+            FROM users u
+            LEFT JOIN broker_credentials bc
+              ON bc.credential_id = (
+                  SELECT bc2.credential_id
+                  FROM broker_credentials bc2
+                  WHERE bc2.user_id = u.user_id
+                    AND bc2.is_active = 1
+                    AND bc2.broker_name IN ('IG Markets', 'IG.com', 'IG')
+                  ORDER BY bc2.updated_at DESC, bc2.created_at DESC
+                  LIMIT 1
+              )
+            ORDER BY u.created_at DESC
+            LIMIT ?
+        ''', (limit,))
+
+        health_rows = []
+        total_with_ig = 0
+        total_ready = 0
+
+        for row in cursor.fetchall():
+            has_ig = bool(row['credential_id'])
+            if has_ig:
+                total_with_ig += 1
+
+            missing_fields = []
+            if has_ig:
+                if not row['api_key']:
+                    missing_fields.append('api_key')
+                if not row['ig_username']:
+                    missing_fields.append('username')
+                if not row['password']:
+                    missing_fields.append('password')
+                if not row['ig_account_id']:
+                    missing_fields.append('account_id')
+
+            is_ready = has_ig and len(missing_fields) == 0
+            if is_ready:
+                total_ready += 1
+
+            if include_all or has_ig:
+                health_rows.append({
+                    'user_id': row['user_id'],
+                    'email': row['email'],
+                    'name': row['name'],
+                    'has_ig_credentials': has_ig,
+                    'credential_id': row['credential_id'] if has_ig else None,
+                    'ig_username': row['ig_username'] if has_ig else None,
+                    'ig_account_id': row['ig_account_id'] if has_ig else None,
+                    'environment': 'live' if bool(row['is_live']) else 'demo' if has_ig else None,
+                    'is_ready': is_ready,
+                    'missing_fields': missing_fields,
+                    'updated_at': row['updated_at'] if has_ig else None,
+                    'created_at': row['created_at'] if has_ig else None,
+                })
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'summary': {
+                'users_scanned': len(health_rows) if include_all else total_with_ig,
+                'users_with_ig_credentials': total_with_ig,
+                'users_ready': total_ready,
+                'users_not_ready': max(total_with_ig - total_ready, 0),
+                'include_all': include_all,
+                'limit': limit,
+            },
+            'users': health_rows,
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting IG credential health: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

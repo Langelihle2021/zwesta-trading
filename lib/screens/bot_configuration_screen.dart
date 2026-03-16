@@ -20,20 +20,38 @@ class BotConfigurationScreen extends StatefulWidget {
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   static const List<Map<String, String>> _binanceSymbols = [
-    {'symbol': 'BTCUSDT', 'name': '₿ Bitcoin / Tether', 'category': 'Crypto'},
-    {'symbol': 'ETHUSDT', 'name': '◆ Ethereum / Tether', 'category': 'Crypto'},
-    {'symbol': 'BNBUSDT', 'name': '◈ BNB / Tether', 'category': 'Crypto'},
-    {'symbol': 'SOLUSDT', 'name': '◎ Solana / Tether', 'category': 'Crypto'},
-    {'symbol': 'XRPUSDT', 'name': '✕ XRP / Tether', 'category': 'Crypto'},
-    {'symbol': 'ADAUSDT', 'name': '◌ Cardano / Tether', 'category': 'Crypto'},
-    {'symbol': 'DOGEUSDT', 'name': '🐕 Dogecoin / Tether', 'category': 'Crypto'},
-    {'symbol': 'AVAXUSDT', 'name': '▲ Avalanche / Tether', 'category': 'Crypto'},
-    {'symbol': 'MATICUSDT', 'name': '⬟ Polygon / Tether', 'category': 'Crypto'},
-    {'symbol': 'LINKUSDT', 'name': '⛓ Chainlink / Tether', 'category': 'Crypto'},
-    {'symbol': 'LTCUSDT', 'name': 'Ł Litecoin / Tether', 'category': 'Crypto'},
-    {'symbol': 'TRXUSDT', 'name': '△ TRON / Tether', 'category': 'Crypto'},
-    {'symbol': 'DOTUSDT', 'name': '● Polkadot / Tether', 'category': 'Crypto'},
-    {'symbol': 'ATOMUSDT', 'name': '⚛ Cosmos / Tether', 'category': 'Crypto'},
+    // --- Tier 1: Large Cap ---
+    {'symbol': 'BTCUSDT',  'name': '₿ Bitcoin / Tether',     'category': 'Large Cap'},
+    {'symbol': 'ETHUSDT',  'name': '◆ Ethereum / Tether',    'category': 'Large Cap'},
+    {'symbol': 'BNBUSDT',  'name': '◈ BNB / Tether',         'category': 'Large Cap'},
+    {'symbol': 'SOLUSDT',  'name': '◎ Solana / Tether',      'category': 'Large Cap'},
+    {'symbol': 'XRPUSDT',  'name': '✕ XRP / Tether',         'category': 'Large Cap'},
+    {'symbol': 'ADAUSDT',  'name': '◌ Cardano / Tether',     'category': 'Large Cap'},
+    {'symbol': 'DOGEUSDT', 'name': '🐕 Dogecoin / Tether',   'category': 'Large Cap'},
+    // --- Tier 2: High-Volume Altcoins ---
+    {'symbol': 'AVAXUSDT', 'name': '▲ Avalanche / Tether',   'category': 'Altcoin'},
+    {'symbol': 'MATICUSDT','name': '⬟ Polygon / Tether',     'category': 'Altcoin'},
+    {'symbol': 'LINKUSDT', 'name': '⛓ Chainlink / Tether',   'category': 'Altcoin'},
+    {'symbol': 'LTCUSDT',  'name': 'Ł Litecoin / Tether',    'category': 'Altcoin'},
+    {'symbol': 'TRXUSDT',  'name': '△ TRON / Tether',        'category': 'Altcoin'},
+    {'symbol': 'DOTUSDT',  'name': '● Polkadot / Tether',    'category': 'Altcoin'},
+    {'symbol': 'ATOMUSDT', 'name': '⚛ Cosmos / Tether',      'category': 'Altcoin'},
+    // --- Tier 3: DeFi & Layer-2 (high volatility) ---
+    {'symbol': 'SHIBUSDT', 'name': '🦴 Shiba Inu / Tether',  'category': 'DeFi & L2'},
+    {'symbol': 'UNIUSDT',  'name': '🦄 Uniswap / Tether',    'category': 'DeFi & L2'},
+    {'symbol': 'NEARUSDT', 'name': '◎ NEAR Protocol / Tether','category': 'DeFi & L2'},
+    {'symbol': 'ARBUSDT',  'name': '🔵 Arbitrum / Tether',   'category': 'DeFi & L2'},
+    {'symbol': 'OPUSDT',   'name': '🔴 Optimism / Tether',   'category': 'DeFi & L2'},
+    {'symbol': 'APTUSDT',  'name': '⚡ Aptos / Tether',       'category': 'DeFi & L2'},
+    {'symbol': 'INJUSDT',  'name': '💉 Injective / Tether',  'category': 'DeFi & L2'},
+    {'symbol': 'SUIUSDT',  'name': '💧 Sui / Tether',        'category': 'DeFi & L2'},
+    {'symbol': 'FTMUSDT',  'name': '👻 Fantom / Tether',     'category': 'DeFi & L2'},
+    {'symbol': 'AAVEUSDT', 'name': '👻 Aave / Tether',       'category': 'DeFi & L2'},
+    // --- Tier 4: Gaming / Metaverse / Cross-chain ---
+    {'symbol': 'SANDUSDT', 'name': '🏖 The Sandbox / Tether','category': 'Gaming'},
+    {'symbol': 'MANAUSDT', 'name': '🌐 Decentraland / Tether','category': 'Gaming'},
+    {'symbol': 'RUNEUSDT', 'name': '⚗️ THORChain / Tether',  'category': 'Gaming'},
+    {'symbol': 'ALGOUSDT', 'name': '◈ Algorand / Tether',   'category': 'Gaming'},
   ];
 
     // Dialog to input account number

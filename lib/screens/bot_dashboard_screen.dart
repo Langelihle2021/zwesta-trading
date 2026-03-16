@@ -342,7 +342,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               Text(runtime, style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 13)),
               const Spacer(),
               Text("Today's Profit ", style: GoogleFonts.poppins(color: Colors.grey.shade700, fontSize: 12)),
-              Text(' 24${todaysProfit.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: const Color(0xFF388E3C), fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('\$${todaysProfit.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: const Color(0xFF388E3C), fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 10),
@@ -350,15 +350,15 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             children: [
               _botStat('Trades', '$totalTrades', Colors.blue.shade700),
               _botStat('Win Rate', '${winRate.toStringAsFixed(1)}%', Colors.green.shade700),
-              _botStat('Profit', ' 24${profit.toStringAsFixed(2)}', profit >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+              _botStat('Profit', '\$${profit.toStringAsFixed(2)}', profit >= 0 ? Colors.green.shade700 : Colors.red.shade700),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               _botStat('ROI', '${roi.toStringAsFixed(1)}%', Colors.orange.shade700),
-              _botStat('Avg/Trade', ' 24${avgTrade.toStringAsFixed(0)}', Colors.indigo.shade700),
-              _botStat('Max Drawdown', ' 24${maxDrawdown.toStringAsFixed(0)}', Colors.red.shade700),
+              _botStat('Avg/Trade', '\$${avgTrade.toStringAsFixed(0)}', Colors.indigo.shade700),
+              _botStat('Max Drawdown', '\$${maxDrawdown.toStringAsFixed(0)}', Colors.red.shade700),
             ],
           ),
           const SizedBox(height: 14),

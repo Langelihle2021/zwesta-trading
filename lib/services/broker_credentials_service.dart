@@ -12,6 +12,7 @@ class BrokerCredential {
   final bool isLive;
   final bool isActive;
   final DateTime createdAt;
+  final String? apiKey;
 
   BrokerCredential({
     required this.credentialId,
@@ -21,6 +22,7 @@ class BrokerCredential {
     required this.isLive,
     required this.isActive,
     required this.createdAt,
+    this.apiKey,
   });
 
   factory BrokerCredential.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class BrokerCredential {
       isLive: json['is_live'] ?? false,
       isActive: json['is_active'] ?? true,
       createdAt: DateTime.parse(json['created_at'] ?? DateTime.now().toString()),
+      apiKey: json['api_key'],
     );
   }
 
@@ -140,6 +143,9 @@ class BrokerCredentialsService extends ChangeNotifier {
     required String password,
     required String server,
     required bool isLive,
+    String? apiKey,
+    String? apiSecret,
+    String? username,
   }) async {
     _isLoading = true;
     _errorMessage = null;
@@ -158,19 +164,24 @@ class BrokerCredentialsService extends ChangeNotifier {
 
       print('🔐 Saving broker credential for: $broker | Account: $accountNumber');
 
+      final body = <String, dynamic>{
+        'broker': broker,
+        'account_number': accountNumber,
+        'password': password,
+        'server': server,
+        'is_live': isLive,
+      };
+      if (apiKey != null) body['api_key'] = apiKey;
+      if (apiSecret != null) body['api_secret'] = apiSecret;
+      if (username != null) body['username'] = username;
+
       final response = await http.post(
         Uri.parse('$_apiUrl/api/broker/credentials'),
         headers: {
           'Content-Type': 'application/json',
           'X-Session-Token': sessionToken,
         },
-        body: jsonEncode({
-          'broker': broker,
-          'account_number': accountNumber,
-          'password': password,
-          'server': server,
-          'is_live': isLive,
-        }),
+        body: jsonEncode(body),
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
