@@ -575,3 +575,239 @@ def ig_withdraw():
     data = request.json
     amount = data.get('amount')
     return jsonify({'success': False, 'error': 'Direct withdrawal via IG API is not supported. Please process manually.'}), 400
+
+
+# ==================== IG PROFIT MONITOR & AUTO-CLOSE ====================
+
+@ig_api.route('/api/ig/profit-check', methods=['POST'])
+def api_ig_profit_check():
+    """
+    Check all open IG positions against a profit target.
+    If total unrealized P&L >= target, auto-close ALL positions and create
+    a withdrawal-ready notification so the user can withdraw on IG's website.
+    
+    Body: { "target_profit": 100.0, "user_id": "...", "auto_close": true }
+    """
+    try:
+        data = request.json or {}
+        target_profit = float(data.get('target_profit', 0))
+        user_id = data.get('user_id', '')
+        auto_close = data.get('auto_close', True)
+
+        if target_profit <= 0:
+            return jsonify({"success": False, "error": "target_profit must be > 0"}), 400
+
+        # 1. Fetch open positions
+        cst, xst = get_ig_tokens()
+        headers = _ig_headers(cst, xst, version="2", content_type=False)
+        resp = requests.get(f"{BASE_URL}/positions", headers=headers, timeout=10)
+
+        if resp.status_code != 200:
+            return jsonify({"success": False, "error": "Failed to fetch positions"}), 500
+
+        raw = resp.json().get('positions', [])
+        total_pnl = 0.0
+        position_details = []
+
+        for p in raw:
+            pos = p.get('position', {})
+            mkt = p.get('market', {})
+            direction = pos.get('direction', '')
+            level = float(pos.get('level', 0))
+            size = float(pos.get('size', 0))
+            bid = float(mkt.get('bid', 0))
+            offer = float(mkt.get('offer', 0))
+
+            if direction == 'BUY':
+                pnl = (bid - level) * size
+            else:
+                pnl = (level - offer) * size
+
+            total_pnl += pnl
+            position_details.append({
+                'dealId': pos.get('dealId', ''),
+                'epic': mkt.get('epic', ''),
+                'instrumentName': mkt.get('instrumentName', ''),
+                'direction': direction,
+                'size': size,
+                'openLevel': level,
+                'currentPrice': bid if direction == 'BUY' else offer,
+                'pnl': round(pnl, 2),
+            })
+
+        target_reached = total_pnl >= target_profit
+
+        close_results = []
+        if target_reached and auto_close and len(raw) > 0:
+            # 2. Auto-close all positions to realize the profit
+            for p in raw:
+                pos = p.get('position', {})
+                deal_id = pos.get('dealId')
+                direction = pos.get('direction', '')
+                size = float(pos.get('size', 0))
+                close_dir = 'SELL' if direction == 'BUY' else 'BUY'
+
+                close_headers = _ig_headers(cst, xst, version="1")
+                close_headers["_method"] = "DELETE"
+                payload = {
+                    "dealId": deal_id,
+                    "direction": close_dir,
+                    "size": size,
+                    "orderType": "MARKET",
+                    "timeInForce": "EXECUTE_AND_ELIMINATE",
+                }
+                close_resp = requests.post(
+                    f"{BASE_URL}/positions/otc",
+                    headers=close_headers, json=payload, timeout=15
+                )
+                if close_resp.status_code == 200:
+                    deal_ref = close_resp.json().get('dealReference', '')
+                    confirm = _confirm_deal(cst, xst, deal_ref)
+                    close_results.append({"dealId": deal_id, "success": True, "confirmation": confirm})
+                else:
+                    close_results.append({"dealId": deal_id, "success": False, "error": close_resp.text})
+
+            closed_count = sum(1 for r in close_results if r['success'])
+            logger.info(
+                f"IG profit target ${target_profit} reached (P&L: ${total_pnl:.2f}). "
+                f"Closed {closed_count}/{len(raw)} positions for user {user_id}."
+            )
+
+        # 3. Fetch updated balance after closes
+        balance_info = {}
+        if target_reached:
+            bal_headers = _ig_headers(cst, xst, version="1", content_type=False)
+            bal_resp = requests.get(f"{BASE_URL}/accounts", headers=bal_headers, timeout=10)
+            if bal_resp.status_code == 200:
+                accounts = bal_resp.json().get('accounts', [])
+                if accounts:
+                    bal = accounts[0].get('balance', {})
+                    balance_info = {
+                        'balance': bal.get('balance', 0),
+                        'available': bal.get('available', 0),
+                        'deposit': bal.get('deposit', 0),
+                        'profitLoss': bal.get('profitLoss', 0),
+                    }
+
+        return jsonify({
+            "success": True,
+            "target_profit": target_profit,
+            "current_pnl": round(total_pnl, 2),
+            "target_reached": target_reached,
+            "positions_checked": len(raw),
+            "positions": position_details,
+            "positions_closed": len(close_results),
+            "close_results": close_results,
+            "balance_after": balance_info,
+            "message": (
+                f"Profit target ${target_profit:.2f} reached! "
+                f"P&L: ${total_pnl:.2f}. Positions closed. "
+                f"Please withdraw funds from IG's website or app."
+            ) if target_reached else (
+                f"P&L ${total_pnl:.2f} / target ${target_profit:.2f} — not yet reached."
+            ),
+        })
+
+    except Exception as e:
+        logger.error(f"IG profit check error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@ig_api.route('/api/ig/withdrawal-notifications', methods=['GET'])
+def api_ig_withdrawal_notifications():
+    """Get all IG withdrawal-ready notifications for a user."""
+    try:
+        import sqlite3
+        user_id = request.args.get('user_id', '')
+        if not user_id:
+            return jsonify({"success": False, "error": "user_id required"}), 400
+
+        db_path = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM ig_withdrawal_notifications
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (user_id,))
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        return jsonify({"success": True, "notifications": rows})
+    except Exception as e:
+        logger.error(f"IG withdrawal notifications error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@ig_api.route('/api/ig/withdrawal-notifications', methods=['POST'])
+def api_ig_create_withdrawal_notification():
+    """Create a withdrawal-ready notification after profits are realized."""
+    try:
+        import sqlite3, uuid
+        data = request.json or {}
+        user_id = data.get('user_id', '')
+        realized_profit = float(data.get('realized_profit', 0))
+        positions_closed = int(data.get('positions_closed', 0))
+        balance_available = float(data.get('balance_available', 0))
+
+        if not user_id:
+            return jsonify({"success": False, "error": "user_id required"}), 400
+
+        db_path = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
+        conn = sqlite3.connect(db_path, timeout=10)
+        cursor = conn.cursor()
+
+        notif_id = str(uuid.uuid4())
+        created_at = datetime.now().isoformat()
+
+        cursor.execute('''
+            INSERT INTO ig_withdrawal_notifications
+            (notification_id, user_id, realized_profit, positions_closed,
+             balance_available, status, created_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        ''', (notif_id, user_id, realized_profit, positions_closed,
+              balance_available, created_at))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(
+            f"IG withdrawal notification created: {notif_id} | "
+            f"User: {user_id} | Profit: ${realized_profit:.2f}"
+        )
+
+        return jsonify({
+            "success": True,
+            "notification_id": notif_id,
+            "message": "Withdrawal notification created. Please withdraw from IG platform.",
+        })
+    except Exception as e:
+        logger.error(f"IG create withdrawal notification error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@ig_api.route('/api/ig/withdrawal-notifications/<notif_id>/mark-done', methods=['POST'])
+def api_ig_mark_withdrawal_done(notif_id):
+    """Mark a withdrawal notification as completed (user confirms they withdrew on IG)."""
+    try:
+        import sqlite3
+        db_path = os.getenv('DATABASE_PATH', 'zwesta_trading.db')
+        conn = sqlite3.connect(db_path, timeout=10)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE ig_withdrawal_notifications
+            SET status = 'completed', completed_at = ?
+            WHERE notification_id = ?
+        ''', (datetime.now().isoformat(), notif_id))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({"success": True, "message": "Withdrawal marked as completed."})
+    except Exception as e:
+        logger.error(f"IG mark withdrawal done error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500

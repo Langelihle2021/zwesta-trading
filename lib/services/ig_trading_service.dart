@@ -249,4 +249,96 @@ class IGTradingService {
       return {'success': false, 'error': e.toString()};
     }
   }
+
+  // ==================== PROFIT CHECK & AUTO-CLOSE ====================
+
+  /// Check IG positions against a profit target.
+  /// If target is reached, positions are auto-closed and a notification is created.
+  static Future<Map<String, dynamic>> profitCheck({
+    required double targetProfit,
+    required String userId,
+    bool autoClose = true,
+  }) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/api/ig/profit-check'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'target_profit': targetProfit,
+          'user_id': userId,
+          'auto_close': autoClose,
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body);
+      }
+      return {'success': false, 'error': 'Server error ${resp.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // ==================== WITHDRAWAL NOTIFICATIONS ====================
+
+  /// Get all withdrawal-ready notifications for a user.
+  static Future<Map<String, dynamic>> getWithdrawalNotifications(String userId) async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/api/ig/withdrawal-notifications?user_id=$userId'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body);
+      }
+      return {'success': false, 'error': 'Server error ${resp.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Create a withdrawal notification after profits are realized.
+  static Future<Map<String, dynamic>> createWithdrawalNotification({
+    required String userId,
+    required double realizedProfit,
+    required int positionsClosed,
+    required double balanceAvailable,
+  }) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/api/ig/withdrawal-notifications'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_id': userId,
+          'realized_profit': realizedProfit,
+          'positions_closed': positionsClosed,
+          'balance_available': balanceAvailable,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body);
+      }
+      return {'success': false, 'error': 'Server error ${resp.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Mark a withdrawal notification as completed.
+  static Future<Map<String, dynamic>> markWithdrawalDone(String notifId) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/api/ig/withdrawal-notifications/$notifId/mark-done'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body);
+      }
+      return {'success': false, 'error': 'Server error ${resp.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
 }

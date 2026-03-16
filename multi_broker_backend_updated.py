@@ -641,6 +641,22 @@ def init_database():
     
     # ✅ MIGRATION: Add IG Markets specific columns if they don't exist
     # Check if api_key and username columns exist in broker_credentials table
+
+    # IG Withdrawal Notifications table — tracks when profit targets are hit
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ig_withdrawal_notifications (
+            notification_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            realized_profit REAL DEFAULT 0,
+            positions_closed INTEGER DEFAULT 0,
+            balance_available REAL DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT,
+            completed_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
     cursor.execute("PRAGMA table_info(broker_credentials)")
     columns = [col[1] for col in cursor.fetchall()]
     
