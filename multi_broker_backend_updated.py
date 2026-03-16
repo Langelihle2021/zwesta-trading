@@ -7916,6 +7916,14 @@ import random as rand
 from ig_service import ig_api
 app.register_blueprint(ig_api)
 
+# --- OANDA API Integration ---
+from oanda_service import oanda_api
+app.register_blueprint(oanda_api)
+
+# --- FXCM API Integration ---
+from fxcm_service import fxcm_api
+app.register_blueprint(fxcm_api)
+
 # Example: Use IG API in bot trading logic
 # (You can call these functions from your bot trading threads)
 def place_ig_trade(epic, size, direction, currency="USD", order_type="MARKET"):

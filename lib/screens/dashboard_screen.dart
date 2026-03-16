@@ -39,6 +39,8 @@ import 'enhanced_dashboard_screen.dart';
 import 'commission_dashboard_screen.dart';
 import 'broker_analytics_dashboard.dart';
 import 'ig_withdrawal_screen.dart';
+import 'oanda_withdrawal_screen.dart';
+import 'fxcm_withdrawal_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -1845,6 +1847,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const IGWithdrawalScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF4CAF50)),
+            title: const Text('OANDA Withdrawals', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Auto-close & withdraw profits', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const OandaWithdrawalScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF7C4DFF)),
+            title: const Text('FXCM Withdrawals', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Auto-close & withdraw profits', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const FxcmWithdrawalScreen()));
             },
           ),
           const Divider(color: Colors.white12),
