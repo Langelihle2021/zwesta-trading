@@ -2914,9 +2914,11 @@ def transfer_funds_api():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-# ==================== IG.COM API ENDPOINTS ====================
+# ==================== LEGACY IG.COM API ENDPOINTS ====================
+# NOTE: These legacy routes are kept for backward compatibility with internal tools.
+# The production Flutter app uses ig_service.py endpoints under /api/ig/* (session-scoped).
 
-@app.route('/api/ig/connect', methods=['POST'])
+@app.route('/api/legacy/ig/connect', methods=['POST'])
 def ig_connect():
     """Connect to IG.com Markets API"""
     try:
@@ -2952,7 +2954,7 @@ def ig_connect():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/ig/account-info', methods=['GET'])
+@app.route('/api/legacy/ig/account-info', methods=['GET'])
 def ig_account_info():
     """Get IG.com account information"""
     try:
@@ -2971,7 +2973,7 @@ def ig_account_info():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/ig/positions', methods=['GET'])
+@app.route('/api/legacy/ig/positions', methods=['GET'])
 def ig_positions():
     """Get IG.com open positions"""
     try:
@@ -2989,7 +2991,7 @@ def ig_positions():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/ig/place-order', methods=['POST'])
+@app.route('/api/legacy/ig/place-order', methods=['POST'])
 def ig_place_order():
     """Place order on IG.com Markets"""
     try:
@@ -3012,7 +3014,7 @@ def ig_place_order():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/ig/trades', methods=['GET'])
+@app.route('/api/legacy/ig/trades', methods=['GET'])
 def ig_trades():
     """Get IG.com open trades"""
     try:
@@ -3030,7 +3032,7 @@ def ig_trades():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/ig/close-position', methods=['POST'])
+@app.route('/api/legacy/ig/close-position', methods=['POST'])
 def ig_close_position():
     """Close a position on IG.com"""
     try:
@@ -9239,7 +9241,7 @@ def place_ig_trade(epic, size, direction, currency="USD", order_type="MARKET"):
     import requests
     from flask import current_app
     # Use the IG API endpoint via internal HTTP call or direct function call
-    url = f"http://localhost:9000/api/ig/place-order"
+    url = f"http://localhost:9000/api/legacy/ig/place-order"
     data = {
         "epic": epic,
         "size": size,
@@ -9266,7 +9268,7 @@ def get_ig_funds():
 # Example: Get IG open positions for bot monitoring
 def get_ig_positions():
     import requests
-    url = f"http://localhost:9000/api/ig/positions"
+    url = f"http://localhost:9000/api/legacy/ig/positions"
     try:
         resp = requests.get(url)
         return resp.json()
