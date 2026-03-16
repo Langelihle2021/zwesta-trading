@@ -7928,6 +7928,10 @@ app.register_blueprint(fxcm_api)
 from binance_service import binance_api
 app.register_blueprint(binance_api)
 
+# --- Unified Broker + Crypto Strategies ---
+from unified_broker_service import unified_broker_api
+app.register_blueprint(unified_broker_api)
+
 # Example: Use IG API in bot trading logic
 # (You can call these functions from your bot trading threads)
 def place_ig_trade(epic, size, direction, currency="USD", order_type="MARKET"):

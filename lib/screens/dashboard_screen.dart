@@ -42,6 +42,8 @@ import 'ig_withdrawal_screen.dart';
 import 'oanda_withdrawal_screen.dart';
 import 'fxcm_withdrawal_screen.dart';
 import 'binance_withdrawal_screen.dart';
+import 'unified_broker_dashboard_screen.dart';
+import 'crypto_strategies_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -1875,6 +1877,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const BinanceWithdrawalScreen()));
+            },
+          ),
+          const Divider(color: Colors.white12),
+          ListTile(
+            leading: const Icon(Icons.dashboard_customize, color: Color(0xFF00E5FF)),
+            title: const Text('Unified Portfolio', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('All brokers in one view', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const UnifiedBrokerDashboardScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.smart_toy, color: Color(0xFFF0B90B)),
+            title: const Text('Crypto Strategies', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Grid, DCA, Scalper & more', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const CryptoStrategiesScreen()));
             },
           ),
           const Divider(color: Colors.white12),
