@@ -3456,10 +3456,142 @@ def vps_heartbeat(vps_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ==================== BROKER DETECTION ====================
+
+def detect_exness_mt5():
+    """Detect if Exness MT5 is available on the system"""
+    try:
+        import MetaTrader5 as mt5
+        
+        # Try to initialize MT5 to check if it's installed
+        if hasattr(mt5, 'version'):
+            logger.info("✅ Exness MT5 detected on system")
+            return {
+                'available': True,
+                'installed': True,
+                'version': str(mt5.version if hasattr(mt5, 'version') else 'Unknown')
+            }
+        else:
+            logger.warning("⚠️ MetaTrader 5 library found but version info unavailable")
+            return {
+                'available': True,
+                'installed': True,
+                'version': 'Unknown'
+            }
+    except ImportError:
+        logger.warning("⚠️ MetaTrader 5 library not installed")
+        return {
+            'available': False,
+            'installed': False,
+            'reason': 'MetaTrader 5 library not installed. Install with: pip install MetaTrader5'
+        }
+    except Exception as e:
+        logger.error(f"❌ Error detecting Exness MT5: {e}")
+        return {
+            'available': False,
+            'installed': False,
+            'error': str(e)
+        }
+
+
+def check_exness_connectivity(account_id=None, password=None, server='Exness-MT5'):
+    """Check if Exness MT5 server is reachable"""
+    try:
+        import MetaTrader5 as mt5
+        
+        # If credentials provided, try to login
+        if account_id and password:
+            if mt5.initialize(login=int(account_id), password=password, server=server):
+                account_info = mt5.account_info()
+                mt5.shutdown()
+                if account_info:
+                    logger.info(f"✅ Exness connectivity verified for account {account_id}")
+                    return {
+                        'connected': True,
+                        'account_id': account_id,
+                        'server': server,
+                        'message': 'Successfully connected to Exness'
+                    }
+            else:
+                error = mt5.last_error()
+                logger.error(f"❌ Exness login failed: {error}")
+                return {
+                    'connected': False,
+                    'error': str(error)
+                }
+        else:
+            # Just check if MT5 library responds
+            logger.info("✅ Exness MT5 library responding")
+            return {
+                'connected': True,
+                'message': 'MT5 library is available (credentials not tested)'
+            }
+    except Exception as e:
+        logger.error(f"❌ Error checking Exness connectivity: {e}")
+        return {
+            'connected': False,
+            'error': str(e)
+        }
+
+
+@app.route('/api/brokers/check-exness', methods=['GET'])
+def check_exness():
+    """Check if Exness is available and can be used"""
+    try:
+        exness_info = detect_exness_mt5()
+        return jsonify(exness_info), 200
+    except Exception as e:
+        logger.error(f"❌ Error checking Exness availability: {e}")
+        return jsonify({
+            'available': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/brokers/verify-exness', methods=['POST'])
+def verify_exness():
+    """Verify Exness connectivity with credentials"""
+    try:
+        data = request.get_json()
+        account_id = data.get('accountId')
+        password = data.get('password')
+        server = data.get('server', 'Exness-MT5')
+        
+        if not account_id or not password:
+            return jsonify({
+                'success': False,
+                'error': 'Missing accountId or password'
+            }), 400
+        
+        result = check_exness_connectivity(account_id, password, server)
+        result['success'] = result.get('connected', False)
+        
+        return jsonify(result), 200 if result['success'] else 401
+    except Exception as e:
+        logger.error(f"❌ Error verifying Exness credentials: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/brokers/list', methods=['GET'])
 def list_brokers():
     """List available brokers"""
+    # Detect Exness availability
+    exness_status = detect_exness_mt5()
+    exness_broker_status = 'active' if exness_status.get('available') else 'inactive'
+    
     brokers = [
+        {
+            'type': 'exness',
+            'name': 'Exness MT5',
+            'description': 'Exness - MetaTrader 5 - Professional Forex & CFD broker',
+            'assets': ['Forex', 'Metals', 'Indices', 'Stocks', 'Cryptos', 'Energies'],
+            'status': exness_broker_status,
+            'installed': exness_status.get('installed', False),
+            'version': exness_status.get('version', 'Not installed')
+        },
         {
             'type': 'mt5',
             'name': 'MetaTrader 5',

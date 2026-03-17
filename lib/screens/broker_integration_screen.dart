@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -94,6 +96,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   bool get _isIgBroker => _selectedBroker.toLowerCase().contains('ig');
   bool get _isBinanceBroker => _selectedBroker.toLowerCase() == 'binance';
   bool get _isOandaBroker => _selectedBroker.toLowerCase() == 'oanda';
+  bool get _isExnessBroker => _selectedBroker.toLowerCase() == 'exness';
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
 
   void _loadSavedAccounts() async {
@@ -163,8 +166,59 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     });
   }
 
+  /// Check if Exness is available on the backend
+  Future<Map<String, dynamic>> _checkExnessAvailability() async {
+    try {
+      final baseUrl = 'http://localhost:5000'; // or your backend URL
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/brokers/check-exness'),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return {
+          'available': data['available'] ?? false,
+          'installed': data['installed'] ?? false,
+          'version': data['version'] ?? 'Unknown',
+          'error': data['error'],
+        };
+      } else {
+        return {
+          'available': false,
+          'error': 'Failed to check Exness availability',
+        };
+      }
+    } catch (e) {
+      return {
+        'available': false,
+        'error': 'Error checking Exness: $e',
+      };
+    }
+  }
+
   void _testConnection() async {
-    final missingMt5 = _isMt5Broker && (_accountController.text.isEmpty || _passwordController.text.isEmpty);
+    // Check Exness availability first if Exness is selected
+    if (_isExnessBroker) {
+      setState(() => _isTestingConnection = true);
+      
+      final exnessCheck = await _checkExnessAvailability();
+      
+      if (!exnessCheck['available'] == true) {
+        if (mounted) {
+          setState(() => _isTestingConnection = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Exness MT5 not available: ${exnessCheck['error'] ?? "Unknown error"}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    final missingMt5 = (_isMt5Broker || _isExnessBroker) && (_accountController.text.isEmpty || _passwordController.text.isEmpty);
     final missingIg = _isIgBroker && (_apiKeyController.text.isEmpty || _usernameController.text.isEmpty || _passwordController.text.isEmpty || _accountController.text.isEmpty);
     final missingBinance = _isBinanceBroker && (_apiKeyController.text.isEmpty || _passwordController.text.isEmpty);
     final missingOanda = _isOandaBroker && (_apiKeyController.text.isEmpty || _accountController.text.isEmpty);
