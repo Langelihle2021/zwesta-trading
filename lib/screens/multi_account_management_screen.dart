@@ -263,10 +263,17 @@ class _MultiAccountManagementScreenState
     return Scaffold(
       appBar: AppBar(
         title: const Text('Multi-Account Management'),
+        backgroundColor: Colors.grey[900],
         elevation: 0,
+        centerTitle: false,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
+      backgroundColor: Colors.grey[850],
       body: _isLoading && _accounts.isEmpty
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00E5FF)))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -274,45 +281,143 @@ class _MultiAccountManagementScreenState
                 children: [
                   if (_errorMessage != null)
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        border: Border.all(color: Colors.red),
-                        borderRadius: BorderRadius.circular(8),
+                        gradient: LinearGradient(
+                          colors: [Colors.red.withOpacity(0.2), Colors.red.withOpacity(0.1)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        border: Border.all(color: Colors.red.withOpacity(0.5)),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.red.withOpacity(0.15),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: _showAddAccountDialog,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Trading Account'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF00E5FF), Color(0xFF7C4DFF)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF00E5FF).withOpacity(0.3),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _showAddAccountDialog,
+                        borderRadius: BorderRadius.circular(14),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.add_circle_outline, color: Colors.white, size: 22),
+                              const SizedBox(width: 10),
+                              const Text(
+                                'Add Trading Account',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 24),
                   if (_accounts.isEmpty)
-                    Center(
+                    Container(
+                      padding: const EdgeInsets.all(40),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.grey[900]!.withOpacity(0.8), Colors.grey[800]!.withOpacity(0.6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.2),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
                       child: Column(
                         children: [
-                          Icon(
-                            Icons.account_balance_wallet,
-                            size: 64,
-                            color: Colors.grey[300],
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xFF00E5FF).withOpacity(0.2), Color(0xFF7C4DFF).withOpacity(0.15)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Color(0xFF00E5FF).withOpacity(0.2),
+                                  blurRadius: 20,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.account_balance_wallet,
+                              size: 56,
+                              color: Color(0xFF00E5FF),
+                            ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 20),
                           Text(
                             'No accounts added yet',
-                            style: Theme.of(context).textTheme.titleMedium,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.3,
+                            ),
                           ),
-                          const SizedBox(height: 8),
-                          const Text(
+                          const SizedBox(height: 12),
+                          Text(
                             'Add your first trading account to get started',
                             textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.white70,
+                              height: 1.5,
+                            ),
                           ),
                         ],
                       ),
@@ -328,71 +433,203 @@ class _MultiAccountManagementScreenState
   Widget _buildAccountCard(Map<String, dynamic> account) {
     final isConnected = account['connected'] ?? false;
     final info = account['info'];
+    final statusColor = isConnected ? Colors.green : Colors.orange;
 
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.grey[900]!.withOpacity(0.9),
+            Colors.grey[800]!.withOpacity(0.8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: statusColor.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withOpacity(0.15),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      account['accountId'] ?? 'Unknown',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [statusColor.withOpacity(0.25), statusColor.withOpacity(0.1)],
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.account_balance,
+                              color: statusColor,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              account['accountId'] ?? 'Unknown',
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Broker: ${account['broker'] ?? 'N/A'}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(Icons.category, color: statusColor.withOpacity(0.6), size: 14),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Broker: ${account['broker'] ?? 'N/A'}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isConnected ? Colors.green : Colors.orange,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    isConnected ? 'Connected' : 'Disconnected',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                    gradient: LinearGradient(
+                      colors: [statusColor.withOpacity(0.3), statusColor.withOpacity(0.15)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: statusColor.withOpacity(0.5)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: statusColor.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isConnected ? Icons.check_circle : Icons.radio_button_unchecked,
+                        color: statusColor,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isConnected ? 'Connected' : 'Offline',
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
             if (info != null) ...[
-              _buildInfoRow('Account #', info['accountNumber']?.toString()),
-              _buildInfoRow('Balance', '\$${info['balance']?.toStringAsFixed(2)}'),
-              _buildInfoRow('Equity', '\$${info['equity']?.toStringAsFixed(2)}'),
-              _buildInfoRow('Currency', info['currency']),
-              _buildInfoRow('Leverage', '1:${info['leverage']}'),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: Colors.white.withOpacity(0.1)),
+                    bottom: BorderSide(color: Colors.white.withOpacity(0.1)),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    _buildInfoRow('Account #', info['accountNumber']?.toString(), Colors.cyan),
+                    const SizedBox(height: 10),
+                    _buildInfoRow('Balance', '\$${info['balance']?.toStringAsFixed(2)}', Colors.green),
+                    const SizedBox(height: 10),
+                    _buildInfoRow('Equity', '\$${info['equity']?.toStringAsFixed(2)}', Colors.blue),
+                    const SizedBox(height: 10),
+                    _buildInfoRow('Currency', info['currency'], Colors.purple),
+                    const SizedBox(height: 10),
+                    _buildInfoRow('Leverage', '1:${info['leverage']}', Colors.orange),
+                  ],
+                ),
+              ),
             ],
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: isConnected
-                  ? null
-                  : () => _connectAccount(account['accountId']),
-              icon: Icon(isConnected ? Icons.check_circle : Icons.link),
-              label: Text(isConnected ? 'Connected' : 'Connect Account'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 36),
+            const SizedBox(height: 14),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isConnected
+                      ? [Colors.green.shade600.withOpacity(0.8), Colors.green.shade700]
+                      : [Colors.blue.shade600, Colors.blue.shade700],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isConnected ? Colors.green : Colors.blue).withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: isConnected ? null : () => _connectAccount(account['accountId']),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isConnected ? Icons.check_circle : Icons.link,
+                          size: 18,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isConnected ? 'Connected' : 'Connect Account',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
@@ -401,22 +638,41 @@ class _MultiAccountManagementScreenState
     );
   }
 
-  Widget _buildInfoRow(String label, String? value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(color: Colors.grey),
+  Widget _buildInfoRow(String label, String? value, Color accentColor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 3,
+              height: 14,
+              decoration: BoxDecoration(
+                color: accentColor,
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        Text(
+          value ?? 'N/A',
+          style: TextStyle(
+            color: accentColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+            letterSpacing: 0.2,
           ),
-          Text(
-            value ?? 'N/A',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
