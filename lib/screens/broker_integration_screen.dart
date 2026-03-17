@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/constants.dart';
+import '../utils/environment_config.dart';
 import '../services/trading_service.dart';
 import '../services/broker_connection_service.dart';
 import '../services/connection_analytics_service.dart';
