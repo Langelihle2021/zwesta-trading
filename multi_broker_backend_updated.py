@@ -10831,7 +10831,11 @@ def exness_available_symbols():
 @app.route('/api/broker/exness/trade/closed', methods=['POST'])
 @require_api_key
 def record_exness_trade_profit():
-    """Record a closed trade profit for Exness (called when trade is closed)"""
+    """
+    Record a closed trade profit for Exness with automatic commission split:
+    - Direct registration: Developer 30%, User 70%
+    - Via referrer: Developer 25%, Referrer 5%, User 70%
+    """
     try:
         data = request.get_json()
         user_id = data.get('user_id')
@@ -10856,6 +10860,7 @@ def record_exness_trade_profit():
         closed_at = datetime.now().isoformat()
         pnl_percentage = ((exit_price - entry_price) / entry_price * 100) if side == 'BUY' else ((entry_price - exit_price) / entry_price * 100)
 
+        # Record the trade profit
         cursor.execute('''
             INSERT INTO exness_trade_profits
             (profit_id, user_id, broker_account_id, order_id, symbol, entry_price, exit_price,
@@ -10865,6 +10870,88 @@ def record_exness_trade_profit():
             profit_id, user_id, broker_account_id, order_id, symbol, entry_price, exit_price,
             volume, side, profit_loss, commission, pnl_percentage, trade_duration_seconds, closed_at
         ))
+
+        # ==================== PROFIT COMMISSION SPLIT ====================
+        
+        # Get user's referrer (if any)
+        cursor.execute('SELECT referrer_id FROM users WHERE user_id = ?', (user_id,))
+        user_row = cursor.fetchone()
+        referrer_id = user_row['referrer_id'] if user_row else None
+        
+        # Calculate commission split based on registration type
+        developer_id = 'SYSTEM_OWNER_USER_ID'  # System developer/owner account
+        
+        if profit_loss > 0:  # Only split if profitable
+            if referrer_id:
+                # Via referrer: Dev 25%, Referrer 5%, User 70%
+                dev_commission = profit_loss * 0.25
+                referrer_commission = profit_loss * 0.05
+                user_profit = profit_loss * 0.70
+                
+                logger.info(f"📊 Profit split (WITH REFERRER): Dev ${dev_commission:.2f} (25%), Referrer ${referrer_commission:.2f} (5%), User ${user_profit:.2f} (70%)")
+            else:
+                # Direct registration: Dev 30%, User 70%
+                dev_commission = profit_loss * 0.30
+                referrer_commission = 0
+                user_profit = profit_loss * 0.70
+                
+                logger.info(f"📊 Profit split (DIRECT): Dev ${dev_commission:.2f} (30%), User ${user_profit:.2f} (70%)")
+            
+            # Insert commission records
+            commission_id_dev = str(uuid.uuid4())
+            commission_id_user = str(uuid.uuid4())
+            commission_time = datetime.now().isoformat()
+            
+            # Developer commission
+            cursor.execute('''
+                INSERT INTO commissions
+                (commission_id, earner_id, payer_id, amount, commission_type, source_id, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                commission_id_dev, developer_id, user_id, dev_commission, 'trade_profit',
+                profit_id, 'earned', commission_time
+            ))
+            
+            # User profit (if not all goes to dev)
+            if user_profit > 0:
+                cursor.execute('''
+                    INSERT INTO commissions
+                    (commission_id, earner_id, payer_id, amount, commission_type, source_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    commission_id_user, user_id, developer_id, user_profit, 'trade_profit',
+                    profit_id, 'earned', commission_time
+                ))
+            
+            # Referrer commission (if applicable)
+            if referrer_id and referrer_commission > 0:
+                commission_id_referrer = str(uuid.uuid4())
+                cursor.execute('''
+                    INSERT INTO commissions
+                    (commission_id, earner_id, payer_id, amount, commission_type, source_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    commission_id_referrer, referrer_id, user_id, referrer_commission, 'referral_profit',
+                    profit_id, 'earned', commission_time
+                ))
+                
+                # Update user total commission
+                cursor.execute('''
+                    UPDATE users SET total_commission = total_commission + ? 
+                    WHERE user_id = ?
+                ''', (referrer_commission, referrer_id))
+            
+            # Update developer total commission
+            cursor.execute('''
+                UPDATE users SET total_commission = total_commission + ? 
+                WHERE user_id = ?
+            ''', (dev_commission, developer_id))
+            
+            # Update user total commission
+            cursor.execute('''
+                UPDATE users SET total_commission = total_commission + ? 
+                WHERE user_id = ?
+            ''', (user_profit, user_id))
 
         conn.commit()
         conn.close()
@@ -10876,7 +10963,7 @@ def record_exness_trade_profit():
             'profit_id': profit_id,
             'profit_loss': profit_loss,
             'pnl_percentage': round(pnl_percentage, 2),
-            'message': 'Trade profit recorded'
+            'message': 'Trade profit recorded with commissions distributed'
         }), 201
 
     except Exception as e:
