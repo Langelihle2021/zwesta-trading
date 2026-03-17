@@ -141,6 +141,7 @@ def find_mt5_path():
 
 # Exness MT5 Configuration (Default)
 MT5_CONFIG = {
+    'broker': 'Exness',  # Broker identifier for terminal manager
     'account': 298997455,  # Exness MT5 Trial account
     'password': 'Zwesta@1985',
     'server': 'Exness-MT5Trial9',  # Exness demo server
@@ -166,6 +167,7 @@ if MT5_CONFIG['path'] is None:
 # Exness Credentials - Allow override with environment variables (for other users)
 if ENVIRONMENT == 'LIVE':
     MT5_CONFIG = {
+        'broker': 'Exness',  # Broker identifier for terminal manager
         'account': int(os.getenv('EXNESS_ACCOUNT', '298997455')),
         'password': os.getenv('EXNESS_PASSWORD', 'Zwesta@1985'),
         'server': os.getenv('EXNESS_SERVER', 'Exness-MT5Trial9'),
@@ -1061,13 +1063,13 @@ class MT5Connection(BrokerConnection):
 
         super().__init__(BrokerType.METATRADER5, credentials)
         # Dynamically launch/check MT5 terminal for this broker
-        broker = canonicalize_broker_name(credentials.get('broker', 'MetaQuotes'))
+        broker = canonicalize_broker_name(credentials.get('broker', 'Exness'))
         try:
             import subprocess, sys
             import os
             # Call the terminal manager to ensure the terminal is running
             mt5_mgr_path = os.path.join(os.path.dirname(__file__), 'mt5_terminal_manager.py')
-            if broker in ['MetaQuotes', 'XM', 'XM Global', 'MetaTrader 5'] and os.path.exists(mt5_mgr_path):
+            if broker in ['Exness', 'MetaQuotes', 'XM', 'XM Global', 'MetaTrader 5'] and os.path.exists(mt5_mgr_path):
                 subprocess.Popen([sys.executable, mt5_mgr_path, broker])
             else:
                 logger.info(f"[MT5 Terminal Manager] Skipping terminal launch for broker={broker}")
