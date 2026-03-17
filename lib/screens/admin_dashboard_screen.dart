@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/environment_config.dart';
+import '../widgets/logo_widget.dart';
 import 'symbol_management_screen.dart';
 import 'user_account_management_screen.dart';
 import 'bot_strategy_configuration_screen.dart';
@@ -48,7 +49,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Admin Dashboard'),
+        title: Row(
+          children: [
+            const LogoWidget(size: 40, showText: false),
+            const SizedBox(width: 12),
+            const Text('Admin Dashboard'),
+          ],
+        ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
         actions: [

@@ -1567,15 +1567,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         elevation: 0,
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF7C4DFF)]),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.auto_graph, color: Colors.white, size: 18),
-            ),
-            const SizedBox(width: 10),
+            const LogoWidget(size: 40, showText: false),
+            const SizedBox(width: 12),
             Text(
               'ZWESTA',
               style: GoogleFonts.poppins(

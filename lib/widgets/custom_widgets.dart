@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../utils/constants.dart';
+import 'logo_widget.dart';
 
 class StatCard extends StatelessWidget {
   final String title;
@@ -215,6 +216,7 @@ class LoadingOverlay extends StatelessWidget {
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final bool showBackButton;
+  final bool showLogo;
   final VoidCallback? onBackPressed;
   final List<Widget>? actions;
   final PreferredSizeWidget? bottom;
@@ -223,6 +225,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     Key? key,
     required this.title,
     this.showBackButton = false,
+    this.showLogo = true,
     this.onBackPressed,
     this.actions,
     this.bottom,
@@ -231,7 +234,23 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      title: Text(title),
+      title: Row(
+        children: [
+          if (showLogo) ...[
+            const LogoWidget(size: 40, showText: false),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
       leading: showBackButton
           ? IconButton(
               icon: const Icon(Icons.arrow_back),
