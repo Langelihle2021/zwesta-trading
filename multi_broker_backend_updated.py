@@ -5180,12 +5180,12 @@ SYMBOL_MAPPING = {
     'CAC40': 'EURUSD',
     'NIKKEI225': 'NIKL', 'NIKKEI': 'NIKL',
     
-    # Stocks (map to forex as fallback - not available on demo)
-    'AMD': 'EURUSD', 'MSFT': 'EURUSD', 'INTC': 'EURUSD', 'NVDA': 'EURUSD', 'NIKL': 'EURUSD',
+    # Stocks - now allowed to trade directly (pass through to broker)
+    'AMD': 'AMD', 'MSFT': 'MSFT', 'INTC': 'INTC', 'NVDA': 'NVDA', 'NIKL': 'NIKL',
     
-    # Crypto (not available)
-    'BITCOIN': 'EURUSD', 'BTC': 'EURUSD',
-    'ETHEREUM': 'EURUSD', 'ETH': 'EURUSD',
+    # Crypto (pass through to broker)
+    'BITCOIN': 'BITCOIN', 'BTC': 'BITCOIN',
+    'ETHEREUM': 'ETHEREUM', 'ETH': 'ETHEREUM',
 }
 
 def validate_and_correct_symbols(symbols, broker_name=None):
