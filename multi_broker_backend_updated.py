@@ -10104,6 +10104,551 @@ def system_health():
         }), 500
 
 
+# ==================== EXNESS BROKER ENDPOINTS ====================
+# Exness provides MT5-based trading with session token authentication
+
+def generate_exness_session_token():
+    """Generate secure session token for Exness MT5 trading"""
+    return f"exness_{uuid.uuid4().hex[:32]}"
+
+def validate_exness_server(server_name):
+    """Validate that server name is correct for Exness"""
+    valid_servers = ['Exness-MT5', 'Exness-MT5.5', 'Exness-MT5-Real']
+    return server_name in valid_servers
+
+def get_exness_available_symbols():
+    """Return list of available Exness symbols (50+ pairs)"""
+    return [
+        # Forex - Major Pairs (8)
+        'EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCNH',
+        # Metals (4)
+        'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD',
+        # Energy (2)
+        'OILK', 'NATGASUS',
+        # Indices (4)
+        'SP500m', 'DAX', 'US300', 'US100',
+        # Additional forex pairs (12+)
+        'EURJPY', 'EURGBP', 'EURCHF', 'EURCAD', 'GBPJPY', 'GBPCHF', 'CHFJPY',
+        'CADCHF', 'CADJPY', 'AUDCAD', 'AUDCHF', 'AUDJPY',
+    ]
+
+@app.route('/api/broker/exness/login', methods=['POST'])
+def exness_login():
+    """Login to Exness MT5 account and create session"""
+    try:
+        data = request.json or {}
+        account_id = data.get('accountId') or data.get('account_id')
+        password = data.get('password')
+        server = data.get('server', 'Exness-MT5')
+        is_live = data.get('is_live', False)
+        
+        if not account_id or not password:
+            return jsonify({'success': False, 'error': 'accountId and password required'}), 400
+        
+        if not validate_exness_server(server):
+            return jsonify({'success': False, 'error': f'Invalid Exness server: {server}'}), 400
+        
+        # Try to connect to MT5 for Exness
+        try:
+            import MetaTrader5 as mt5
+            
+            # Initialize MT5
+            if not mt5.initialize():
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to initialize MT5',
+                    'detail': 'MT5 terminal may not be installed or running'
+                }), 500
+            
+            # Login to Exness account
+            try:
+                account_id_int = int(account_id)
+            except ValueError:
+                return jsonify({'success': False, 'error': 'accountId must be numeric'}), 400
+            
+            login_result = mt5.login(account_id_int, password=password, server=server)
+            
+            if not login_result:
+                error_msg = mt5.last_error()
+                logger.warning(f"⚠️ Exness login failed for account {account_id}: {error_msg}")
+                mt5.shutdown()
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to login to Exness account',
+                    'detail': f'Check account ID, password, and server name. Server must be "{server}"'
+                }), 401
+            
+            # Get account info
+            account_info = mt5.account_info()
+            if not account_info:
+                mt5.shutdown()
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to retrieve account info from MT5'
+                }), 500
+            
+            # Generate session token
+            session_token = generate_exness_session_token()
+            
+            logger.info(f"✅ Exness login successful for account {account_id}")
+            
+            return jsonify({
+                'success': True,
+                'session_token': session_token,
+                'account_id': account_id,
+                'account_type': 'LIVE' if is_live else 'DEMO',
+                'balance': account_info.balance,
+                'currency': account_info.currency,
+                'leverage': account_info.leverage,
+                'server': server,
+            }), 200
+            
+        except ImportError:
+            return jsonify({
+                'success': False,
+                'error': 'MetaTrader5 SDK not installed',
+                'detail': 'Install: pip install MetaTrader5>=5.0.45'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in Exness login: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/logout', methods=['POST'])
+def exness_logout():
+    """Logout from Exness (cleanup session)"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token:
+            return jsonify({'success': False, 'error': 'No session token provided'}), 401
+        
+        # Close MT5 connection
+        try:
+            import MetaTrader5 as mt5
+            mt5.shutdown()
+        except:
+            pass
+        
+        logger.info(f"✅ Exness session ended")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Logged out from Exness'
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in Exness logout: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/account', methods=['GET'])
+def exness_account_info():
+    """Get Exness account information"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if not mt5.initialize():
+                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            
+            account_info = mt5.account_info()
+            if not account_info:
+                return jsonify({'success': False, 'error': 'Failed to get account info'}), 500
+            
+            return jsonify({
+                'success': True,
+                'account': {
+                    'accountId': account_info.login,
+                    'balance': account_info.balance,
+                    'equity': account_info.equity,
+                    'margin': account_info.margin,
+                    'marginFree': account_info.margin_free,
+                    'marginLevel': account_info.margin_level if account_info.margin > 0 else 0,
+                    'currency': account_info.currency,
+                    'leverage': account_info.leverage,
+                    'profitLoss': account_info.equity - account_info.balance,
+                }
+            }), 200
+            
+        except ImportError:
+            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting Exness account info: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/trade', methods=['POST'])
+def exness_place_trade():
+    """Place order on Exness MT5 account"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        data = request.json or {}
+        symbol = (data.get('symbol') or '').upper()
+        side = (data.get('side') or 'BUY').upper()
+        volume = float(data.get('volume', 0.1))
+        stop_loss = data.get('stopLoss') or data.get('stop_loss')
+        take_profit = data.get('takeProfit') or data.get('take_profit')
+        
+        if not symbol or side not in ['BUY', 'SELL']:
+            return jsonify({'success': False, 'error': 'symbol and side (BUY/SELL) required'}), 400
+        
+        if volume <= 0:
+            return jsonify({'success': False, 'error': 'volume must be positive'}), 400
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if not mt5.initialize():
+                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            
+            # Select symbol
+            if not mt5.symbol_select(symbol, True):
+                return jsonify({
+                    'success': False,
+                    'error': f'Symbol {symbol} not available on Exness'
+                }), 400
+            
+            # Get tick for price
+            tick = mt5.symbol_info_tick(symbol)
+            if not tick:
+                return jsonify({
+                    'success': False,
+                    'error': f'Cannot get market data for {symbol}'
+                }), 500
+            
+            price = tick.ask if side == 'BUY' else tick.bid
+            
+            # Build order request
+            request_dict = {
+                'action': mt5.TRADE_ACTION_DEAL,
+                'symbol': symbol,
+                'volume': volume,
+                'type': mt5.ORDER_TYPE_BUY if side == 'BUY' else mt5.ORDER_TYPE_SELL,
+                'price': price,
+                'comment': 'Exness Order',
+                'type_time': mt5.ORDER_TIME_GTC,
+                'type_filling': mt5.ORDER_FILLING_FOK,
+            }
+            
+            if stop_loss:
+                request_dict['sl'] = float(stop_loss)
+            if take_profit:
+                request_dict['tp'] = float(take_profit)
+            
+            # Send order
+            result = mt5.order_send(request_dict)
+            
+            if result is None:
+                return jsonify({
+                    'success': False,
+                    'error': 'Order submission failed - terminal disconnected'
+                }), 500
+            
+            if result.retcode != mt5.TRADE_RETCODE_DONE:
+                return jsonify({
+                    'success': False,
+                    'error': f'Order failed: {result.comment}',
+                    'retcode': result.retcode
+                }), 400
+            
+            logger.info(f"✅ Exness order placed: {symbol} {side} {volume}L")
+            
+            return jsonify({
+                'success': True,
+                'orderId': result.order,
+                'symbol': symbol,
+                'side': side,
+                'volume': volume,
+                'price': price,
+                'commission': result.comment if hasattr(result, 'comment') else 0,
+            }), 201
+            
+        except ImportError:
+            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error placing Exness trade: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/orders', methods=['GET'])
+def exness_get_orders():
+    """Get open orders/positions from Exness account"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if not mt5.initialize():
+                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            
+            # Get open positions
+            positions = mt5.positions_get()
+            if positions is None:
+                positions = []
+            
+            orders = []
+            for pos in positions:
+                orders.append({
+                    'orderId': pos.ticket,
+                    'symbol': pos.symbol,
+                    'side': 'BUY' if pos.type == mt5.ORDER_TYPE_BUY else 'SELL',
+                    'volume': pos.volume,
+                    'openPrice': pos.price_open,
+                    'currentPrice': pos.price_current,
+                    'profit': pos.profit,
+                    'profitPercent': (pos.profit / (pos.price_open * pos.volume)) * 100 if pos.price_open > 0 else 0,
+                    'openTime': datetime.fromtimestamp(pos.time).isoformat(),
+                })
+            
+            logger.info(f"✅ Retrieved {len(orders)} open orders from Exness")
+            
+            return jsonify({
+                'success': True,
+                'orders': orders,
+                'count': len(orders)
+            }), 200
+            
+        except ImportError:
+            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting Exness orders: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/orders/<order_id>/close', methods=['POST'])
+def exness_close_order(order_id):
+    """Close a specific order/position on Exness"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        try:
+            order_id_int = int(order_id)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Invalid order ID'}), 400
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if not mt5.initialize():
+                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            
+            # Get position
+            position = mt5.positions_get(ticket=order_id_int)
+            if not position:
+                return jsonify({'success': False, 'error': 'Position not found'}), 404
+            
+            pos = position[0]
+            
+            # Build close order request
+            close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+            
+            # Get current price
+            tick = mt5.symbol_info_tick(pos.symbol)
+            price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
+            
+            request_dict = {
+                'action': mt5.TRADE_ACTION_DEAL,
+                'symbol': pos.symbol,
+                'volume': pos.volume,
+                'type': close_type,
+                'position': order_id_int,
+                'price': price,
+                'comment': 'Position Closed',
+                'type_time': mt5.ORDER_TIME_GTC,
+                'type_filling': mt5.ORDER_FILLING_FOK,
+            }
+            
+            result = mt5.order_send(request_dict)
+            
+            if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to close position'
+                }), 500
+            
+            logger.info(f"✅ Exness position {order_id} closed successfully")
+            
+            return jsonify({
+                'success': True,
+                'orderId': order_id,
+                'message': 'Position closed'
+            }), 200
+            
+        except ImportError:
+            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error closing Exness order: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/orders/<order_id>', methods=['PATCH'])
+def exness_update_order(order_id):
+    """Update stop loss and take profit for Exness order"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        data = request.json or {}
+        new_sl = data.get('stopLoss') or data.get('stop_loss')
+        new_tp = data.get('takeProfit') or data.get('take_profit')
+        
+        if not new_sl and not new_tp:
+            return jsonify({'success': False, 'error': 'stopLoss or takeProfit required'}), 400
+        
+        try:
+            order_id_int = int(order_id)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Invalid order ID'}), 400
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if not mt5.initialize():
+                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            
+            # Get position
+            position = mt5.positions_get(ticket=order_id_int)
+            if not position:
+                return jsonify({'success': False, 'error': 'Position not found'}), 404
+            
+            pos = position[0]
+            
+            # Build modify request
+            request_dict = {
+                'action': mt5.TRADE_ACTION_SLTP,
+                'position': order_id_int,
+                'sl': float(new_sl) if new_sl else pos.sl,
+                'tp': float(new_tp) if new_tp else pos.tp,
+            }
+            
+            result = mt5.order_send(request_dict)
+            
+            if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to update position'
+                }), 500
+            
+            logger.info(f"✅ Exness position {order_id} updated: SL={new_sl}, TP={new_tp}")
+            
+            return jsonify({
+                'success': True,
+                'orderId': order_id,
+                'stopLoss': new_sl,
+                'takeProfit': new_tp,
+                'message': 'Position updated'
+            }), 200
+            
+        except ImportError:
+            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error updating Exness order: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/symbols/<symbol>', methods=['GET'])
+def exness_symbol_info(symbol):
+    """Get symbol information and current market data from Exness"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        symbol = symbol.upper()
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if not mt5.initialize():
+                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            
+            # Get symbol info
+            symbol_info = mt5.symbol_info(symbol)
+            if not symbol_info:
+                return jsonify({
+                    'success': False,
+                    'error': f'Symbol {symbol} not found on Exness'
+                }), 404
+            
+            # Get tick data
+            tick = mt5.symbol_info_tick(symbol)
+            if not tick:
+                return jsonify({
+                    'success': False,
+                    'error': f'Cannot get market data for {symbol}'
+                }), 500
+            
+            return jsonify({
+                'success': True,
+                'symbol': symbol,
+                'bid': tick.bid,
+                'ask': tick.ask,
+                'spread': tick.ask - tick.bid,
+                'minSize': symbol_info.volume_min,
+                'maxSize': symbol_info.volume_max,
+                'stepSize': symbol_info.volume_step,
+                'tradable': symbol_info.trade_mode != mt5.SYMBOL_TRADE_MODE_DISABLED,
+                'lastUpdate': datetime.fromtimestamp(tick.time).isoformat(),
+            }), 200
+            
+        except ImportError:
+            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting Exness symbol info: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/symbols', methods=['GET'])
+def exness_available_symbols():
+    """Get list of all available symbols on Exness"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not session_token or not session_token.startswith('exness_'):
+            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        
+        symbols = get_exness_available_symbols()
+        
+        logger.info(f"✅ Retrieved {len(symbols)} available symbols from Exness")
+        
+        return jsonify({
+            'success': True,
+            'symbols': symbols,
+            'count': len(symbols)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting Exness symbols: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def shutdown_backup():
     """Create final backup before shutdown"""
     logger.info("🛑 Creating final backup on shutdown...")
