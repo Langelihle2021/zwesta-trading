@@ -532,5 +532,11 @@ class BotService extends ChangeNotifier {
     );
     notifyListeners();
   }
+
+  /// Remove a bot from the active bots list locally
+  void removeBotLocally(String botId) {
+    _activeBots.removeWhere((bot) => (bot['botId'] ?? bot['id']) == botId);
+    notifyListeners();
+  }
 }
 

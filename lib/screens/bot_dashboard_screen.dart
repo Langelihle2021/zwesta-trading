@@ -498,8 +498,40 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      onTap: () {
-                        // TODO: Implement delete logic
+                      onTap: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: Text('Delete $botId?', style: const TextStyle(color: Colors.white)),
+                            backgroundColor: const Color(0xFF0A0E21),
+                            content: const Text(
+                              'This action cannot be undone.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: Text('Delete', style: GoogleFonts.poppins(color: Colors.red)),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed != true) return;
+                        final botService = context.read<BotService>();
+                        botService.removeBotLocally(botId);
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('✓ $botId deleted'),
+                            backgroundColor: Colors.red,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                        setState(() {});
                       },
                       borderRadius: BorderRadius.circular(12),
                       child: Padding(
@@ -887,14 +919,17 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         ),
                       );
                       if (confirmed != true) return;
-                      // TODO: Implement delete bot functionality
+                      final botService = context.read<BotService>();
+                      botService.removeBotLocally(botId);
                       if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('$botId deleted'),
+                          content: Text('✓ $botId deleted'),
                           backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 2),
                         ),
                       );
+                      setState(() {});
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 12),
