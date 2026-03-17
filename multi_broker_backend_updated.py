@@ -788,6 +788,80 @@ def init_database():
         except Exception as e:
             logger.debug(f"username column might already exist: {e}")
     
+    # Trading symbols management table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trading_symbols (
+            symbol_id TEXT PRIMARY KEY,
+            symbol TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            symbol_type TEXT NOT NULL,
+            broker TEXT,
+            min_price REAL,
+            max_price REAL,
+            is_active BOOLEAN DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    ''')
+    
+    # Bot strategies configuration table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_strategies (
+            strategy_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            bot_id TEXT,
+            strategy_name TEXT NOT NULL,
+            description TEXT,
+            strategy_type TEXT,
+            parameters TEXT,
+            symbols TEXT,
+            risk_level TEXT,
+            profit_target REAL,
+            stop_loss REAL,
+            is_active BOOLEAN DEFAULT 1,
+            performance_stats TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # User accounts management table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_accounts (
+            account_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            account_type TEXT,
+            broker TEXT,
+            account_number TEXT,
+            account_balance REAL DEFAULT 0,
+            available_balance REAL DEFAULT 0,
+            total_profit REAL DEFAULT 0,
+            is_primary BOOLEAN DEFAULT 0,
+            is_verified BOOLEAN DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # User trading settings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_trading_settings (
+            setting_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            risk_profile TEXT,
+            daily_loss_limit REAL,
+            max_position_size REAL,
+            leverage INTEGER DEFAULT 1,
+            auto_trade_enabled BOOLEAN DEFAULT 0,
+            notifications_enabled BOOLEAN DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -3727,6 +3801,381 @@ def list_brokers():
         },
     ]
     return jsonify({'brokers': brokers})
+
+
+# ==================== SYMBOL MANAGEMENT ====================
+
+@app.route('/api/symbols', methods=['GET'])
+@require_api_key
+def list_symbols():
+    """List all available trading symbols"""
+    try:
+        symbol_type = request.args.get('type')  # Filter by type (Forex, Crypto, Commodity, etc.)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if symbol_type:
+            cursor.execute('''
+                SELECT * FROM trading_symbols 
+                WHERE is_active = 1 AND symbol_type = ?
+                ORDER BY symbol
+            ''', (symbol_type,))
+        else:
+            cursor.execute('''
+                SELECT * FROM trading_symbols 
+                WHERE is_active = 1
+                ORDER BY symbol_type, symbol
+            ''')
+        
+        symbols = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'symbols': symbols,
+            'total': len(symbols)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error listing symbols: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/symbols/add', methods=['POST'])
+@require_api_key
+def add_symbol():
+    """Add a new trading symbol"""
+    try:
+        data = request.get_json()
+        symbol_id = str(uuid.uuid4())
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO trading_symbols 
+            (symbol_id, symbol, name, symbol_type, broker, min_price, max_price, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            symbol_id,
+            data.get('symbol').upper(),
+            data.get('name'),
+            data.get('symbol_type'),
+            data.get('broker'),
+            data.get('min_price'),
+            data.get('max_price'),
+            datetime.now().isoformat(),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Symbol added: {data.get('symbol')}")
+        
+        return jsonify({
+            'success': True,
+            'symbol_id': symbol_id,
+            'message': f"Symbol {data.get('symbol')} added successfully"
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error adding symbol: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/symbols/<symbol_id>', methods=['DELETE'])
+@require_api_key
+def delete_symbol(symbol_id):
+    """Delete a trading symbol"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('UPDATE trading_symbols SET is_active = 0 WHERE symbol_id = ?', (symbol_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Symbol deleted: {symbol_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Symbol deleted successfully'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error deleting symbol: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== USER MANAGEMENT ====================
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_api_key
+def list_users():
+    """List all users (admin only)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, email, name, referral_code, total_commission, created_at 
+            FROM users 
+            ORDER BY created_at DESC
+        ''')
+        
+        users = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'users': users,
+            'total': len(users)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/create', methods=['POST'])
+@require_api_key
+def create_user():
+    """Create a new user"""
+    try:
+        data = request.get_json()
+        user_id = str(uuid.uuid4())
+        referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO users 
+            (user_id, email, name, referral_code, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            user_id,
+            data.get('email'),
+            data.get('name'),
+            referral_code,
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ User created: {data.get('email')}")
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'referral_code': referral_code,
+            'message': f"User {data.get('name')} created successfully"
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<user_id>', methods=['GET'])
+@require_api_key
+def get_user(user_id):
+    """Get user details"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+        user = dict(cursor.fetchone() or {})
+        
+        # Get user accounts
+        cursor.execute('SELECT * FROM user_accounts WHERE user_id = ?', (user_id,))
+        accounts = [dict(row) for row in cursor.fetchall()]
+        
+        # Get user trading settings
+        cursor.execute('SELECT * FROM user_trading_settings WHERE user_id = ?', (user_id,))
+        settings = dict(cursor.fetchone() or {})
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'user': user,
+            'accounts': accounts,
+            'settings': settings
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== BOT STRATEGY MANAGEMENT ====================
+
+@app.route('/api/strategies', methods=['GET'])
+@require_api_key
+def list_strategies():
+    """List all bot strategies for user"""
+    try:
+        user_id = request.headers.get('X-User-ID', 'default_user')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM bot_strategies 
+            WHERE user_id = ? AND is_active = 1
+            ORDER BY created_at DESC
+        ''', (user_id,))
+        
+        strategies = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'strategies': strategies,
+            'total': len(strategies)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error listing strategies: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/strategies/create', methods=['POST'])
+@require_api_key
+def create_strategy():
+    """Create a new bot strategy"""
+    try:
+        data = request.get_json()
+        user_id = request.headers.get('X-User-ID', 'default_user')
+        strategy_id = str(uuid.uuid4())
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO bot_strategies 
+            (strategy_id, user_id, strategy_name, description, strategy_type, 
+             parameters, symbols, risk_level, profit_target, stop_loss, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            strategy_id,
+            user_id,
+            data.get('strategy_name'),
+            data.get('description'),
+            data.get('strategy_type'),  # 'TREND_FOLLOW', 'MEAN_REVERSION', 'SCALPING', etc.
+            json.dumps(data.get('parameters', {})),
+            json.dumps(data.get('symbols', [])),
+            data.get('risk_level'),  # 'LOW', 'MEDIUM', 'HIGH'
+            data.get('profit_target'),
+            data.get('stop_loss'),
+            datetime.now().isoformat(),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Strategy created: {data.get('strategy_name')} for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'strategy_id': strategy_id,
+            'message': f"Strategy {data.get('strategy_name')} created successfully"
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Error creating strategy: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/strategies/<strategy_id>', methods=['PUT'])
+@require_api_key
+def update_strategy(strategy_id):
+    """Update a bot strategy"""
+    try:
+        data = request.get_json()
+        user_id = request.headers.get('X-User-ID', 'default_user')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE bot_strategies 
+            SET 
+                strategy_name = ?,
+                description = ?,
+                strategy_type = ?,
+                parameters = ?,
+                symbols = ?,
+                risk_level = ?,
+                profit_target = ?,
+                stop_loss = ?,
+                updated_at = ?
+            WHERE strategy_id = ? AND user_id = ?
+        ''', (
+            data.get('strategy_name'),
+            data.get('description'),
+            data.get('strategy_type'),
+            json.dumps(data.get('parameters', {})),
+            json.dumps(data.get('symbols', [])),
+            data.get('risk_level'),
+            data.get('profit_target'),
+            data.get('stop_loss'),
+            datetime.now().isoformat(),
+            strategy_id,
+            user_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Strategy updated: {strategy_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Strategy updated successfully'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error updating strategy: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/strategies/<strategy_id>', methods=['DELETE'])
+@require_api_key
+def delete_strategy(strategy_id):
+    """Delete a bot strategy"""
+    try:
+        user_id = request.headers.get('X-User-ID', 'default_user')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE bot_strategies 
+            SET is_active = 0 
+            WHERE strategy_id = ? AND user_id = ?
+        ''', (strategy_id, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Strategy deleted: {strategy_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Strategy deleted successfully'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error deleting strategy: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ==================== DEMO/LIVE MODE SWITCHING ====================
