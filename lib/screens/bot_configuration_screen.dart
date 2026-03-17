@@ -579,22 +579,18 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'drawdownPausePercent': double.tryParse(_drawdownPauseController.text) ?? 0.0,
         'allowedVolatility': _allowedVolatility,
         'enabled': true,
-        
-        // Add withdrawal settings
-        if (_enableAutoWithdrawal) ...[
-          'autoWithdrawal': {
-            'enabled': true,
-            'withdrawalMode': _withdrawalMode,
-            if (_withdrawalMode == 'fixed') 'targetProfit': _targetProfit,
-            if (_withdrawalMode == 'intelligent') ...[
-              'minProfit': _minProfit,
-              'maxProfit': _maxProfit,
-              'winRateMin': _winRateMin,
-            ],
-          }
-        ] else ...[
-          'autoWithdrawal': {'enabled': false}
-        ]
+        'autoWithdrawal': _enableAutoWithdrawal ? {
+          'enabled': true,
+          'withdrawalMode': _withdrawalMode,
+          if (_withdrawalMode == 'fixed') 'targetProfit': _targetProfit,
+          if (_withdrawalMode == 'intelligent') ...{
+            'minProfit': _minProfit,
+            'maxProfit': _maxProfit,
+            'winRateMin': _winRateMin,
+          },
+        } : {
+          'enabled': false,
+        },
       };
       
       final createResponse = await http.post(
