@@ -139,25 +139,42 @@ def find_mt5_path():
     logger.warning("MT5 not found in common paths - will use simulated trading as fallback")
     return None  # Return None instead of default fallback
 
+# Exness MT5 Configuration (Default)
 MT5_CONFIG = {
-    'account': 104254514,
-    'password': 'OoO*EdV2',
-    'server': 'MetaQuotes-Demo',
-    'path': find_mt5_path()
+    'account': 298997455,  # Exness MT5 Trial account
+    'password': 'Zwesta@1985',
+    'server': 'Exness-MT5Trial9',  # Exness demo server
+    'path': None  # Will auto-detect Exness terminal
 }
 
-# MT5 Credentials - LIVE (override with environment variables)
+# Try to find Exness terminal specifically
+if MT5_CONFIG['path'] is None:
+    # Check Exness paths first
+    exness_paths = [
+        r'C:\Program Files\Exness MT5\terminal64.exe',
+        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+        r'C:\MT5\Exness\terminal64.exe',
+    ]
+    for path in exness_paths:
+        if os.path.exists(path):
+            MT5_CONFIG['path'] = path
+            break
+    # Fallback to generic MT5 if Exness not found
+    if MT5_CONFIG['path'] is None:
+        MT5_CONFIG['path'] = find_mt5_path()
+
+# Exness Credentials - Allow override with environment variables (for other users)
 if ENVIRONMENT == 'LIVE':
     MT5_CONFIG = {
-        'account': int(os.getenv('MT5_ACCOUNT', '0')),
-        'password': os.getenv('MT5_PASSWORD', ''),
-        'server': os.getenv('MT5_SERVER', ''),
-        'path': os.getenv('MT5_PATH', find_mt5_path())
+        'account': int(os.getenv('EXNESS_ACCOUNT', '298997455')),
+        'password': os.getenv('EXNESS_PASSWORD', 'Zwesta@1985'),
+        'server': os.getenv('EXNESS_SERVER', 'Exness-MT5Trial9'),
+        'path': os.getenv('EXNESS_PATH', MT5_CONFIG.get('path'))
     }
     # Validate LIVE credentials
     if MT5_CONFIG['account'] == 0 or not MT5_CONFIG['password']:
-        logger.error("[ALERT] LIVE MODE: Missing MT5 credentials in environment variables!")
-        logger.error("Set: MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER")
+        logger.error("[ALERT] LIVE MODE: Missing Exness credentials in environment variables!")
+        logger.error("Set: EXNESS_ACCOUNT, EXNESS_PASSWORD, EXNESS_SERVER")
 
 # IG.com Broker Configuration
 IG_CONFIG = {
@@ -193,9 +210,9 @@ WITHDRAWAL_CONFIG = {
 
 logger.info(f"[INIT] Backend initialized in {ENVIRONMENT} mode")
 if ENVIRONMENT == 'LIVE':
-    logger.warning(f"[ALERT] LIVE TRADING MODE - Account: {MT5_CONFIG['account']}")
+    logger.warning(f"[ALERT] LIVE TRADING MODE - Exness Account: {MT5_CONFIG['account']}")
 else:
-    logger.info(f"[DEMO] DEMO MODE - Account: {MT5_CONFIG['account']}")
+    logger.info(f"[DEMO] DEMO MODE - Exness Account: {MT5_CONFIG['account']}")
 
 # ==================== API AUTHENTICATION ====================
 OWNER_USER_ID = 'SYSTEM_OWNER_USER_ID'  # TODO: Set your real owner user_id here
@@ -2892,32 +2909,32 @@ def canonicalize_broker_name(broker_name: str) -> str:
 
 
 def is_mt5_broker_name(broker_name: str) -> bool:
-    return canonicalize_broker_name(broker_name) in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']
+    return canonicalize_broker_name(broker_name) in ['Exness', 'MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']
 
 # ==================== IN-MEMORY STORAGE ====================
 # Store demo trades placed via API (temporary storage for this session)
 demo_trades_storage = {}
 
-# Auto-add default MT5 account with demo credentials
-logger.info("Initializing with MT5 demo account")
-broker_manager.add_connection('Default MT5', BrokerType.METATRADER5, MT5_CONFIG)
+# Auto-add default Exness MT5 account
+logger.info("Initializing with Exness MT5 account")
+broker_manager.add_connection('Exness MT5', BrokerType.METATRADER5, MT5_CONFIG)
 
 # Auto-add IG.com account with API credentials
 logger.info("Initializing with IG.com account")
 broker_manager.add_connection('IG Markets', BrokerType.IG, IG_CONFIG)
 
-# AUTO-CONNECT to MT5 on startup (so dashboard shows real balance)
+# AUTO-CONNECT to Exness MT5 on startup (so dashboard shows real balance)
 def auto_connect_mt5():
-    """Auto-connect to MT5 on startup"""
+    """Auto-connect to Exness MT5 on startup"""
     try:
-        connection = broker_manager.connections.get('Default MT5')
+        connection = broker_manager.connections.get('Exness MT5')
         if connection:
-            logger.info("🔗 Attempting auto-connect to MT5...")
+            logger.info("🔗 Attempting auto-connect to Exness MT5...")
             if connection.connect():
-                logger.info("✅ Auto-connected to MT5 successfully - balance will display on dashboard")
+                logger.info("✅ Auto-connected to Exness MT5 successfully - balance will display on dashboard")
                 return True
             else:
-                logger.warning("⚠️  Failed to auto-connect to MT5 - will use simulated trading, dashboard will show $0 balance")
+                logger.warning("⚠️  Failed to auto-connect to Exness MT5 - will use simulated trading, dashboard will show $0 balance")
                 return False
     except Exception as e:
         logger.warning(f"⚠️  Error auto-connecting to MT5: {e} - will use simulated trading")
@@ -5366,13 +5383,13 @@ def get_live_prices_from_mt5():
     global previous_prices
     
     try:
-        mt5_connection = broker_manager.connections.get('Default MT5')
+        mt5_connection = broker_manager.connections.get('Exness MT5')
         if not mt5_connection:
-            logger.debug("❌ MT5 connection not found in broker_manager")
+            logger.debug("❌ Exness MT5 connection not found in broker_manager")
             return None
         
         if not mt5_connection.connected:
-            logger.debug("❌ MT5 connection exists but not connected")
+            logger.debug("❌ Exness MT5 connection exists but not connected")
             return None
         
         live_prices = {}
