@@ -122,6 +122,12 @@ class BrokerConnectionService {
       }
 
       // Call backend API with session token and is_live flag
+      // Exness MT5 requires longer timeout due to terminal launch & initialization
+      final isExness = normalizedBroker.contains('exness');
+      final timeout = isExness 
+          ? const Duration(seconds: 60)  // Exness needs more time for MT5 terminal
+          : const Duration(seconds: 45); // Other brokers need reasonable time
+      
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
         headers: {
@@ -129,7 +135,7 @@ class BrokerConnectionService {
           'X-Session-Token': sessionToken,
         },
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(timeout);
 
       print('📥 Backend response: ${response.statusCode}');
       print('   Body: ${response.body}');

@@ -246,6 +246,17 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
     setState(() => _isTestingConnection = true);
 
+    // Show loading message with context about Exness delays
+    if (_isExnessBroker) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('🔌 Testing Exness connection... (may take 30-60 seconds)'),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.blue.withOpacity(0.7),
+        ),
+      );
+    }
+
     try {
       final result = await BrokerConnectionService.testConnection(
         broker: _selectedBroker,
