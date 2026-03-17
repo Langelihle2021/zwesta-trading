@@ -9,7 +9,6 @@ import '../models/trade.dart';
 import '../utils/constants.dart';
 import '../utils/environment_config.dart';
 import '../widgets/custom_widgets.dart';
-import '../widgets/logo_widget.dart';
 import 'broker_integration_screen.dart';
 
 class TradesScreen extends StatefulWidget {

@@ -695,7 +695,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           children: [
             const LogoWidget(size: 40, showText: false),
             const SizedBox(width: 12),
-            const Text('Bot Configuration'),
+            const Expanded(
+              child: Text('Bot Configuration'),
+            ),
           ],
         ),
         backgroundColor: Colors.grey[900],

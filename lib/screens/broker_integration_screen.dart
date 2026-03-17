@@ -126,6 +126,18 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   }
 
   void _saveCredentials() async {
+    // Require test connection before saving
+    if (!_isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ Must test connection before saving'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     final missingMt5 = _isMt5Broker && (_accountController.text.isEmpty || _passwordController.text.isEmpty);
     final missingIg = _isIgBroker && (_apiKeyController.text.isEmpty || _usernameController.text.isEmpty || _passwordController.text.isEmpty || _accountController.text.isEmpty);
     final missingBinance = _isBinanceBroker && (_apiKeyController.text.isEmpty || _passwordController.text.isEmpty);
@@ -170,7 +182,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   /// Check if Exness is available on the backend
   Future<Map<String, dynamic>> _checkExnessAvailability() async {
     try {
-      final baseUrl = 'http://localhost:5000'; // or your backend URL
+      final baseUrl = EnvironmentConfig.apiUrl;
       final response = await http.get(
         Uri.parse('$baseUrl/api/brokers/check-exness'),
       ).timeout(const Duration(seconds: 5));
