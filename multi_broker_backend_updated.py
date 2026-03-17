@@ -3729,6 +3729,95 @@ def list_brokers():
     return jsonify({'brokers': brokers})
 
 
+# ==================== DEMO/LIVE MODE SWITCHING ====================
+
+@app.route('/api/user/trading-mode', methods=['GET'])
+@require_api_key
+def get_trading_mode():
+    """Get user's current trading mode (DEMO or LIVE)"""
+    try:
+        user_id = request.headers.get('X-User-ID', 'default_user')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if trading_mode exists in user preferences
+        cursor.execute('''
+            SELECT trading_mode FROM user_preferences 
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        result = cursor.fetchone()
+        mode = result['trading_mode'] if result else 'DEMO'
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'mode': mode,
+            'user_id': user_id
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting trading mode: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/switch-mode', methods=['POST'])
+@require_api_key
+def switch_trading_mode():
+    """Switch between DEMO and LIVE trading modes"""
+    try:
+        data = request.get_json()
+        user_id = request.headers.get('X-User-ID', 'default_user')
+        mode = data.get('mode', 'DEMO').upper()
+        
+        if mode not in ['DEMO', 'LIVE']:
+            return jsonify({'success': False, 'error': 'Invalid mode. Use DEMO or LIVE'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Create user_preferences table if it doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id TEXT PRIMARY KEY,
+                trading_mode TEXT DEFAULT 'DEMO',
+                live_account TEXT,
+                live_server TEXT,
+                updated_at TEXT
+            )
+        ''')
+        
+        # Update or insert user preference
+        cursor.execute('''
+            INSERT OR REPLACE INTO user_preferences 
+            (user_id, trading_mode, live_account, live_server, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            user_id,
+            mode,
+            data.get('account') if mode == 'LIVE' else None,
+            data.get('server') if mode == 'LIVE' else None,
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ User {user_id} switched to {mode} trading mode")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Switched to {mode} trading mode',
+            'mode': mode,
+            'user_id': user_id
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error switching trading mode: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/accounts/add', methods=['POST'])
 def add_account():
     """Add a new trading account"""
