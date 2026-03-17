@@ -547,6 +547,53 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+
+    # Exness withdrawals table - tracks Exness MT5 profit withdrawals
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS exness_withdrawals (
+            withdrawal_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            broker_account_id TEXT NOT NULL,
+            withdrawal_type TEXT NOT NULL,
+            source_type TEXT,
+            profit_from_trades REAL DEFAULT 0,
+            commission_earned REAL DEFAULT 0,
+            total_amount REAL NOT NULL,
+            fee REAL DEFAULT 0,
+            net_amount REAL,
+            status TEXT DEFAULT 'pending',
+            withdrawal_method TEXT,
+            payment_details TEXT,
+            created_at TEXT,
+            submitted_at TEXT,
+            completed_at TEXT,
+            admin_notes TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
+    # Exness trade profits table - tracks profits from closed trades
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS exness_trade_profits (
+            profit_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            broker_account_id TEXT NOT NULL,
+            order_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            exit_price REAL NOT NULL,
+            volume REAL NOT NULL,
+            side TEXT,
+            profit_loss REAL NOT NULL,
+            commission REAL DEFAULT 0,
+            pnl_percentage REAL,
+            trade_duration_seconds INTEGER,
+            closed_at TEXT,
+            withdrawal_id TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            FOREIGN KEY (withdrawal_id) REFERENCES exness_withdrawals(withdrawal_id)
+        )
+    ''')
     
     # User sessions table - for authentication
     cursor.execute('''
@@ -10778,6 +10825,317 @@ def exness_available_symbols():
         
     except Exception as e:
         logger.error(f"Error getting Exness symbols: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/trade/closed', methods=['POST'])
+@require_api_key
+def record_exness_trade_profit():
+    """Record a closed trade profit for Exness (called when trade is closed)"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        broker_account_id = data.get('broker_account_id')
+        order_id = data.get('order_id')
+        symbol = data.get('symbol')
+        entry_price = data.get('entry_price')
+        exit_price = data.get('exit_price')
+        volume = data.get('volume')
+        side = data.get('side')  # 'BUY' or 'SELL'
+        profit_loss = data.get('profit_loss')
+        commission = data.get('commission', 0)
+        trade_duration_seconds = data.get('trade_duration_seconds')
+
+        if not all([user_id, broker_account_id, order_id, symbol, entry_price, exit_price, volume, profit_loss]):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        profit_id = str(uuid.uuid4())
+        closed_at = datetime.now().isoformat()
+        pnl_percentage = ((exit_price - entry_price) / entry_price * 100) if side == 'BUY' else ((entry_price - exit_price) / entry_price * 100)
+
+        cursor.execute('''
+            INSERT INTO exness_trade_profits
+            (profit_id, user_id, broker_account_id, order_id, symbol, entry_price, exit_price,
+             volume, side, profit_loss, commission, pnl_percentage, trade_duration_seconds, closed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            profit_id, user_id, broker_account_id, order_id, symbol, entry_price, exit_price,
+            volume, side, profit_loss, commission, pnl_percentage, trade_duration_seconds, closed_at
+        ))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"✅ Trade profit recorded: {symbol} P&L=${profit_loss} ({pnl_percentage:.2f}%)")
+
+        return jsonify({
+            'success': True,
+            'profit_id': profit_id,
+            'profit_loss': profit_loss,
+            'pnl_percentage': round(pnl_percentage, 2),
+            'message': 'Trade profit recorded'
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Error recording Exness trade profit: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== EXNESS WITHDRAWAL PIPELINE ====================
+
+@app.route('/api/broker/exness/withdrawal/request', methods=['POST'])
+@require_api_key
+def exness_withdrawal_request():
+    """Request profit withdrawal from Exness account"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        broker_account_id = data.get('broker_account_id')
+        withdrawal_type = data.get('withdrawal_type')  # 'profits', 'commission', 'both'
+        amount = data.get('amount')
+        withdrawal_method = data.get('withdrawal_method', 'bank_transfer')
+        payment_details = data.get('payment_details')
+
+        if not all([user_id, broker_account_id, withdrawal_type, amount]):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+
+        # Validate withdrawal type
+        if withdrawal_type not in ['profits', 'commission', 'both']:
+            return jsonify({'success': False, 'error': 'Invalid withdrawal type'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Calculate available amounts
+        cursor.execute('''
+            SELECT COALESCE(SUM(profit_loss), 0) as total_profits 
+            FROM exness_trade_profits 
+            WHERE user_id = ? AND broker_account_id = ? AND withdrawal_id IS NULL
+        ''', (user_id, broker_account_id))
+        
+        profit_row = cursor.fetchone()
+        available_profits = profit_row['total_profits'] if profit_row else 0
+
+        # Get commission earned
+        cursor.execute('''
+            SELECT COALESCE(SUM(commission_amount), 0) as total_commission 
+            FROM commissions 
+            WHERE earner_id = ? AND status = 'earned'
+        ''', (user_id,))
+        
+        commission_row = cursor.fetchone()
+        available_commission = commission_row['total_commission'] if commission_row else 0
+
+        # Validate amount based on type
+        if withdrawal_type == 'profits' and amount > available_profits:
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'error': f'Insufficient profit balance. Available: ${available_profits}'
+            }), 400
+
+        if withdrawal_type == 'commission' and amount > available_commission:
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'Insufficient commission balance. Available: ${available_commission}'
+            }), 400
+
+        if withdrawal_type == 'both' and amount > (available_profits + available_commission):
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'Insufficient combined balance. Available: ${available_profits + available_commission}'
+            }), 400
+
+        # Create withdrawal request
+        withdrawal_id = str(uuid.uuid4())
+        fee = amount * 0.01  # 1% withdrawal fee
+        net_amount = amount - fee
+        created_at = datetime.now().isoformat()
+
+        profit_from_trades = 0
+        commission_earned = 0
+
+        if withdrawal_type == 'profits':
+            profit_from_trades = amount
+        elif withdrawal_type == 'commission':
+            commission_earned = amount
+        else:  # both
+            profit_from_trades = available_profits
+            commission_earned = available_commission
+
+        cursor.execute('''
+            INSERT INTO exness_withdrawals
+            (withdrawal_id, user_id, broker_account_id, withdrawal_type, profit_from_trades,
+             commission_earned, total_amount, fee, net_amount, status, withdrawal_method,
+             payment_details, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            withdrawal_id, user_id, broker_account_id, withdrawal_type, profit_from_trades,
+            commission_earned, amount, fee, net_amount, 'pending', withdrawal_method,
+            payment_details, created_at
+        ))
+
+        # Link trade profits to withdrawal
+        if withdrawal_type in ['profits', 'both']:
+            cursor.execute('''
+                UPDATE exness_trade_profits 
+                SET withdrawal_id = ? 
+                WHERE user_id = ? AND broker_account_id = ? AND withdrawal_id IS NULL
+                LIMIT (SELECT COUNT(*) FROM exness_trade_profits 
+                       WHERE user_id = ? AND broker_account_id = ? AND withdrawal_id IS NULL)
+            ''', (withdrawal_id, user_id, broker_account_id, user_id, broker_account_id))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"✅ Exness withdrawal request {withdrawal_id}: User {user_id} - ${amount}")
+
+        return jsonify({
+            'success': True,
+            'withdrawal_id': withdrawal_id,
+            'amount': amount,
+            'fee': round(fee, 2),
+            'net_amount': round(net_amount, 2),
+            'status': 'pending',
+            'message': 'Withdrawal request submitted successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error requesting Exness withdrawal: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/withdrawal/history/<user_id>', methods=['GET'])
+def exness_withdrawal_history(user_id):
+    """Get Exness withdrawal history for user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM exness_withdrawals 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (user_id,))
+
+        withdrawals = cursor.fetchall()
+        conn.close()
+
+        withdrawal_list = []
+        for w in withdrawals:
+            withdrawal_list.append({
+                'withdrawal_id': w['withdrawal_id'],
+                'broker_account_id': w['broker_account_id'],
+                'withdrawal_type': w['withdrawal_type'],
+                'profit_from_trades': w['profit_from_trades'],
+                'commission_earned': w['commission_earned'],
+                'total_amount': w['total_amount'],
+                'fee': w['fee'],
+                'net_amount': w['net_amount'],
+                'status': w['status'],
+                'withdrawal_method': w['withdrawal_method'],
+                'created_at': w['created_at'],
+                'submitted_at': w['submitted_at'],
+                'completed_at': w['completed_at'],
+            })
+
+        return jsonify({
+            'success': True,
+            'withdrawals': withdrawal_list,
+            'count': len(withdrawal_list)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching Exness withdrawal history: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/withdrawal/status/<withdrawal_id>', methods=['GET'])
+def exness_withdrawal_status(withdrawal_id):
+    """Check withdrawal status"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM exness_withdrawals WHERE withdrawal_id = ?', (withdrawal_id,))
+        withdrawal = cursor.fetchone()
+        conn.close()
+
+        if not withdrawal:
+            return jsonify({'success': False, 'error': 'Withdrawal not found'}), 404
+
+        return jsonify({
+            'success': True,
+            'withdrawal_id': withdrawal['withdrawal_id'],
+            'status': withdrawal['status'],
+            'amount': withdrawal['total_amount'],
+            'net_amount': withdrawal['net_amount'],
+            'created_at': withdrawal['created_at'],
+            'submitted_at': withdrawal['submitted_at'],
+            'completed_at': withdrawal['completed_at'],
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting Exness withdrawal status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/balance/<user_id>', methods=['GET'])
+def exness_withdrawal_balance(user_id):
+    """Get available balance for withdrawal from Exness"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get profit from closed trades
+        cursor.execute('''
+            SELECT COALESCE(SUM(profit_loss), 0) as total_profits 
+            FROM exness_trade_profits 
+            WHERE user_id = ? AND withdrawal_id IS NULL
+        ''', (user_id,))
+        
+        profit_row = cursor.fetchone()
+        available_profits = profit_row['total_profits'] if profit_row else 0
+
+        # Get commission earned
+        cursor.execute('''
+            SELECT COALESCE(SUM(commission_amount), 0) as total_commission 
+            FROM commissions 
+            WHERE earner_id = ? AND status = 'earned'
+        ''', (user_id,))
+        
+        commission_row = cursor.fetchone()
+        available_commission = commission_row['total_commission'] if commission_row else 0
+
+        # Get pending/processing withdrawals
+        cursor.execute('''
+            SELECT COALESCE(SUM(total_amount), 0) as total_pending 
+            FROM exness_withdrawals 
+            WHERE user_id = ? AND status IN ('pending', 'submitted', 'processing')
+        ''', (user_id,))
+        
+        pending_row = cursor.fetchone()
+        pending_withdrawals = pending_row['total_pending'] if pending_row else 0
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'available_profits': round(available_profits, 2),
+            'available_commission': round(available_commission, 2),
+            'total_available': round(available_profits + available_commission, 2),
+            'pending_withdrawals': round(pending_withdrawals, 2),
+            'net_available': round(available_profits + available_commission - pending_withdrawals, 2),
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting Exness balance: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
