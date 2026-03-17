@@ -152,6 +152,7 @@ MT5_CONFIG = {
 if MT5_CONFIG['path'] is None:
     # Check Exness paths first
     exness_paths = [
+        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
         r'C:\Program Files\Exness MT5\terminal64.exe',
         r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
         r'C:\MT5\Exness\terminal64.exe',
@@ -11263,60 +11264,16 @@ if __name__ == '__main__':
     logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
     logger.info(f"MT5 Server: {MT5_CONFIG['server']}")
     
-    # LAUNCH MT5 PROCESS (required for IPC connections)
+    # SKIP TERMINAL LAUNCH - Connect to already-running Exness MT5 instance
+    # The user's Exness MT5 is already open and logged in, so we just connect to it
     logger.info("="*60)
-    logger.info("🚀 LAUNCHING MT5 TERMINAL...")
+    logger.info("🚀 Exness MT5 Terminal Check...")
     logger.info("="*60)
-    mt5_path = MT5_CONFIG.get('path')
-    if mt5_path and os.path.exists(mt5_path):
-        try:
-            account = MT5_CONFIG.get('account', '104017418')
-            password = MT5_CONFIG.get('password', '*6RjhRvH')
-            server = MT5_CONFIG.get('server', 'MetaQuotes-Demo')
-            
-            logger.info(f"Starting: {mt5_path}")
-            logger.info(f"   Account: {account}")
-            logger.info(f"   Server: {server}")
-            
-            # Kill any existing MT5 processes first
-            try:
-                import subprocess
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "terminal.exe"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "terminal64.exe"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                logger.info("  ↻ Cleaned up any existing MT5 processes")
-                time.sleep(2)  # Wait for cleanup
-            except:
-                pass
-            
-            # Launch fresh MT5 instance
-            subprocess.Popen(
-                [mt5_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            logger.info("  ✓ Process launched")
-            
-            # Wait for terminal to fully initialize (increased from 10 to 15 seconds)
-            logger.info("⏳ Waiting 15 seconds for MT5 terminal to fully initialize...")
-            for countdown in range(15, 0, -1):
-                if countdown % 3 == 0:
-                    logger.info(f"   {countdown}s remaining...")
-                time.sleep(1)
-            
-            logger.info("✅ MT5 terminal initialization complete - ready for SDK connections")
-        except Exception as e:
-            logger.warning(f"⚠️  Could not launch MT5: {e}")
-    else:
-        logger.warning("⚠️  MT5 path not found - will use simulated trading only")
+    logger.info(f"Looking for already-running Exness MT5 terminal...")
+    logger.info(f"   Account: {MT5_CONFIG.get('account', '298997455')}")
+    logger.info(f"   Server: {MT5_CONFIG.get('server', 'Exness-MT5Trial9')}")
+    logger.info("⚠️  Skipping terminal launch - attempting to connect to already-running terminal")
+    logger.info("✅ Ready to connect to running Exness MT5 instance")
     
     # AUTO-CONNECT to MT5 (so dashboard shows real account balance)
     # This will retry up to 3 times with increasing waits

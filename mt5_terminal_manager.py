@@ -45,6 +45,8 @@ def detect_broker_mt5_terminal(broker):
             r'C:\MT5\XMGlobal\terminal.exe',
         ],
         'Exness': [
+            r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+            r'C:\Program Files\MetaTrader 5 EXNESS\terminal.exe',
             r'C:\Program Files\Exness MT5\terminal64.exe',
             r'C:\Program Files\Exness MT5\terminal.exe',
             r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
