@@ -139,18 +139,17 @@ def find_mt5_path():
     logger.warning("MT5 not found in common paths - will use simulated trading as fallback")
     return None  # Return None instead of default fallback
 
-# Exness MT5 Configuration (Default)
+# Exness MT5 Configuration (Default - DEMO)
 MT5_CONFIG = {
-    'broker': 'Exness',  # Broker identifier for terminal manager
-    'account': 298997455,  # Exness MT5 Trial account
+    'broker': 'Exness',
+    'account': 298997455,  # Demo account
     'password': 'Zwesta@1985',
-    'server': 'Exness-MT5Trial9',  # Exness demo server
-    'path': None  # Will auto-detect Exness terminal
+    'server': 'Exness-MT5Trial9',  # Demo server
+    'path': None
 }
 
 # Try to find Exness terminal specifically
 if MT5_CONFIG['path'] is None:
-    # Check Exness paths first
     exness_paths = [
         r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
         r'C:\Program Files\Exness MT5\terminal64.exe',
@@ -161,23 +160,25 @@ if MT5_CONFIG['path'] is None:
         if os.path.exists(path):
             MT5_CONFIG['path'] = path
             break
-    # Fallback to generic MT5 if Exness not found
     if MT5_CONFIG['path'] is None:
         MT5_CONFIG['path'] = find_mt5_path()
 
-# Exness Credentials - Allow override with environment variables (for other users)
+# Exness Credentials - Support DEMO and LIVE modes
 if ENVIRONMENT == 'LIVE':
     MT5_CONFIG = {
-        'broker': 'Exness',  # Broker identifier for terminal manager
-        'account': int(os.getenv('EXNESS_ACCOUNT', '298997455')),
-        'password': os.getenv('EXNESS_PASSWORD', 'Zwesta@1985'),
-        'server': os.getenv('EXNESS_SERVER', 'Exness-MT5Trial9'),
+        'broker': 'Exness',
+        'account': int(os.getenv('EXNESS_ACCOUNT', '295619855')),  # Live account: 295619855
+        'password': os.getenv('EXNESS_PASSWORD', ''),  # Set via environment variable
+        'server': os.getenv('EXNESS_SERVER', 'Exness-Real'),  # Live server
         'path': os.getenv('EXNESS_PATH', MT5_CONFIG.get('path'))
     }
-    # Validate LIVE credentials
-    if MT5_CONFIG['account'] == 0 or not MT5_CONFIG['password']:
-        logger.error("[ALERT] LIVE MODE: Missing Exness credentials in environment variables!")
-        logger.error("Set: EXNESS_ACCOUNT, EXNESS_PASSWORD, EXNESS_SERVER")
+    if not MT5_CONFIG['password']:
+        logger.error("[ALERT] LIVE MODE: EXNESS_PASSWORD environment variable not set!")
+else:
+    # DEMO mode - uses default credentials above
+    logger.info(f"[DEMO] Using Exness demo credentials - Account: {MT5_CONFIG['account']}")
+    logger.info(f"[DEMO] Server: {MT5_CONFIG['server']}")
+    logger.info(f"[DEMO] Live account available at: 295619855 (set ENVIRONMENT=LIVE to use)")
 
 # IG.com Broker Configuration
 IG_CONFIG = {
@@ -215,7 +216,9 @@ logger.info(f"[INIT] Backend initialized in {ENVIRONMENT} mode")
 if ENVIRONMENT == 'LIVE':
     logger.warning(f"[ALERT] LIVE TRADING MODE - Exness Account: {MT5_CONFIG['account']}")
 else:
-    logger.info(f"[DEMO] DEMO MODE - Exness Account: {MT5_CONFIG['account']}")
+    logger.info(f"[DEMO] DEMO MODE - Exness Account: {MT5_CONFIG['account']} (Demo)")
+    logger.info(f"[DEMO] Available in DEMO: 298997455")
+    logger.info(f"[DEMO] Available in LIVE: 295619855")
 
 # ==================== API AUTHENTICATION ====================
 OWNER_USER_ID = 'SYSTEM_OWNER_USER_ID'  # TODO: Set your real owner user_id here
@@ -11264,16 +11267,69 @@ if __name__ == '__main__':
     logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
     logger.info(f"MT5 Server: {MT5_CONFIG['server']}")
     
-    # SKIP TERMINAL LAUNCH - Connect to already-running Exness MT5 instance
-    # The user's Exness MT5 is already open and logged in, so we just connect to it
+    # AUTO-LAUNCH & LOGIN Exness MT5 Terminal with credentials
     logger.info("="*60)
-    logger.info("🚀 Exness MT5 Terminal Check...")
+    logger.info("🚀 LAUNCHING EXNESS MT5 TERMINAL WITH AUTO-LOGIN...")
     logger.info("="*60)
-    logger.info(f"Looking for already-running Exness MT5 terminal...")
-    logger.info(f"   Account: {MT5_CONFIG.get('account', '298997455')}")
-    logger.info(f"   Server: {MT5_CONFIG.get('server', 'Exness-MT5Trial9')}")
-    logger.info("⚠️  Skipping terminal launch - attempting to connect to already-running terminal")
-    logger.info("✅ Ready to connect to running Exness MT5 instance")
+    
+    mt5_path = MT5_CONFIG.get('path')
+    account = MT5_CONFIG.get('account', '298997455')
+    password = MT5_CONFIG.get('password', 'Zwesta@1985')
+    server = MT5_CONFIG.get('server', 'Exness-MT5Trial9')
+    
+    logger.info(f"Terminal: {mt5_path}")
+    logger.info(f"Account: {account}")
+    logger.info(f"Server: {server}")
+    logger.info(f"Mode: {ENVIRONMENT.upper()}")
+    
+    if mt5_path and os.path.exists(mt5_path):
+        try:
+            # Kill any existing MT5 processes first
+            import subprocess
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "terminal.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "terminal64.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            logger.info("Cleaned up existing MT5 processes")
+            time.sleep(2)
+            
+            # Launch Exness MT5 with auto-login parameters
+            # Exness MT5 terminal supports: /account:LOGIN /password:PASS /server:SERVER
+            terminal_args = [
+                mt5_path,
+                f'/account:{account}',
+                f'/password:{password}',
+                f'/server:{server}'
+            ]
+            
+            logger.info(f"Launching: {' '.join(terminal_args[:1])} with login parameters...")
+            
+            subprocess.Popen(
+                terminal_args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            logger.info("✓ Terminal launched with auto-login credentials")
+            
+            # Wait for terminal to fully initialize and login
+            logger.info("⏳ Waiting 20 seconds for MT5 terminal to fully initialize and authenticate...")
+            for countdown in range(20, 0, -1):
+                if countdown % 5 == 0:
+                    logger.info(f"   {countdown}s remaining...")
+                time.sleep(1)
+            
+            logger.info("✅ MT5 terminal initialization complete - ready for SDK connections")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not launch MT5: {e}")
+    else:
+        logger.warning(f"⚠️  MT5 path not found: {mt5_path}")
     
     # AUTO-CONNECT to MT5 (so dashboard shows real account balance)
     # This will retry up to 3 times with increasing waits
