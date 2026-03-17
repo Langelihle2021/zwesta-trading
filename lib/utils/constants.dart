@@ -75,4 +75,23 @@ class AppConstants {
   static const String apiBaseUrl = 'https://api.zwesta-trading.com';
   static const Duration connectionTimeout = Duration(seconds: 30);
   static const Duration receiveTimeout = Duration(seconds: 30);
+
+  // ==================== EXNESS MT5 TRADING DEFAULTS ====================
+  /// Default Take Profit percentage for Exness MT5 trades
+  static const double exnessDefaultTakeProfitPercentage = 2.0;
+
+  /// Default Stop Loss percentage for Exness MT5 trades
+  static const double exnessDefaultStopLossPercentage = 1.0;
+
+  /// Minimum Take Profit percentage
+  static const double minTakeProfitPercentage = 0.5;
+
+  /// Maximum Take Profit percentage
+  static const double maxTakeProfitPercentage = 10.0;
+
+  /// Minimum Stop Loss percentage
+  static const double minStopLossPercentage = 0.1;
+
+  /// Maximum Stop Loss percentage
+  static const double maxStopLossPercentage = 5.0;
 }

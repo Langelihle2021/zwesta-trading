@@ -135,6 +135,13 @@ class ExnessTradingService {
 
   static const Duration _cacheValidityDuration = Duration(seconds: 30);
 
+  // ==================== SYSTEM DEFAULTS ====================
+  /// Default Take Profit percentage for Exness MT5 (2%)
+  static const double defaultTakeProfitPercentage = 2.0;
+
+  /// Default Stop Loss percentage for Exness MT5 (1%)
+  static const double defaultStopLossPercentage = 1.0;
+
   ExnessTradingService({
     required this.accountId,
     required this.password,
@@ -253,6 +260,24 @@ class ExnessTradingService {
 
   // ==================== TRADING ====================
 
+  /// Calculate Take Profit price from percentage
+  static double calculateTakeProfitPrice(double entryPrice, double tpPercentage, String side) {
+    if (side.toUpperCase() == 'BUY') {
+      return entryPrice * (1 + (tpPercentage / 100));
+    } else {
+      return entryPrice * (1 - (tpPercentage / 100));
+    }
+  }
+
+  /// Calculate Stop Loss price from percentage
+  static double calculateStopLossPrice(double entryPrice, double slPercentage, String side) {
+    if (side.toUpperCase() == 'BUY') {
+      return entryPrice * (1 - (slPercentage / 100));
+    } else {
+      return entryPrice * (1 + (slPercentage / 100));
+    }
+  }
+
   /// Place a buy or sell order
   Future<Map<String, dynamic>> placeOrder({
     required String symbol,
@@ -260,6 +285,8 @@ class ExnessTradingService {
     required double volume,
     double? stopLoss,
     double? takeProfit,
+    double? useTakeProfitPercentage, // Use system default if null
+    double? useStopLossPercentage, // Use system default if null
     String? comment,
   }) async {
     if (!isAuthenticated) {
@@ -270,6 +297,10 @@ class ExnessTradingService {
 
     try {
       print('📈 Placing ${side.toUpperCase()} order: $symbol | Volume: $volume');
+
+      // Use default percentages if not provided and absolute prices not provided
+      final finalTpPercentage = useTakeProfitPercentage ?? defaultTakeProfitPercentage;
+      final finalSlPercentage = useStopLossPercentage ?? defaultStopLossPercentage;
 
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/trade'),
@@ -283,13 +314,16 @@ class ExnessTradingService {
           'volume': volume,
           'stopLoss': stopLoss,
           'takeProfit': takeProfit,
-          'comment': comment,
+          'takeProfitPercentage': finalTpPercentage,
+          'stopLossPercentage': finalSlPercentage,
+          'comment': comment ?? 'Exness MT5 Trade',
         }),
       ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
         print('✅ Order placed successfully: ${data['orderId']}');
+        print('   TP%: $finalTpPercentage% | SL%: $finalSlPercentage%');
         return {
           'success': true,
           'orderId': data['orderId'],
@@ -313,12 +347,14 @@ class ExnessTradingService {
     }
   }
 
-  /// Buy order shortcut
+  /// Buy order shortcut (with system defaults for TP/SL)
   Future<Map<String, dynamic>> buy({
     required String symbol,
     required double volume,
     double? stopLoss,
     double? takeProfit,
+    double? takeProfitPercentage,
+    double? stopLossPercentage,
   }) =>
     placeOrder(
       symbol: symbol,
@@ -326,14 +362,18 @@ class ExnessTradingService {
       volume: volume,
       stopLoss: stopLoss,
       takeProfit: takeProfit,
+      useTakeProfitPercentage: takeProfitPercentage,
+      useStopLossPercentage: stopLossPercentage,
     );
 
-  /// Sell order shortcut
+  /// Sell order shortcut (with system defaults for TP/SL)
   Future<Map<String, dynamic>> sell({
     required String symbol,
     required double volume,
     double? stopLoss,
     double? takeProfit,
+    double? takeProfitPercentage,
+    double? stopLossPercentage,
   }) =>
     placeOrder(
       symbol: symbol,
@@ -341,6 +381,8 @@ class ExnessTradingService {
       volume: volume,
       stopLoss: stopLoss,
       takeProfit: takeProfit,
+      useTakeProfitPercentage: takeProfitPercentage,
+      useStopLossPercentage: stopLossPercentage,
     );
 
   // ==================== POSITION MANAGEMENT ====================
