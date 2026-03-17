@@ -583,11 +583,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           'enabled': true,
           'withdrawalMode': _withdrawalMode,
           if (_withdrawalMode == 'fixed') 'targetProfit': _targetProfit,
-          if (_withdrawalMode == 'intelligent') ...{
-            'minProfit': _minProfit,
-            'maxProfit': _maxProfit,
-            'winRateMin': _winRateMin,
-          },
+          if (_withdrawalMode == 'intelligent') 'minProfit': _minProfit,
+          if (_withdrawalMode == 'intelligent') 'maxProfit': _maxProfit,
+          if (_withdrawalMode == 'intelligent') 'winRateMin': _winRateMin,
         } : {
           'enabled': false,
         },
