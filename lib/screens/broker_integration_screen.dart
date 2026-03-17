@@ -8,6 +8,7 @@ import '../utils/constants.dart';
 import '../services/trading_service.dart';
 import '../services/broker_connection_service.dart';
 import '../services/connection_analytics_service.dart';
+import '../widgets/logo_widget.dart';
 import '../models/broker_connection_model.dart';
 import 'broker_analytics_dashboard.dart';
 
@@ -367,7 +368,13 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Broker Integration'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Broker Integration'),
+          ],
+        ),
         elevation: 0,
       ),
       body: SingleChildScrollView(

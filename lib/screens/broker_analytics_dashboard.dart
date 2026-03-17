@@ -3,6 +3,7 @@ import '../utils/constants.dart';
 import '../services/broker_connection_service.dart';
 import '../services/connection_analytics_service.dart';
 import '../models/broker_connection_model.dart';
+import '../widgets/logo_widget.dart';
 
 class BrokerAnalyticsDashboard extends StatefulWidget {
   final VoidCallback? onBackPressed;
@@ -56,7 +57,13 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
       length: 4,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Broker Analytics Dashboard'),
+          title: Row(
+            children: const [
+              LogoWidget(size: 40, showText: false),
+              SizedBox(width: 12),
+              Text('Broker Analytics Dashboard'),
+            ],
+          ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed:

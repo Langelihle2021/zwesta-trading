@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/logo_widget.dart';
 
 class SymbolManagementScreen extends StatefulWidget {
   const SymbolManagementScreen({Key? key}) : super(key: key);
@@ -241,7 +242,13 @@ class _SymbolManagementScreenState extends State<SymbolManagementScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Symbol Management'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Symbol Management'),
+          ],
+        ),
         backgroundColor: Colors.deepPurple,
         elevation: 0,
       ),

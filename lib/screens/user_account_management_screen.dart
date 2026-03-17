@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/logo_widget.dart';
 
 class UserAccountManagementScreen extends StatefulWidget {
   const UserAccountManagementScreen({Key? key}) : super(key: key);
@@ -257,7 +258,13 @@ class _UserAccountManagementScreenState extends State<UserAccountManagementScree
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('User Account Management'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('User Account Management'),
+          ],
+        ),
         backgroundColor: Colors.deepPurple,
         elevation: 0,
       ),

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/environment_config.dart';
+import '../widgets/logo_widget.dart';
 
 class CommissionConfigScreen extends StatefulWidget {
   const CommissionConfigScreen({Key? key}) : super(key: key);
@@ -142,8 +143,13 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
-        title: Text('Commission Config',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18)),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Commission Config'),
+          ],
+        ),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadConfig),
         ],

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/commission_service.dart';
+import '../widgets/logo_widget.dart';
 
 class CommissionDashboardScreen extends StatefulWidget {
   const CommissionDashboardScreen({Key? key}) : super(key: key);
@@ -25,7 +26,13 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
-        title: Text('Commissions', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Commissions'),
+          ],
+        ),
         backgroundColor: const Color(0xFF111633),
         elevation: 0,
       ),

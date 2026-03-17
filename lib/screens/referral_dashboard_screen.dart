@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../utils/environment_config.dart';
 import '../utils/constants.dart';
+import '../widgets/logo_widget.dart';
 
 class ReferralDashboardScreen extends StatefulWidget {
   final String userId;
@@ -398,7 +399,13 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Referral Program'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Referral Program'),
+          ],
+        ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
       ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../utils/environment_config.dart';
+import '../widgets/logo_widget.dart';
 
 class MultiAccountManagementScreen extends StatefulWidget {
   const MultiAccountManagementScreen({Key? key}) : super(key: key);
@@ -262,7 +263,13 @@ class _MultiAccountManagementScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Multi-Account Management'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Multi-Account Management'),
+          ],
+        ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
         centerTitle: false,

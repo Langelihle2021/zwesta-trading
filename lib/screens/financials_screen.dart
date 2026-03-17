@@ -5,6 +5,7 @@ import '../services/trading_service.dart';
 import '../models/account.dart';
 import '../models/financial_statement.dart';
 import '../utils/constants.dart';
+import '../widgets/logo_widget.dart';
 
 class FinancialsScreen extends StatefulWidget {
   final Account account;
@@ -69,7 +70,13 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Financial Analytics'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Financial Analytics'),
+          ],
+        ),
         backgroundColor: AppColors.primaryColor,
         elevation: 0,
       ),

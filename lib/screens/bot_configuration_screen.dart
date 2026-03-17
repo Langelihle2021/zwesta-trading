@@ -8,6 +8,7 @@ import '../utils/environment_config.dart';
 import '../services/broker_credentials_service.dart';
 import '../services/commission_service.dart';
 import '../services/fund_service.dart';
+import '../widgets/logo_widget.dart';
 import 'bot_dashboard_screen.dart';
 import 'broker_integration_screen.dart';
 
@@ -690,7 +691,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bot Configuration'),
+        title: Row(
+          children: [
+            const LogoWidget(size: 40, showText: false),
+            const SizedBox(width: 12),
+            const Text('Bot Configuration'),
+          ],
+        ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
         actions: [

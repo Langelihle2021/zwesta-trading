@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import '../services/api_service.dart';
+import '../widgets/logo_widget.dart';
 
 class BotStrategyConfigurationScreen extends StatefulWidget {
   const BotStrategyConfigurationScreen({Key? key}) : super(key: key);
@@ -465,7 +466,13 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bot Strategy Configuration'),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Bot Strategy Configuration'),
+          ],
+        ),
         backgroundColor: Colors.deepPurple,
         elevation: 0,
       ),

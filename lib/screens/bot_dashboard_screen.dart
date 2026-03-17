@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import '../services/bot_service.dart';
 import '../services/ig_trading_service.dart';
+import '../widgets/logo_widget.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
 

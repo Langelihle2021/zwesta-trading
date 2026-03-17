@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/unified_broker_service.dart';
+import '../widgets/logo_widget.dart';
 
 class UnifiedBrokerDashboardScreen extends StatefulWidget {
   const UnifiedBrokerDashboardScreen({Key? key}) : super(key: key);
@@ -93,7 +94,13 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
-        title: Text('Unified Portfolio', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18)),
+        title: Row(
+          children: const [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Unified Portfolio'),
+          ],
+        ),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: () { _loadPortfolio(); _loadPositions(); }),
         ],
