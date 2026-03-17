@@ -1150,6 +1150,11 @@ class MT5Connection(BrokerConnection):
             mt5_mgr_path = os.path.join(os.path.dirname(__file__), 'mt5_terminal_manager.py')
             if broker in ['Exness', 'MetaQuotes', 'XM', 'XM Global', 'MetaTrader 5'] and os.path.exists(mt5_mgr_path):
                 subprocess.Popen([sys.executable, mt5_mgr_path, broker])
+                # CRITICAL: Wait for terminal to fully initialize before SDK connection attempt
+                # This prevents IPC timeout errors during connection testing
+                logger.info(f"⏳ Waiting 15 seconds for {broker} MT5 terminal to fully initialize...")
+                time.sleep(15)
+                logger.info(f"✅ {broker} MT5 terminal initialization period complete - ready for SDK connection")
             else:
                 logger.info(f"[MT5 Terminal Manager] Skipping terminal launch for broker={broker}")
         except Exception as e:
