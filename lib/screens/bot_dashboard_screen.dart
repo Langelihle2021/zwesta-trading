@@ -142,18 +142,9 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Top 5 Newest Bots (horizontal scroll)
+                      // Top Newest Bots (full vertical cards - newest first)
                       if (top5.isNotEmpty) ...[
-                        Text('Newest Bots', style: GoogleFonts.poppins(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          height: 100,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: top5.length,
-                            itemBuilder: (_, i) => _buildMiniBot(top5[i]),
-                          ),
-                        ),
+                        ...top5.map((bot) => _buildNewestBotCard(bot)),
                         const SizedBox(height: 16),
                       ],
 
@@ -641,6 +632,331 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             fontWeight: FontWeight.w600,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildNewestBotCard(Map<String, dynamic> bot) {
+    final botId = bot['botId'] ?? 'Unknown';
+    final isEnabled = bot['enabled'] == true;
+    final status = (bot['status'] ?? (isEnabled ? 'ACTIVE' : 'INACTIVE')).toString().toUpperCase();
+    final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
+    final totalTrades = int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0;
+    final winRate = double.tryParse(bot['winRate']?.toString() ?? '0') ?? 0;
+    final roi = double.tryParse(bot['roi']?.toString() ?? '0') ?? 0;
+    final avgTrade = double.tryParse(bot['avgProfitPerTrade']?.toString() ?? '0') ?? 0;
+    final maxDrawdown = double.tryParse(bot['maxDrawdown']?.toString() ?? '0') ?? 0;
+    final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
+    final strategy = bot['strategy'] ?? 'Auto';
+    final symbolStr = symbols is List ? (symbols as List).join(', ') : symbols.toString();
+
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotAnalyticsScreen(bot: bot))),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1F3A),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+          boxShadow: [
+            BoxShadow(
+              color: isEnabled ? const Color(0xFF69F0AE).withOpacity(0.1) : Colors.black.withOpacity(0.2),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with bot ID and status
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        botId,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        strategy,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isEnabled
+                        ? const Color(0xFF69F0AE).withOpacity(0.2)
+                        : Colors.grey.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isEnabled
+                          ? const Color(0xFF69F0AE)
+                          : Colors.grey,
+                    ),
+                  ),
+                  child: Text(
+                    status,
+                    style: GoogleFonts.poppins(
+                      color: isEnabled
+                          ? const Color(0xFF69F0AE)
+                          : Colors.grey,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Symbol
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: Text(
+                symbolStr,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Running time and today's profit
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Running for',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white60,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      bot['runtimeFormatted'] ?? '0h 0m',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "Today's Profit",
+                      style: GoogleFonts.poppins(
+                        color: Colors.white60,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '\$${profit.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFF69F0AE),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Stats grid
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard('$totalTrades', 'Trades', const Color(0xFF00E5FF)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard('${winRate.toStringAsFixed(1)}%', 'Win Rate', const Color(0xFF69F0AE)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard('\$${profit.toStringAsFixed(2)}', 'Profit', 
+                    profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard('${roi.toStringAsFixed(1)}%', 'ROI', const Color(0xFFFFC107)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard('\$${avgTrade.toStringAsFixed(0)}', 'Avg/Trade', const Color(0xFF8B7FDC)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard('\$${maxDrawdown.toStringAsFixed(0)}', 'Max Drawdown', const Color(0xFFFF6B6B)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotAnalyticsScreen(bot: bot))),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00E5FF).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.bar_chart, color: Color(0xFF00E5FF), size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'View Analytics',
+                            style: GoogleFonts.poppins(
+                              color: const Color(0xFF00E5FF),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: Text('Delete $botId?', style: const TextStyle(color: Colors.white)),
+                          backgroundColor: const Color(0xFF0A0E21),
+                          content: const Text(
+                            'This action cannot be undone.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: Text('Delete', style: GoogleFonts.poppins(color: Colors.red)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed != true) return;
+                      // TODO: Implement delete bot functionality
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('$botId deleted'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.red.withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Delete',
+                            style: GoogleFonts.poppins(
+                              color: Colors.red,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String value, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            value,
+            style: GoogleFonts.poppins(
+              color: color,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              color: Colors.white60,
+              fontSize: 10,
+            ),
+          ),
+        ],
       ),
     );
   }

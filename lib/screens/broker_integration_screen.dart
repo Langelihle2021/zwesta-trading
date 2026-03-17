@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../utils/constants.dart';
 import '../services/trading_service.dart';
 import '../services/broker_connection_service.dart';
@@ -634,130 +635,180 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             ),
           ),
           const SizedBox(height: 32),
-          Card(
-            color: Colors.grey[900],
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _isConnected ? AppColors.successColor : Colors.orange,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _isConnected ? 'CONNECTED ✓' : 'Status: Not Connected',
-                        style: TextStyle(
-                          color: _isConnected ? AppColors.successColor : Colors.orange,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      if (_isConnected)
+          // Connection Status Card
+          Container(
+            margin: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1F3A),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _isConnected 
+                  ? AppColors.successColor.withOpacity(0.3)
+                  : Colors.orange.withOpacity(0.2),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: (_isConnected ? AppColors.successColor : Colors.orange).withOpacity(0.15),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Status header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          width: 14,
+                          height: 14,
+                          margin: const EdgeInsets.only(bottom: 2),
                           decoration: BoxDecoration(
-                            color: _isLiveMode ? Colors.red : Colors.orange,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _isLiveMode ? Icons.warning : Icons.school,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _isLiveMode ? 'LIVE' : 'DEMO',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
+                            shape: BoxShape.circle,
+                            color: _isConnected ? AppColors.successColor : Colors.orange,
+                            boxShadow: [
+                              BoxShadow(
+                                color: (_isConnected ? AppColors.successColor : Colors.orange).withOpacity(0.5),
+                                blurRadius: 8,
                               ),
                             ],
                           ),
                         ),
-                    ],
-                  ),
-                  if (_isConnected) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Bot Status: READY',
-                      style: TextStyle(color: AppColors.successColor, fontWeight: FontWeight.bold),
+                        const SizedBox(width: 10),
+                        Text(
+                          _isConnected ? 'CONNECTED ✓' : 'Status: Not Connected',
+                          style: GoogleFonts.poppins(
+                            color: _isConnected ? AppColors.successColor : Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.successColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(4),
+                    if (_isConnected)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _isLiveMode 
+                            ? Colors.red.withOpacity(0.25)
+                            : Colors.orange.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _isLiveMode ? Colors.red : Colors.orange,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isLiveMode ? Icons.warning : Icons.school,
+                              color: _isLiveMode ? Colors.red : Colors.orange,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _isLiveMode ? 'LIVE' : 'DEMO',
+                              style: GoogleFonts.poppins(
+                                color: _isLiveMode ? Colors.red : Colors.orange,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Live Scalping Activity:',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                          const SizedBox(height: 6),
-                          Text('Connected Account: ${_accountController.text}',
-                              style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                          const SizedBox(height: 6),
-                          Text('Last Connection: ${_lastConnectionTime?.toString().split('.')[0] ?? 'N/A'}',
-                              style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                          const SizedBox(height: 6),
-                          Text('Account Balance: \$${_accountBalance.toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Click "Test Connection" to validate credentials',
-                      style: TextStyle(fontSize: 12, color: Colors.white70),
-                    ),
                   ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (_isConnected)
-            Row(
-              children: [
-                Expanded(
-                  child: CheckboxListTile(
-                    title: const Text('Enable Auto-Reconnect', style: TextStyle(fontSize: 12)),
-                    value: _autoReconnectEnabled,
-                    onChanged: (bool? value) {
-                      if (value == true) {
-                        _startAutoReconnect();
-                      }
-                    },
-                    contentPadding: EdgeInsets.zero,
-                  ),
                 ),
+                if (_isConnected) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    'Bot Status: READY',
+                    style: GoogleFonts.poppins(
+                      color: AppColors.successColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.successColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.successColor.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Live Scalping Activity:',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildStatusInfoRow('Account', _accountController.text),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('Connection', _lastConnectionTime?.toString().split('.')[0] ?? 'N/A'),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('Balance', '\$${_accountBalance.toStringAsFixed(2)}'),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Click "Test Connection" to validate credentials',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
               ],
             ),
-          const SizedBox(height: 12),
+          ),
+          // Auto-reconnect checkbox
+          if (_isConnected)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: CheckboxListTile(
+                title: Text(
+                  'Enable Auto-Reconnect',
+                  style: GoogleFonts.poppins(fontSize: 13),
+                ),
+                value: _autoReconnectEnabled,
+                onChanged: (bool? value) {
+                  if (value == true) {
+                    _startAutoReconnect();
+                  }
+                },
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          // Buttons
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
               onPressed: _saveCredentials,
-              icon: const Icon(Icons.save),
-              label: const Text('Save Credentials'),
+              icon: const Icon(Icons.save, size: 20),
+              label: Text(
+                'Save Credentials',
+                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),
@@ -768,19 +819,22 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
               onPressed: _isTestingConnection ? null : _testConnection,
               icon: _isTestingConnection
                   ? const SizedBox(
-                      width: 16,
-                      height: 16,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation(Colors.white),
                       ),
                     )
-                  : const Icon(Icons.cloud_sync),
-              label: Text(_isTestingConnection ? 'Testing...' : 'Test Connection'),
+                  : const Icon(Icons.cloud_sync, size: 20),
+              label: Text(
+                _isTestingConnection ? 'Testing...' : 'Test Connection',
+                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    _isConnected ? AppColors.successColor : AppColors.primaryColor,
+                backgroundColor: _isConnected ? AppColors.successColor : AppColors.primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),
@@ -994,6 +1048,29 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         ],
       ),
       ),
+    );
+  }
+
+  Widget _buildStatusInfoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            color: Colors.white70,
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }
