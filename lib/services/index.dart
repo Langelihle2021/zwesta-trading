@@ -7,3 +7,4 @@ export 'statement_service.dart';
 export 'pdf_export_service.dart';
 export 'financial_service.dart';
 export 'mock_data_provider.dart';
+export 'exness_trading_service.dart';
