@@ -299,13 +299,25 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: brokerType.toString().contains('IG') ? const Color(0xFFE91E63).withOpacity(0.15) : const Color(0xFF2196F3).withOpacity(0.15),
+                            color: brokerType.toString().contains('IG') 
+                              ? const Color(0xFFE91E63).withOpacity(0.15)
+                              : brokerType.toString().toUpperCase().contains('BINANCE')
+                              ? const Color(0xFFF7931A).withOpacity(0.15)
+                              : const Color(0xFF2196F3).withOpacity(0.15),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            brokerType.toString().contains('IG') ? 'IG' : 'MT5',
+                            brokerType.toString().contains('IG') 
+                              ? 'IG'
+                              : brokerType.toString().toUpperCase().contains('BINANCE')
+                              ? 'BINANCE'
+                              : 'MT5',
                             style: GoogleFonts.poppins(
-                              color: brokerType.toString().contains('IG') ? const Color(0xFFE91E63) : const Color(0xFF2196F3),
+                              color: brokerType.toString().contains('IG')
+                                ? const Color(0xFFE91E63)
+                                : brokerType.toString().toUpperCase().contains('BINANCE')
+                                ? const Color(0xFFF7931A)
+                                : const Color(0xFF2196F3),
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
                             ),
@@ -367,12 +379,37 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               Expanded(
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
+                    backgroundColor: isEnabled ? Colors.orange.shade600 : Colors.green.shade600,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: Icon(isEnabled ? Icons.pause : Icons.play_arrow),
+                  label: Text(isEnabled ? 'Stop' : 'Start'),
+                  onPressed: () async {
+                    final botService = BotService();
+                    final result = isEnabled
+                      ? await botService.stopBotTrading(botId)
+                      : await botService.startBotTrading(botId);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(result ? (isEnabled ? 'Bot stopped' : 'Bot started') : 'Action failed'),
+                      backgroundColor: result ? Colors.green : Colors.red,
+                    ));
+                    // Refresh bot list
+                    setState(() {});
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue.shade600,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   icon: const Icon(Icons.bar_chart),
-                  label: const Text('View Analytics'),
+                  label: const Text('Analytics'),
                   onPressed: () {
                     Navigator.push(context, MaterialPageRoute(
                       builder: (_) => BotAnalyticsScreen(bot: bot),
