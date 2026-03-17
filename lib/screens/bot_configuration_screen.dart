@@ -159,6 +159,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   String? _successMessage;
   String? _errorMessage;
   
+  // Auto-Withdrawal Settings
+  String _withdrawalMode = 'fixed'; // 'fixed' or 'intelligent'
+  double _targetProfit = 300; // For fixed mode
+  double _minProfit = 50; // For intelligent mode
+  double _maxProfit = 500; // For intelligent mode
+  double _winRateMin = 60; // For intelligent mode
+  bool _enableAutoWithdrawal = false;
+  
   // NEW: Broker integration
   late BrokerCredentialsService _brokerService;
   late CommissionService _commissionService;
@@ -560,24 +568,42 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       print('   Account: ${_brokerService.activeCredential?.accountNumber}');
 
       // STEP 2: Create bot with credential_id
+      final botPayload = {
+        'botId': _botIdController.text,
+        'credentialId': _brokerService.activeCredential!.credentialId, // ✅ Link to broker credential
+        'symbols': _selectedSymbols,
+        'strategy': _selectedStrategy,
+        'riskPerTrade': double.parse(_riskPerTradeController.text),
+        'maxDailyLoss': double.parse(_maxDailyLossController.text),
+        'profitLock': double.tryParse(_profitLockController.text) ?? 0.0,
+        'drawdownPausePercent': double.tryParse(_drawdownPauseController.text) ?? 0.0,
+        'allowedVolatility': _allowedVolatility,
+        'enabled': true,
+        
+        // Add withdrawal settings
+        if (_enableAutoWithdrawal) ...[
+          'autoWithdrawal': {
+            'enabled': true,
+            'withdrawalMode': _withdrawalMode,
+            if (_withdrawalMode == 'fixed') 'targetProfit': _targetProfit,
+            if (_withdrawalMode == 'intelligent') ...[
+              'minProfit': _minProfit,
+              'maxProfit': _maxProfit,
+              'winRateMin': _winRateMin,
+            ],
+          }
+        ] else ...[
+          'autoWithdrawal': {'enabled': false}
+        ]
+      };
+      
       final createResponse = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/create'),
         headers: {
           'Content-Type': 'application/json',
           'X-Session-Token': sessionToken,
         },
-        body: jsonEncode({
-          'botId': _botIdController.text,
-          'credentialId': _brokerService.activeCredential!.credentialId, // ✅ Link to broker credential
-          'symbols': _selectedSymbols,
-          'strategy': _selectedStrategy,
-          'riskPerTrade': double.parse(_riskPerTradeController.text),
-          'maxDailyLoss': double.parse(_maxDailyLossController.text),
-          'profitLock': double.tryParse(_profitLockController.text) ?? 0.0,
-          'drawdownPausePercent': double.tryParse(_drawdownPauseController.text) ?? 0.0,
-          'allowedVolatility': _allowedVolatility,
-          'enabled': true,
-        }),
+        body: jsonEncode(botPayload),
       ).timeout(const Duration(seconds: 10));
 
       if (createResponse.statusCode != 200 && createResponse.statusCode != 201) {
@@ -1228,6 +1254,272 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                         },
                       );
                     }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Auto-Withdrawal Settings
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.orange.withOpacity(0.05),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.savings, color: Colors.orange, size: 24),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Auto-Withdrawal to USDT',
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: Colors.orange,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        
+                        // Enable/Disable Toggle
+                        SwitchListTile(
+                          value: _enableAutoWithdrawal,
+                          onChanged: (value) {
+                            setState(() => _enableAutoWithdrawal = value);
+                          },
+                          title: const Text('Enable Auto-Withdrawal'),
+                          subtitle: Text(
+                            _enableAutoWithdrawal
+                                ? 'Profits will be withdrawn to your USDT wallet automatically'
+                                : 'Disable to keep profits in trading account',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        
+                        if (_enableAutoWithdrawal) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            'Choose Withdrawal Trigger Mode',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 12),
+                          
+                          // Fixed Mode Option
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: _withdrawalMode == 'fixed'
+                                    ? Colors.green
+                                    : Colors.grey.withOpacity(0.3),
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                              color: _withdrawalMode == 'fixed'
+                                  ? Colors.green.withOpacity(0.1)
+                                  : Colors.transparent,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'fixed',
+                                      groupValue: _withdrawalMode,
+                                      onChanged: (value) {
+                                        setState(() => _withdrawalMode = value ?? 'fixed');
+                                      },
+                                    ),
+                                    const Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '💰 Fixed Mode',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          SizedBox(height: 4),
+                                          Text(
+                                            'Withdraw when profit hits target amount',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (_withdrawalMode == 'fixed') ...[
+                                  const SizedBox(height: 12),
+                                  TextField(
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Target Profit (\$)',
+                                      hintText: '300',
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      prefixIcon: const Icon(Icons.attach_money),
+                                    ),
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _targetProfit = double.tryParse(value) ?? 300;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          
+                          // Intelligent Mode Option
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: _withdrawalMode == 'intelligent'
+                                    ? Colors.purple
+                                    : Colors.grey.withOpacity(0.3),
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                              color: _withdrawalMode == 'intelligent'
+                                  ? Colors.purple.withOpacity(0.1)
+                                  : Colors.transparent,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'intelligent',
+                                      groupValue: _withdrawalMode,
+                                      onChanged: (value) {
+                                        setState(() => _withdrawalMode = value ?? 'fixed');
+                                      },
+                                    ),
+                                    const Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '🧠 Intelligent Mode',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          SizedBox(height: 4),
+                                          Text(
+                                            'Bot withdraws based on market conditions',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (_withdrawalMode == 'intelligent') ...[
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          keyboardType: TextInputType.number,
+                                          decoration: InputDecoration(
+                                            labelText: 'Min (\$)',
+                                            hintText: '50',
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                          ),
+                                          onChanged: (value) {
+                                            setState(() {
+                                              _minProfit = double.tryParse(value) ?? 50;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: TextField(
+                                          keyboardType: TextInputType.number,
+                                          decoration: InputDecoration(
+                                            labelText: 'Max (\$)',
+                                            hintText: '500',
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                          ),
+                                          onChanged: (value) {
+                                            setState(() {
+                                              _maxProfit = double.tryParse(value) ?? 500;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextField(
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Min Win Rate (%)',
+                                      hintText: '60',
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      helperText: 'Only withdraw when win rate ≥ this %',
+                                    ),
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _winRateMin = double.tryParse(value) ?? 60;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                            ),
+                            child: const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '📝 Next Step:',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'After creating the bot, provide your USDT wallet address and choose your network (Polygon recommended)',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),

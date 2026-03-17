@@ -84,64 +84,126 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Profile Header
-              Center(
-                child: Column(
-                  children: [
-                    Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppColors.primaryColor.withOpacity(0.2),
-                      ),
-                      child: const Icon(
-                        Icons.person,
-                        size: 50,
-                        color: AppColors.primaryColor,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      authService.currentUser?.fullName ?? 'User',
-                      style: Theme.of(context).textTheme.displaySmall,
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      authService.currentUser?.email ?? '',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.sm,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        authService.currentUser?.accountType ?? 'Standard',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primaryColor,
-                        ),
-                      ),
+              // Profile Header with Gradient Background
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.blue.withOpacity(0.15), Colors.purple.withOpacity(0.1)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.blue.withOpacity(0.15),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
                     ),
                   ],
+                ),
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [Colors.blue.shade400, Colors.purple.shade400],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.4),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.person,
+                          size: 60,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        authService.currentUser?.fullName ?? 'User',
+                        style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        authService.currentUser?.email ?? '',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.blue.shade600, Colors.purple.shade600],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          authService.currentUser?.accountType ?? 'Standard',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
               const SizedBox(height: AppSpacing.xl),
 
-              // Profile Form
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: _buildEditProfileForm(context, authService),
+              // Profile Form with Gradient Card
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.grey.shade900.withOpacity(0.9), Colors.grey.shade800.withOpacity(0.8)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: _buildEditProfileForm(context, authService),
               ),
             ],
           ),
@@ -236,7 +298,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         return ListView(
           padding: const EdgeInsets.all(AppSpacing.md),
           children: [
-            // Broker integration quick link
+            // Broker integration quick link with gradient
             FutureBuilder<SharedPreferences>(
               future: SharedPreferences.getInstance(),
               builder: (ctx, snap) {
@@ -245,24 +307,109 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                 final broker = prefs.getString('broker');
                 final connected = prefs.getBool('broker_connected') == true;
                 final balance = prefs.getDouble('account_balance') ?? 0;
-                return Card(
+                return Container(
                   margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        (connected ? Colors.green : Colors.orange).withOpacity(0.15),
+                        (connected ? Colors.teal : Colors.amber).withOpacity(0.08),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: (connected ? Colors.green : Colors.orange).withOpacity(0.4),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (connected ? Colors.green : Colors.orange).withOpacity(0.2),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
                   child: Column(
                     children: [
-                      ListTile(
-                        leading: Icon(connected ? Icons.link : Icons.link_off, color: connected ? Colors.green : Colors.orange),
-                        title: Text(connected ? 'Broker: ${broker ?? "Unknown"}' : 'No Broker Connected'),
-                        subtitle: connected ? Text('Balance: \$${balance.toStringAsFixed(2)}') : const Text('Tap to connect your trading account'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
+                      Container(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: [
+                                    (connected ? Colors.green : Colors.orange).shade600,
+                                    (connected ? Colors.teal : Colors.amber).shade600,
+                                  ],
+                                ),
+                              ),
+                              child: Icon(
+                                connected ? Icons.link : Icons.link_off,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    connected ? 'Broker: ${broker ?? "Unknown"}' : 'No Broker Connected',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    connected ? 'Balance: \$${balance.toStringAsFixed(2)}' : 'Tap to connect your trading account',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: (connected ? Colors.green : Colors.orange).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: const Icon(Icons.chevron_right, color: Colors.white),
+                            ),
+                          ],
+                        ),
                       ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: const Icon(Icons.monetization_on, color: Colors.green),
-                        title: const Text('View Commissions'),
-                        subtitle: const Text('Earnings & withdrawal history'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CommissionDashboardScreen())),
+                      const Divider(height: 1, color: Colors.white12),
+                      TextButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
+                        icon: const Icon(Icons.edit, size: 18),
+                        label: const Text('Manage Connection'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: connected ? Colors.green : Colors.orange,
+                          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                      ),
+                      const Divider(height: 1, color: Colors.white12),
+                      TextButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CommissionDashboardScreen())),
+                        icon: const Icon(Icons.monetization_on, size: 18),
+                        label: const Text('View Commissions'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.green,
+                          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                          minimumSize: const Size.fromHeight(48),
+                        ),
                       ),
                     ],
                   ),
@@ -385,80 +532,122 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Security Section
-          Text(
-            'Security',
-            style: Theme.of(context).textTheme.titleLarge,
+          // Security Section Header
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Security',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.md),
-          _glassSettingsCard(
-            child: ListTile(
-              leading: const Icon(Icons.lock, color: Colors.blueAccent),
-              title: const Text('Change Password'),
-              subtitle: Text(
-                'Update your password regularly',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              trailing: const Icon(Icons.arrow_forward),
-              onTap: () => _showChangePasswordDialog(),
-            ),
+          _buildModernSettingsCard(
+            icon: Icons.lock,
+            color: Colors.blue,
+            title: 'Change Password',
+            subtitle: 'Update your password regularly',
+            onTap: () => _showChangePasswordDialog(),
           ),
           const SizedBox(height: AppSpacing.md),
-          _glassSettingsCard(
-            child: ListTile(
-              leading: const Icon(Icons.security, color: Colors.deepPurple),
-              title: const Text('Two-Factor Authentication'),
-              subtitle: Text(
-                'Secure your account',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              trailing: Switch(value: false, onChanged: (_) {}),
+          _buildModernSettingsCard(
+            icon: Icons.security,
+            color: Colors.purple,
+            title: 'Two-Factor Authentication',
+            subtitle: 'Secure your account',
+            trailing: Switch(
+              value: false,
+              activeColor: Colors.purple,
+              onChanged: (_) {},
             ),
           ),
 
           const SizedBox(height: AppSpacing.lg),
 
-          // Preferences Section
-          Text(
-            'Preferences',
-            style: Theme.of(context).textTheme.titleLarge,
+          // Preferences Section Header
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Preferences',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.md),
-          _glassSettingsCard(
-            child: ListTile(
-              leading: const Icon(Icons.notifications, color: Colors.orange),
-              title: const Text('Notifications'),
-              trailing: Switch(value: true, onChanged: (_) {}),
+          _buildModernSettingsCard(
+            icon: Icons.notifications,
+            color: Colors.orange,
+            title: 'Notifications',
+            subtitle: 'Manage notification settings',
+            trailing: Switch(
+              value: true,
+              activeColor: Colors.orange,
+              onChanged: (_) {},
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          _glassSettingsCard(
-            child: ListTile(
-              leading: const Icon(Icons.dark_mode, color: Colors.black87),
-              title: const Text('Dark Mode'),
-              trailing: Switch(value: false, onChanged: (_) {}),
-            ),
+          _buildModernSettingsCard(
+            icon: Icons.dark_mode,
+            color: Colors.indigo,
+            title: 'Dark Mode',
+            subtitle: 'Always enabled',
+            trailing: const Icon(Icons.check_circle, color: Colors.indigo),
           ),
 
           const SizedBox(height: AppSpacing.lg),
 
-          // Account Section
-          Text(
-            'Account',
-            style: Theme.of(context).textTheme.titleLarge,
+          // Account Section Header
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Account',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.md),
-          _glassSettingsCard(
-            child: ListTile(
-              leading: const Icon(Icons.delete, color: Colors.redAccent),
-              title: const Text('Delete Account'),
-              subtitle: Text(
-                'Permanently delete your account',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              trailing: const Icon(Icons.arrow_forward),
-              textColor: AppColors.dangerColor,
-              onTap: () {
+          _buildModernSettingsCard(
+            icon: Icons.delete_outline,
+            color: Colors.red,
+            title: 'Delete Account',
+            subtitle: 'Permanently delete your account',
+            onTap: () {
                 showDialog(
                   context: context,
                   builder: (context) => AlertDialog(
