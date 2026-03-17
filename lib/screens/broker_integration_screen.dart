@@ -854,15 +854,21 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             width: double.infinity,
             child: ElevatedButton.icon(
               onPressed: _saveCredentials,
-              icon: const Icon(Icons.save, size: 20),
+              icon: const Icon(Icons.save, size: 20, color: Colors.white),
               label: Text(
                 'Save Credentials',
-                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                  letterSpacing: 0.5,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 4,
               ),
             ),
           ),
@@ -880,15 +886,21 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                         valueColor: AlwaysStoppedAnimation(Colors.white),
                       ),
                     )
-                  : const Icon(Icons.cloud_sync, size: 20),
+                  : const Icon(Icons.cloud_sync, size: 20, color: Colors.white),
               label: Text(
-                _isTestingConnection ? 'Testing...' : 'Test Connection',
-                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+                _isTestingConnection ? 'Testing Connection...' : 'Test Connection',
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                  letterSpacing: 0.5,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isConnected ? AppColors.successColor : AppColors.primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 4,
               ),
             ),
           ),
