@@ -8,6 +8,7 @@ MT5_TERMINALS = {
     'MetaQuotes': r'C:\MT5\MetaQuotes\terminal64.exe',
     'XM': r'C:\Program Files\XM Global MT5\terminal64.exe',
     'XM Global': r'C:\Program Files\XM Global MT5\terminal64.exe',
+    'Exness': r'C:\Program Files\Exness MT5\terminal64.exe',
 }
 
 # Track running processes
@@ -42,6 +43,14 @@ def detect_broker_mt5_terminal(broker):
             r'C:\Program Files\XM Global MT5\terminal.exe',
             r'C:\MT5\XMGlobal\terminal64.exe',
             r'C:\MT5\XMGlobal\terminal.exe',
+        ],
+        'Exness': [
+            r'C:\Program Files\Exness MT5\terminal64.exe',
+            r'C:\Program Files\Exness MT5\terminal.exe',
+            r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+            r'C:\Program Files (x86)\Exness MT5\terminal.exe',
+            r'C:\MT5\Exness\terminal64.exe',
+            r'C:\MT5\Exness\terminal.exe',
         ],
         'MetaQuotes': [
             r'C:\Program Files\MetaTrader 5\terminal64.exe',
