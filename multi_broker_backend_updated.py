@@ -1208,8 +1208,21 @@ class MT5Connection(BrokerConnection):
                         # Successfully initialized, now try to login
                         logger.info(f"  ✓ MT5 SDK initialized (path: {self.mt5_path})")
                         
+                        # Wait for IPC to stabilize after initialization (critical for Exness)
+                        logger.info(f"  ⏳ Waiting 5 seconds for MT5 IPC stabilization...")
+                        time.sleep(5)
+                        
                         # Try login with password first
-                        login_result = self.mt5.login(account, password=password, server=server)
+                        logger.info(f"  🔐 Attempting login with password...")
+                        try:
+                            login_result = self.mt5.login(account, password=password, server=server)
+                            login_error = self.mt5.last_error()
+                            logger.info(f"     Login result: {login_result}, Error: {login_error}")
+                        except Exception as login_ex:
+                            logger.warning(f"  ✗ Login exception: {login_ex}")
+                            login_result = False
+                            login_error = str(login_ex)
+                        
                         if login_result:
                             self.connected = True
                             self.get_account_info()
@@ -1219,10 +1232,18 @@ class MT5Connection(BrokerConnection):
                             return True
                         
                         # If password fails, try guest login
-                        logger.warning(f"  ✗ Password login failed: {self.mt5.last_error()}")
+                        logger.warning(f"  ✗ Password login failed: {login_error}")
                         logger.info(f"  ↻ Attempting guest login (no password)...")
                         
-                        login_result = self.mt5.login(account, server=server)
+                        try:
+                            login_result = self.mt5.login(account, server=server)
+                            login_error = self.mt5.last_error()
+                            logger.info(f"     Guest login result: {login_result}, Error: {login_error}")
+                        except Exception as guest_ex:
+                            logger.warning(f"  ✗ Guest login exception: {guest_ex}")
+                            login_result = False
+                            login_error = str(guest_ex)
+                        
                         if login_result:
                             self.connected = True
                             self.get_account_info()
@@ -1232,8 +1253,7 @@ class MT5Connection(BrokerConnection):
                             return True
                         
                         # Both login methods failed
-                        login_error = self.mt5.last_error()
-                        logger.warning(f"  ✗ Guest login also failed: {login_error}")
+                        logger.warning(f"  ✗ Both login methods failed: {login_error}")
                         
                         # Shutdown for retry
                         try:
@@ -1249,10 +1269,11 @@ class MT5Connection(BrokerConnection):
                 except Exception as e:
                     logger.warning(f"  ✗ Error during attempt {attempt}: {e}")
                 
-                # Wait before retry, increasing delay each time
+                # Wait before retry, exponential backoff
                 if attempt < max_retries:
-                    wait_time = 3 * attempt  # 3 sec, then 6 sec, then 9 sec
-                    logger.info(f"  ⏳ Waiting {wait_time} seconds before retry...")
+                    # Exponential backoff: 8 sec, 15 sec, 25 sec
+                    wait_time = 5 + (5 * attempt * attempt)  
+                    logger.info(f"  ⏳ Waiting {wait_time} seconds before retry (exponential backoff)...")
                     time.sleep(wait_time)
             
             # All retries exhausted
