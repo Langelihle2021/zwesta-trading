@@ -499,12 +499,22 @@ class ExnessTradingService {
   /// Default Exness symbols (fallback)
   static List<String> _getDefaultExnessSymbols() {
     return [
-      // Only these 5 symbols are available on Exness Demo Account 298997455
       'BTCUSDm',   // Bitcoin / USD
       'ETHUSDm',   // Ethereum / USD
       'EURUSDm',   // Euro / USD
       'USDJPYm',   // USD / Japanese Yen
       'XAUUSDm',   // Gold / USD
+      'AAPLm',
+      'AMDm',
+      'MSFTm',
+      'NVDAm',
+      'JPMm',
+      'BACm',
+      'WFCm',
+      'GOOGLm',
+      'METAm',
+      'ORCLm',
+      'TSMm',
     ];
   }
 

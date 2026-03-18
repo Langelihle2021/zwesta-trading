@@ -23,14 +23,24 @@ class BotService extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   List<Map<String, dynamic>> get activeBots => _activeBots;
 
-  // Updated list with all trading symbols including crypto and tech
+  // Fallback list for Exness / MT5 symbols when backend data is not yet loaded.
   final List<String> availableTradingSymbols = [
-    // Only these 5 symbols are available on Exness Demo Account 298997455
     'BTCUSDm',   // Bitcoin / USD
     'ETHUSDm',   // Ethereum / USD
     'EURUSDm',   // Euro / USD
     'USDJPYm',   // USD / Japanese Yen
     'XAUUSDm',   // Gold / USD
+    'AAPLm',
+    'AMDm',
+    'MSFTm',
+    'NVDAm',
+    'JPMm',
+    'BACm',
+    'WFCm',
+    'GOOGLm',
+    'METAm',
+    'ORCLm',
+    'TSMm',
   ];
 
   final List<String> availableStrategies = [

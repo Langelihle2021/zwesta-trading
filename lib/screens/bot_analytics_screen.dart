@@ -108,14 +108,33 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     super.dispose();
   }
 
-  List<dynamic> _getProfitChartData() {
-    // Chart disabled for fl_chart compatibility
-    return [];
+  List<Map<String, dynamic>> _getProfitChartData() {
+    final dailyProfits = widget.bot['dailyProfits'] as Map?;
+    if (dailyProfits == null || dailyProfits.isEmpty) {
+      return [];
+    }
+    return dailyProfits.entries.map((e) => {
+      'date': e.key,
+      'profit': (e.value as num).toDouble(),
+    }).toList();
   }
 
-  List<dynamic> _getTradesChartData() {
-    // Chart disabled for fl_chart compatibility
-    return [];
+  List<Map<String, dynamic>> _getTradesChartData() {
+    final tradeHistory = widget.bot['tradeHistory'] as List?;
+    if (tradeHistory == null || tradeHistory.isEmpty) {
+      return [];
+    }
+    final trades = List.from(tradeHistory);
+    trades.sort((a, b) {
+      final aTime = a['time']?.toString() ?? '';
+      final bTime = b['time']?.toString() ?? '';
+      return aTime.compareTo(bTime);
+    });
+    return trades.map((t) => {
+      'symbol': t['symbol'] ?? 'N/A',
+      'profit': (t['profit'] as num).toDouble(),
+      'isWinning': (t['profit'] as num) > 0,
+    }).toList();
   }
 
   @override
@@ -524,6 +543,42 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Widget _buildProfitChart() {
+    final chartData = _getProfitChartData();
+    if (chartData.isEmpty) {
+      return Container(
+        height: 300,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.blue.withOpacity(0.1), Colors.purple.withOpacity(0.05)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.blue.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.blue.withOpacity(0.1),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.show_chart, color: Colors.blue, size: 32),
+              SizedBox(height: 12),
+              Text('No profit data available yet', style: TextStyle(color: Colors.white70, fontSize: 14)),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    final maxProfit = chartData.fold<double>(0, (max, p) => p['profit'] > max ? p['profit'] : max);
+    final minProfit = chartData.fold<double>(0, (min, p) => p['profit'] < min ? p['profit'] : min);
+    
     return Container(
       height: 300,
       decoration: BoxDecoration(
@@ -542,20 +597,115 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ),
         ],
       ),
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.show_chart, color: Colors.blue, size: 32),
-            SizedBox(height: 12),
-            Text('Profit chart will appear here', style: TextStyle(color: Colors.white70, fontSize: 14)),
-          ],
-        ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: chartData.map((item) {
+                final profit = item['profit'] as double;
+                final heightRatio = maxProfit > 0 ? (profit / (maxProfit > 0 ? maxProfit : 1)) : 0.1;
+                final isPositive = profit >= 0;
+                return Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Tooltip(
+                        message: '\$${profit.toStringAsFixed(2)}',
+                        child: Container(
+                          height: (heightRatio * 200).clamp(20, 200),
+                          width: double.infinity,
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isPositive
+                                  ? [Colors.green.shade400, Colors.green.shade600]
+                                  : [Colors.red.shade400, Colors.red.shade600],
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                            ),
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(4),
+                              topRight: Radius.circular(4),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (isPositive ? Colors.green : Colors.red).withOpacity(0.3),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item['date'].toString().length > 5 ? item['date'].toString().substring(5) : item['date'].toString(),
+                        style: const TextStyle(color: Colors.white54, fontSize: 10),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Min: \$${minProfit.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              Text('Max: \$${maxProfit.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            ],
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildTradesChart() {
+    final chartData = _getTradesChartData();
+    if (chartData.isEmpty) {
+      return Container(
+        height: 300,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.purple.withOpacity(0.1), Colors.indigo.withOpacity(0.05)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.purple.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.purple.withOpacity(0.1),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.trending_up, color: Colors.purple, size: 32),
+              SizedBox(height: 12),
+              Text('No trades data available yet', style: TextStyle(color: Colors.white70, fontSize: 14)),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    final totalTrades = chartData.length;
+    final winningTrades = chartData.where((t) => t['isWinning'] == true).length;
+    final cumulativeProfit = chartData.fold<double>(0, (sum, t) => sum + t['profit']);
+    
     return Container(
       height: 300,
       decoration: BoxDecoration(
@@ -574,15 +724,72 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ),
         ],
       ),
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.trending_up, color: Colors.purple, size: 32),
-            SizedBox(height: 12),
-            Text('Trades chart will appear here', style: TextStyle(color: Colors.white70, fontSize: 14)),
-          ],
-        ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: chartData.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final item = entry.value;
+                final isWinning = item['isWinning'] as bool;
+                final cumulativeAtIndex = chartData.take(idx + 1).fold<double>(0, (sum, t) => sum + t['profit']);
+                final maxCumulative = chartData.fold<double>(0, (max, item) {
+                  final idx = chartData.indexOf(item);
+                  final cum = chartData.take(idx + 1).fold<double>(0, (sum, t) => sum + t['profit']);
+                  return cum > max ? cum : max;
+                });
+                final heightRatio = maxCumulative > 0 ? (cumulativeAtIndex / maxCumulative) : 0.1;
+                
+                return Expanded(
+                  child: Tooltip(
+                    message: '${item['symbol']}\n\$${cumulativeAtIndex.toStringAsFixed(2)}',
+                    child: Container(
+                      height: (heightRatio * 200).clamp(20, 200),
+                      width: double.infinity,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: isWinning
+                              ? [Colors.green.shade400, Colors.green.shade600]
+                              : [Colors.red.shade400, Colors.red.shade600],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                          topRight: Radius.circular(4),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: (isWinning ? Colors.green : Colors.red).withOpacity(0.3),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Trades: $totalTrades | Wins: $winningTrades', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              Text('Total: \$${cumulativeProfit.toStringAsFixed(2)}', style: TextStyle(
+                color: cumulativeProfit >= 0 ? Colors.green : Colors.red,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              )),
+            ],
+          ),
+        ],
       ),
     );
   }

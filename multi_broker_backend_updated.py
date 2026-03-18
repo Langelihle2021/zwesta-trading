@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from enum import Enum
 import sys
 import atexit
@@ -4829,8 +4829,7 @@ def list_commodities():
                 'stocks': []
             }
             
-            # EXNESS DEMO ACCOUNT - ONLY 5 TRADEABLE SYMBOLS AVAILABLE
-            # Showing only symbols that are verified to work on Exness MT5 demo account 298997455
+            # Exness symbols verified in MT5 Market Watch for the current account/server.
             symbol_config = {
                 'forex': [
                     {'symbol': 'EURUSDm', 'name': 'Euro vs US Dollar (Exness)', 'min_price': 1.08, 'max_price': 1.10},
@@ -4839,9 +4838,21 @@ def list_commodities():
                 'precious_metals': [
                     {'symbol': 'XAUUSDm', 'name': '🥇 Gold (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 2100},
                 ],
-                'energy': [],  # OILK not available on Exness demo
-                'indices': [],  # Indices not available on Exness demo
-                'stocks': []  # Stocks not available on Exness demo
+                'energy': [],
+                'indices': [],
+                'stocks': [
+                    {'symbol': 'AAPLm', 'name': 'Apple Inc.', 'type': 'Stock CFD', 'min_price': 180, 'max_price': 260},
+                    {'symbol': 'AMDm', 'name': 'Advanced Micro Devices, Inc.', 'type': 'Stock CFD', 'min_price': 120, 'max_price': 230},
+                    {'symbol': 'MSFTm', 'name': 'Microsoft Corporation', 'type': 'Stock CFD', 'min_price': 380, 'max_price': 520},
+                    {'symbol': 'NVDAm', 'name': 'NVIDIA Corporation', 'type': 'Stock CFD', 'min_price': 700, 'max_price': 1100},
+                    {'symbol': 'JPMm', 'name': 'J P Morgan Chase & Co', 'type': 'Stock CFD', 'min_price': 170, 'max_price': 280},
+                    {'symbol': 'BACm', 'name': 'Bank of America Corporation', 'type': 'Stock CFD', 'min_price': 28, 'max_price': 55},
+                    {'symbol': 'WFCm', 'name': 'Wells Fargo & Company', 'type': 'Stock CFD', 'min_price': 45, 'max_price': 85},
+                    {'symbol': 'GOOGLm', 'name': 'Alphabet Inc.', 'type': 'Stock CFD', 'min_price': 130, 'max_price': 230},
+                    {'symbol': 'METAm', 'name': 'META Platforms, Inc.', 'type': 'Stock CFD', 'min_price': 350, 'max_price': 700},
+                    {'symbol': 'ORCLm', 'name': 'Oracle Corporation', 'type': 'Stock CFD', 'min_price': 100, 'max_price': 220},
+                    {'symbol': 'TSMm', 'name': 'Taiwan Semiconductor Manufacturing Company, Limited', 'type': 'Stock CFD', 'min_price': 110, 'max_price': 240},
+                ]
             }
             
             # Add crypto symbols (available on Exness)
@@ -4865,7 +4876,8 @@ def list_commodities():
             # Log sample signals for debugging
             eurusd_signal = flat_market_data.get('EURUSDm', {}).get('signal', 'NO DATA')
             btc_signal = flat_market_data.get('BTCUSDm', {}).get('signal', 'NO DATA')
-            logger.info(f"[/api/commodities/list] Returning 5 Exness demo symbols: EURUSDm={eurusd_signal}, BTCUSDm={btc_signal}")
+            total_symbols = sum(len(items) for items in categorized.values())
+            logger.info(f"[/api/commodities/list] Returning {total_symbols} Exness symbols: EURUSDm={eurusd_signal}, BTCUSDm={btc_signal}")
             
             return jsonify({
                 'success': True,
@@ -5234,13 +5246,23 @@ def get_account_info_alias():
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
-    # Only these 5 symbols are available on Exness Demo Account 298997455
-    # Verified in MT5 Market Watch - note the "m" suffix (micro lot size)
+    # Verified Exness/MT5 symbols currently supported by the app and backend.
     'BTCUSDm',   # Bitcoin / USD
     'ETHUSDm',   # Ethereum / USD
     'EURUSDm',   # Euro / USD
     'USDJPYm',   # USD / Japanese Yen
     'XAUUSDm',   # Gold / USD
+    'AAPLm',     # Apple Inc.
+    'AMDm',      # Advanced Micro Devices, Inc.
+    'MSFTm',     # Microsoft Corporation
+    'NVDAm',     # NVIDIA Corporation
+    'JPMm',      # J P Morgan Chase & Co
+    'BACm',      # Bank of America Corporation
+    'WFCm',      # Wells Fargo & Company
+    'GOOGLm',    # Alphabet Inc.
+    'METAm',     # META Platforms, Inc.
+    'ORCLm',     # Oracle Corporation
+    'TSMm',      # Taiwan Semiconductor Manufacturing Company, Limited
 }
 
 BINANCE_VALID_SYMBOLS = {
@@ -5262,6 +5284,17 @@ SYMBOL_MAPPING = {
     'EURUSD': 'EURUSDm',
     'USDJPY': 'USDJPYm',
     'XAUUSD': 'XAUUSDm',
+    'AAPL': 'AAPLm',
+    'AMD': 'AMDm',
+    'MSFT': 'MSFTm',
+    'NVDA': 'NVDAm',
+    'JPM': 'JPMm',
+    'BAC': 'BACm',
+    'WFC': 'WFCm',
+    'GOOGL': 'GOOGLm',
+    'META': 'METAm',
+    'ORCL': 'ORCLm',
+    'TSM': 'TSMm',
     
     # OLD -> NEW SYMBOL CORRECTIONS
     # Metals
@@ -5292,8 +5325,12 @@ SYMBOL_MAPPING = {
     'CAC40': 'EURUSDm',
     'NIKKEI225': 'EURUSDm', 'NIKKEI': 'EURUSDm', 'NIKL': 'EURUSDm',
     
-    # Stocks (not available on Exness demo - map to available symbols)
-    'AMD': 'BTCUSDm', 'MSFT': 'EURUSDm', 'INTC': 'ETHUSDm', 'NVDA': 'USDJPYm',
+    # Stocks aliases
+    'APPLE': 'AAPLm',
+    'ALPHABET': 'GOOGLm',
+    'GOOGLE': 'GOOGLm',
+    'MICROSOFT': 'MSFTm',
+    'NVIDIA': 'NVDAm',
     
     # Crypto variants
     'BITCOIN': 'BTCUSDm', 'BTC': 'BTCUSDm',
@@ -5378,12 +5415,12 @@ def validate_and_correct_symbols(symbols, broker_name=None):
         elif symbol in SYMBOL_MAPPING:
             # Symbol is old - map to new one
             new_symbol = SYMBOL_MAPPING[symbol]
-            logger.warning(f"🔄 Auto-correcting symbol {symbol} -> {new_symbol} (Exness demo only supports 5 symbols)")
+            logger.warning(f"🔄 Auto-correcting symbol {symbol} -> {new_symbol} based on configured Exness symbol mappings")
             if new_symbol not in corrected:
                 corrected.append(new_symbol)
         else:
             # Unknown symbol - use fallback to valid Exness symbol
-            logger.warning(f"⚠️  Unknown symbol {symbol} - using EURUSDm fallback (Exness demo only)")
+            logger.warning(f"⚠️  Unknown symbol {symbol} - using EURUSDm fallback based on current Exness defaults")
             if 'EURUSDm' not in corrected:
                 corrected.append('EURUSDm')
     
@@ -5903,6 +5940,7 @@ def get_bot_config(bot_id):
                 'basePositionSize': bot.get('basePositionSize', 1.0),
                 'riskPerTrade': bot.get('riskPerTrade'),
                 'maxDailyLoss': bot.get('maxDailyLoss'),
+                    'displayCurrency': bot.get('displayCurrency', 'USD'),
                 'enabled': bot.get('enabled'),
                 'volatilityLevel': bot.get('volatilityLevel'),
             },
@@ -5914,6 +5952,7 @@ def get_bot_config(bot_id):
                 'totalProfit': round(bot.get('totalProfit', 0), 2),
                 'dailyProfit': round(bot.get('dailyProfits', {}).get(datetime.now().strftime('%Y-%m-%d'), 0), 2),
                 'maxDrawdown': round(bot.get('maxDrawdown', 0), 2),
+                'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
             },
             'intelligence': {
                 'lastStrategySwitch': bot.get('lastStrategySwitch'),
@@ -6022,23 +6061,64 @@ def should_trade_today(bot_config, symbol):
     """
     # 1. Profit Lock-In: If daily profit exceeds lock threshold, stop trading for the day
     profit_lock = bot_config.get('profitLock', 0.0) or 0.0  # e.g., 500 (set per bot)
+    max_daily_loss = bot_config.get('maxDailyLoss', 0.0) or 0.0
+    drawdown_pause_hours = bot_config.get('drawdownPauseHours', 6.0) or 6.0
     today = datetime.now().strftime('%Y-%m-%d')
+    now = datetime.now()
     daily_profit = bot_config.get('dailyProfits', {}).get(today, 0.0)
     if profit_lock > 0 and daily_profit >= profit_lock:
         logger.info(f"[RISK] Bot {bot_config.get('botId')} hit daily profit lock-in (${daily_profit:.2f} >= ${profit_lock:.2f}), pausing trading for today.")
         return False
 
-    # 2. Drawdown Pause: If drawdown from peak profit exceeds threshold, pause trading
+    # 2. Daily Loss Cutoff: If today's realized loss exceeds threshold, stop trading for the day
+    realized_loss = abs(daily_profit) if daily_profit < 0 else 0.0
+    if max_daily_loss > 0 and realized_loss >= max_daily_loss:
+        logger.info(
+            f"[RISK] Bot {bot_config.get('botId')} hit max daily loss "
+            f"(${realized_loss:.2f} >= ${max_daily_loss:.2f}), pausing trading for today."
+        )
+        return False
+
+    # 3. Drawdown cooldown: pause for a cooldown period, then automatically resume from a fresh baseline.
+    drawdown_pause_until_raw = bot_config.get('drawdownPauseUntil')
+    if drawdown_pause_until_raw:
+        try:
+            drawdown_pause_until = datetime.fromisoformat(drawdown_pause_until_raw)
+            if now < drawdown_pause_until:
+                logger.info(
+                    f"[RISK] Bot {bot_config.get('botId')} is in drawdown cooldown until "
+                    f"{drawdown_pause_until.isoformat()}, skipping {symbol}."
+                )
+                return False
+
+            current_total_profit = bot_config.get('totalProfit', 0.0) or 0.0
+            bot_config['drawdownPauseUntil'] = None
+            bot_config['maxDrawdown'] = 0.0
+            bot_config['peakProfit'] = current_total_profit
+            logger.info(
+                f"[RISK] Bot {bot_config.get('botId')} drawdown cooldown expired; "
+                f"resuming trading from fresh baseline profit ${current_total_profit:.2f}."
+            )
+        except Exception as e:
+            logger.warning(f"[RISK] Bot {bot_config.get('botId')} had invalid drawdownPauseUntil value: {e}")
+            bot_config['drawdownPauseUntil'] = None
+
+    # 4. Drawdown Pause: If drawdown from peak profit exceeds threshold, pause trading
     peak = bot_config.get('peakProfit', 0)
     max_dd = bot_config.get('maxDrawdown', 0)
     dd_threshold = bot_config.get('drawdownPausePercent', 0.0) or 0.0  # e.g., 10 (%)
     if peak > 0 and dd_threshold > 0:
         dd_percent = (max_dd / peak) * 100
         if dd_percent >= dd_threshold:
-            logger.info(f"[RISK] Bot {bot_config.get('botId')} drawdown {dd_percent:.1f}% >= {dd_threshold}%, pausing trading.")
+            pause_until = now + timedelta(hours=drawdown_pause_hours)
+            bot_config['drawdownPauseUntil'] = pause_until.isoformat()
+            logger.info(
+                f"[RISK] Bot {bot_config.get('botId')} drawdown {dd_percent:.1f}% >= {dd_threshold}%, "
+                f"pausing trading until {pause_until.isoformat()}."
+            )
             return False
 
-    # 3. Volatility Filter: Only trade if volatility is allowed
+    # 5. Volatility Filter: Only trade if volatility is allowed
     allowed_vol = bot_config.get('allowedVolatility', ['Low', 'Medium'])
     # Get current volatility for symbol
     vol = commodity_market_data.get(symbol, {}).get('volatility', 'Medium')
@@ -6046,7 +6126,7 @@ def should_trade_today(bot_config, symbol):
         logger.info(f"[RISK] Bot {bot_config.get('botId')} skipping {symbol} due to volatility: {vol}")
         return False
 
-    # 4. Regime Check: Only trade if signal is strong (not consolidating/weak)
+    # 6. Regime Check: Only trade if signal is strong (not consolidating/weak)
     signal = commodity_market_data.get(symbol, {}).get('signal', '')
     if 'CONSOLIDAT' in signal or 'VOLATILE' in signal or 'WEAK' in signal:
         logger.info(f"[RISK] Bot {bot_config.get('botId')} skipping {symbol} due to regime: {signal}")
@@ -6268,12 +6348,23 @@ def live_market_data_updater():
 # Commodity Market Sentiment Data
 # Tracks price trends, volatility, and trading signals
 commodity_market_data = {
-    # ===== EXNESS DEMO - VALID SYMBOLS ONLY (5 total) =====
+    # ===== EXNESS / MT5 MARKET DATA DEFAULTS =====
     'EURUSDm': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.65},
     'USDJPYm': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.62},
     'XAUUSDm': {'price': 2076.44, 'change': 0.68, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Gold strong uptrend - excellent profitability', 'profitability_score': 0.88},
     'BTCUSDm': {'price': 43560.00, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Bitcoin volatile with strong momentum', 'profitability_score': 0.85},
     'ETHUSDm': {'price': 2280.45, 'change': 1.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Ethereum strong uptrend - excellent opportunity', 'profitability_score': 0.82},
+    'AAPLm': {'price': 215.40, 'change': 0.84, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Steady technology momentum with manageable volatility', 'profitability_score': 0.66},
+    'AMDm': {'price': 182.30, 'change': 1.28, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Semiconductor strength but watch volatility around news', 'profitability_score': 0.71},
+    'MSFTm': {'price': 428.15, 'change': 0.61, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Large-cap trend remains constructive', 'profitability_score': 0.68},
+    'NVDAm': {'price': 932.75, 'change': 1.96, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong trend but keep tighter risk controls', 'profitability_score': 0.79},
+    'JPMm': {'price': 198.60, 'change': 0.39, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Stable financial sector momentum', 'profitability_score': 0.61},
+    'BACm': {'price': 41.80, 'change': 0.22, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Lower-priced financial stock with moderate momentum', 'profitability_score': 0.58},
+    'WFCm': {'price': 58.40, 'change': 0.31, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Financial sector remains constructive', 'profitability_score': 0.57},
+    'GOOGLm': {'price': 176.20, 'change': 0.73, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Large-cap tech trend remains favorable', 'profitability_score': 0.67},
+    'METAm': {'price': 498.35, 'change': 1.12, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Growth momentum is strong but reactive to earnings', 'profitability_score': 0.72},
+    'ORCLm': {'price': 144.70, 'change': 0.48, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Cloud and enterprise trend remains positive', 'profitability_score': 0.62},
+    'TSMm': {'price': 162.25, 'change': 0.95, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Semiconductor leader with strong directional bias', 'profitability_score': 0.69},
 }
 
 # Store active bots configuration
@@ -7500,6 +7591,107 @@ def request_bot_deletion(bot_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+BOT_RISK_LIMITS = {
+    'riskPerTrade': (5.0, 30.0),
+    'maxDailyLoss': (20.0, 150.0),
+    'profitLock': (0.0, 300.0),
+    'drawdownPausePercent': (3.0, 12.0),
+    'drawdownPauseHours': (2.0, 12.0),
+}
+
+SUPPORTED_DISPLAY_CURRENCIES = {'USD', 'ZAR', 'GBP'}
+
+
+def _clamp_bot_config_value(field_name: str, raw_value, minimum: float, maximum: float, default_value: float, warnings: List[str]) -> float:
+    """Clamp bot risk inputs into a safe range and track any overrides."""
+    try:
+        parsed_value = float(raw_value)
+    except (TypeError, ValueError):
+        warnings.append(f'{field_name} defaulted to {default_value}')
+        return default_value
+
+    if parsed_value < minimum:
+        warnings.append(f'{field_name} raised to minimum {minimum}')
+        return minimum
+    if parsed_value > maximum:
+        warnings.append(f'{field_name} reduced to maximum {maximum}')
+        return maximum
+    return parsed_value
+
+
+def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
+    """Normalize bot risk configuration before persisting or trading."""
+    warnings: List[str] = []
+
+    risk_per_trade = _clamp_bot_config_value(
+        'riskPerTrade',
+        data.get('riskPerTrade', 20),
+        BOT_RISK_LIMITS['riskPerTrade'][0],
+        BOT_RISK_LIMITS['riskPerTrade'][1],
+        20.0,
+        warnings,
+    )
+    max_daily_loss = _clamp_bot_config_value(
+        'maxDailyLoss',
+        data.get('maxDailyLoss', 60),
+        BOT_RISK_LIMITS['maxDailyLoss'][0],
+        BOT_RISK_LIMITS['maxDailyLoss'][1],
+        60.0,
+        warnings,
+    )
+
+    raw_profit_lock = data.get('profitLock', 80)
+    try:
+        parsed_profit_lock = float(raw_profit_lock)
+    except (TypeError, ValueError):
+        parsed_profit_lock = 80.0
+        warnings.append('profitLock defaulted to 80.0')
+
+    if parsed_profit_lock <= 0:
+        profit_lock = 0.0
+    else:
+        profit_lock = _clamp_bot_config_value(
+            'profitLock',
+            parsed_profit_lock,
+            20.0,
+            BOT_RISK_LIMITS['profitLock'][1],
+            80.0,
+            warnings,
+        )
+
+    drawdown_pause_percent = _clamp_bot_config_value(
+        'drawdownPausePercent',
+        data.get('drawdownPausePercent', 5),
+        BOT_RISK_LIMITS['drawdownPausePercent'][0],
+        BOT_RISK_LIMITS['drawdownPausePercent'][1],
+        5.0,
+        warnings,
+    )
+    drawdown_pause_hours = _clamp_bot_config_value(
+        'drawdownPauseHours',
+        data.get('drawdownPauseHours', 6),
+        BOT_RISK_LIMITS['drawdownPauseHours'][0],
+        BOT_RISK_LIMITS['drawdownPauseHours'][1],
+        6.0,
+        warnings,
+    )
+
+    display_currency = str(data.get('displayCurrency', 'USD')).upper()
+    if display_currency not in SUPPORTED_DISPLAY_CURRENCIES:
+        warnings.append('displayCurrency defaulted to USD')
+        display_currency = 'USD'
+
+    return {
+        'riskPerTrade': risk_per_trade,
+        'maxDailyLoss': max_daily_loss,
+        'profitLock': profit_lock,
+        'drawdownPausePercent': drawdown_pause_percent,
+        'drawdownPauseHours': drawdown_pause_hours,
+        'displayCurrency': display_currency,
+        'warnings': warnings,
+    }
+
+
 @app.route('/api/bot/create', methods=['POST'])
 @require_session
 def create_bot():
@@ -7516,8 +7708,8 @@ def create_bot():
         "credentialId": "credential_uuid",  // ✅ REQUIRED - from broker integration
         "symbols": ["EURUSD", "XAUUSD"],
         "strategy": "Trend Following",
-        "riskPerTrade": 100,
-        "maxDailyLoss": 500
+        "riskPerTrade": 20,
+        "maxDailyLoss": 60
     }
     """
     try:
@@ -7586,8 +7778,13 @@ def create_bot():
             raw_symbols = data.get('symbols', ['EURUSDm'])
             symbols = validate_and_correct_symbols(raw_symbols, broker_name)  # ✅ AUTO-CORRECT OLD SYMBOLS
             strategy = data.get('strategy', 'Trend Following')
-            risk_per_trade = float(data.get('riskPerTrade', 100))
-            max_daily_loss = float(data.get('maxDailyLoss', 500))
+            sanitized_risk_config = sanitize_bot_risk_config(data)
+            risk_per_trade = sanitized_risk_config['riskPerTrade']
+            max_daily_loss = sanitized_risk_config['maxDailyLoss']
+            profit_lock = sanitized_risk_config['profitLock']
+            drawdown_pause_percent = sanitized_risk_config['drawdownPausePercent']
+            drawdown_pause_hours = sanitized_risk_config['drawdownPauseHours']
+            display_currency = sanitized_risk_config['displayCurrency']
             trading_enabled = data.get('enabled', True)
 
             account_id = f"{broker_name}_{account_number}"
@@ -7648,6 +7845,10 @@ def create_bot():
             'strategy': strategy,
             'riskPerTrade': risk_per_trade,
             'maxDailyLoss': max_daily_loss,
+            'profitLock': profit_lock,
+            'drawdownPausePercent': drawdown_pause_percent,
+            'drawdownPauseHours': drawdown_pause_hours,
+            'displayCurrency': display_currency,
             'enabled': trading_enabled,
             'basePositionSize': data.get('basePositionSize', 1.0),
             'totalTrades': 0,
@@ -7663,6 +7864,7 @@ def create_bot():
             'dailyProfit': 0,
             'maxDrawdown': 0,
             'peakProfit': 0,
+            'drawdownPauseUntil': None,
             'profit': 0,  # Always include profit field
         }
         
@@ -7742,6 +7944,15 @@ def create_bot():
             'broker': broker_name,
             'account_number': account_number,
             'mode': mode,
+            'displayCurrency': display_currency,
+            'appliedRiskConfig': {
+                'riskPerTrade': risk_per_trade,
+                'maxDailyLoss': max_daily_loss,
+                'profitLock': profit_lock,
+                'drawdownPausePercent': drawdown_pause_percent,
+                'drawdownPauseHours': drawdown_pause_hours,
+            },
+            'warnings': sanitized_risk_config['warnings'],
             'message': f'Bot {bot_id} created and starting...',
             'status': 'STARTING'
         }), 201
@@ -8657,6 +8868,8 @@ def bot_status():
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
+                'displayCurrency': bot.get('displayCurrency', 'USD'),
+                'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
                 'broker_type': bot.get('broker_type', 'MT5'),
                 'profitField': round(total_profit, 2),

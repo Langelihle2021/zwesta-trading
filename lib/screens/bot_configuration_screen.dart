@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
+import '../providers/currency_provider.dart';
 import '../services/bot_service.dart';
 import '../utils/environment_config.dart';
 import '../services/broker_credentials_service.dart';
@@ -20,6 +21,36 @@ class BotConfigurationScreen extends StatefulWidget {
 }
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
+  static const List<Map<String, dynamic>> _accountRiskPresets = [
+    {
+      'id': 'starter_300',
+      'label': 'R300 Starter',
+      'riskPerTrade': '10',
+      'maxDailyLoss': '30',
+      'profitLock': '40',
+      'drawdownPausePercent': '4',
+      'allowedVolatility': ['Low'],
+    },
+    {
+      'id': 'starter_500',
+      'label': 'R500 Starter',
+      'riskPerTrade': '15',
+      'maxDailyLoss': '45',
+      'profitLock': '60',
+      'drawdownPausePercent': '5',
+      'allowedVolatility': ['Low', 'Medium'],
+    },
+    {
+      'id': 'starter_1000',
+      'label': 'R1000+',
+      'riskPerTrade': '20',
+      'maxDailyLoss': '60',
+      'profitLock': '80',
+      'drawdownPausePercent': '5',
+      'allowedVolatility': ['Low', 'Medium'],
+    },
+  ];
+
   static const List<Map<String, String>> _binanceSymbols = [
     // --- Tier 1: Large Cap ---
     {'symbol': 'BTCUSDT',  'name': '₿ Bitcoin / Tether',     'category': 'Large Cap'},
@@ -154,6 +185,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   List<String> _allowedVolatility = ['Low', 'Medium'];
 
   String _selectedStrategy = 'Trend Following';
+  String _selectedRiskPresetId = 'starter_1000';
   List<String> _selectedSymbols = [];
   bool _isCreating = false;
   bool _isLoadingData = true;
@@ -256,6 +288,44 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     setState(() {
       _selectedSymbols = symbols;
     });
+  }
+
+  void _applyRiskPreset(String presetId) {
+    final preset = _accountRiskPresets.firstWhere(
+      (item) => item['id'] == presetId,
+      orElse: () => _accountRiskPresets.last,
+    );
+
+    setState(() {
+      _selectedRiskPresetId = presetId;
+      _riskPerTradeController.text = preset['riskPerTrade'] as String;
+      _maxDailyLossController.text = preset['maxDailyLoss'] as String;
+      _profitLockController.text = preset['profitLock'] as String;
+      _drawdownPauseController.text = preset['drawdownPausePercent'] as String;
+      _allowedVolatility = List<String>.from(preset['allowedVolatility'] as List);
+    });
+  }
+
+  String _currencySymbol(AppCurrency currency) {
+    switch (currency) {
+      case AppCurrency.usd:
+        return '\$';
+      case AppCurrency.zar:
+        return 'R';
+      case AppCurrency.gbp:
+        return 'GBP';
+    }
+  }
+
+  String _currencyCode(AppCurrency currency) {
+    switch (currency) {
+      case AppCurrency.usd:
+        return 'USD';
+      case AppCurrency.zar:
+        return 'ZAR';
+      case AppCurrency.gbp:
+        return 'GBP';
+    }
   }
 
   Widget _binanceQuickActionButton({
@@ -387,10 +457,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _botIdController = TextEditingController(
       text: 'bot_${DateTime.now().millisecondsSinceEpoch}',
     );
-    _riskPerTradeController = TextEditingController(text: '100');
-    _maxDailyLossController = TextEditingController(text: '500');
-    _profitLockController = TextEditingController(text: '500');
-    _drawdownPauseController = TextEditingController(text: '10');
+    _riskPerTradeController = TextEditingController(text: '20');
+    _maxDailyLossController = TextEditingController(text: '60');
+    _profitLockController = TextEditingController(text: '80');
+    _drawdownPauseController = TextEditingController(text: '5');
     
     // Initialize services
     _brokerService = BrokerCredentialsService();
@@ -559,6 +629,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
+      final currencyProvider = context.read<CurrencyProvider>();
       
       if (sessionToken == null) {
         throw Exception('Session expired. Please login again.');
@@ -578,6 +649,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'maxDailyLoss': double.parse(_maxDailyLossController.text),
         'profitLock': double.tryParse(_profitLockController.text) ?? 0.0,
         'drawdownPausePercent': double.tryParse(_drawdownPauseController.text) ?? 0.0,
+        'displayCurrency': _currencyCode(currencyProvider.currency),
         'allowedVolatility': _allowedVolatility,
         'enabled': true,
         'autoWithdrawal': _enableAutoWithdrawal ? {
@@ -677,10 +749,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
   void _resetForm() {
     _botIdController.text = 'bot_${DateTime.now().millisecondsSinceEpoch}';
-    _riskPerTradeController.text = '100';
-    _maxDailyLossController.text = '500';
+    _riskPerTradeController.text = '20';
+    _maxDailyLossController.text = '60';
+    _profitLockController.text = '80';
+    _drawdownPauseController.text = '5';
     _selectedSymbols.clear();
     _selectedStrategy = 'Trend Following';
+    _selectedRiskPresetId = 'starter_1000';
+    _allowedVolatility = ['Low', 'Medium'];
   }
 
   void _showError(String message) {
@@ -689,6 +765,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currencyProvider = context.watch<CurrencyProvider>();
+    final currencySymbol = _currencySymbol(currencyProvider.currency);
+    final currencyCode = _currencyCode(currencyProvider.currency);
+
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -703,6 +783,28 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         backgroundColor: Colors.grey[900],
         elevation: 0,
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<AppCurrency>(
+                value: currencyProvider.currency,
+                dropdownColor: Colors.grey[900],
+                icon: const Icon(Icons.currency_exchange, color: Colors.white),
+                style: const TextStyle(color: Colors.white),
+                items: AppCurrency.values.map((currency) {
+                  return DropdownMenuItem<AppCurrency>(
+                    value: currency,
+                    child: Text(_currencyCode(currency), style: const TextStyle(color: Colors.white)),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    currencyProvider.setCurrency(value);
+                  }
+                },
+              ),
+            ),
+          ),
           TextButton.icon(
             onPressed: () {
               Navigator.of(context).push(
@@ -1190,12 +1292,35 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 12),
+                  Text(
+                    'Working currency: $currencyCode. Use the same currency as the trading account. South African clients can keep this on Rand.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Client Account Size Preset',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _accountRiskPresets.map((preset) {
+                      final presetId = preset['id'] as String;
+                      return ChoiceChip(
+                        label: Text(preset['label'] as String),
+                        selected: presetId == _selectedRiskPresetId,
+                        onSelected: (_) => _applyRiskPreset(presetId),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: _riskPerTradeController,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
-                      labelText: 'Risk Per Trade (4)',
-                      hintText: '100',
+                      labelText: 'Risk Per Trade ($currencySymbol)',
+                      hintText: '20',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -1206,8 +1331,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     controller: _maxDailyLossController,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
-                      labelText: 'Max Daily Loss (4)',
-                      hintText: '500',
+                      labelText: 'Max Daily Loss ($currencySymbol)',
+                      hintText: '60',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -1218,8 +1343,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     controller: _profitLockController,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
-                      labelText: 'Daily Profit Lock-In (4)',
-                      hintText: '500',
+                      labelText: 'Daily Profit Lock-In ($currencySymbol)',
+                      hintText: '80',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -1231,7 +1356,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
                       labelText: 'Drawdown Pause (%)',
-                      hintText: '10',
+                      hintText: '5',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
