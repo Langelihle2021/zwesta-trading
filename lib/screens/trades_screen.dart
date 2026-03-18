@@ -28,6 +28,7 @@ class _TradesScreenState extends State<TradesScreen> {
       appBar: CustomAppBar(
         title: 'Trades',
         showBackButton: true,
+        showLogo: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.add),

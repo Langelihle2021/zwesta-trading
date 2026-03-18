@@ -85,7 +85,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               colors: [Color(0xFF0A0E21), Color(0xFF1A1F3A), Color(0xFF0A0E21)],
             ),
           ),
-          child: botService.isLoading && bots.isEmpty
+          child: allBots.isEmpty && botService.isLoading
               ? const Center(child: CircularProgressIndicator(color: Color(0xFF00E5FF)))
               : RefreshIndicator(
                   onRefresh: () => botService.fetchActiveBots(),

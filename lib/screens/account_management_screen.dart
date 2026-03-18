@@ -56,6 +56,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
       appBar: CustomAppBar(
         title: 'Account Management',
         showBackButton: true,
+        showLogo: false,
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
