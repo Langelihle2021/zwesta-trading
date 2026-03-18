@@ -889,6 +889,30 @@ def init_database():
         )
     ''')
 
+    # Bot trade history table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trades (
+            trade_id TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            order_type TEXT NOT NULL,
+            volume REAL DEFAULT 0,
+            price REAL DEFAULT 0,
+            profit REAL DEFAULT 0,
+            commission REAL DEFAULT 0,
+            swap REAL DEFAULT 0,
+            ticket INTEGER,
+            time_open TEXT,
+            time_close TEXT,
+            status TEXT DEFAULT 'open',
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (bot_id) REFERENCES user_bots(bot_id),
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
