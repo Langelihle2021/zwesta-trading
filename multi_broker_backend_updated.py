@@ -12905,6 +12905,238 @@ def exness_withdrawal_balance(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/broker/exness/trades', methods=['GET'])
+def exness_get_trades():
+    """Get closed trades history with profit/loss from Exness MT5"""
+    try:
+        # Get optional filters from query params
+        user_id = request.args.get('user_id')
+        limit = int(request.args.get('limit', 50))
+        
+        # First try to get from MT5 live data
+        try:
+            import MetaTrader5 as mt5
+            
+            if mt5.initialize():
+                deals = mt5.history_deals_get(position=0)
+                trades = []
+                
+                if deals:
+                    # Process last N deals and reverse to show most recent first
+                    for deal in sorted(deals, key=lambda x: x.time, reverse=True)[:limit]:
+                        trade = {
+                            'ticket': deal.ticket,
+                            'symbol': deal.symbol,
+                            'side': 'BUY' if deal.type == mt5.DEAL_TYPE_BUY else 'SELL',
+                            'volume': deal.volume,
+                            'entryPrice': deal.price,
+                            'exitPrice': deal.price,  # Deal price is exit price for closed deals
+                            'profitLoss': float(deal.profit),
+                            'commission': float(deal.commission),
+                            'pnlPercentage': ((deal.profit / (deal.price * deal.volume)) * 100) if (deal.price * deal.volume) > 0 else 0,
+                            'closedAt': datetime.fromtimestamp(deal.time).isoformat(),
+                            'duration': 'N/A'  # Duration not directly available from deal
+                        }
+                        trades.append(trade)
+                
+                logger.info(f"✅ Retrieved {len(trades)} trades from MT5 live data")
+                return jsonify({
+                    'success': True,
+                    'trades': trades,
+                    'count': len(trades),
+                    'source': 'MT5_LIVE'
+                }), 200
+        except ImportError:
+            logger.warning("MT5 SDK not available, falling back to database")
+        except Exception as mt5_error:
+            logger.warning(f"Error fetching from MT5: {mt5_error}, falling back to database")
+        
+        # Fallback to database records
+        if user_id:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT * FROM exness_trade_profits 
+                WHERE user_id = ? 
+                ORDER BY closed_at DESC 
+                LIMIT ?
+            ''', (user_id, limit))
+            
+            trades = []
+            for row in cursor.fetchall():
+                trade = {
+                    'profit_id': row['profit_id'],
+                    'symbol': row['symbol'],
+                    'side': row['side'],
+                    'volume': row['volume'],
+                    'entryPrice': row['entry_price'],
+                    'exitPrice': row['exit_price'],
+                    'profitLoss': row['profit_loss'],
+                    'commission': row['commission'],
+                    'pnlPercentage': row['pnl_percentage'],
+                    'closedAt': row['closed_at'],
+                    'duration': row['trade_duration_seconds']
+                }
+                trades.append(trade)
+            
+            conn.close()
+            
+            logger.info(f"✅ Retrieved {len(trades)} trades from database for user {user_id}")
+            return jsonify({
+                'success': True,
+                'trades': trades,
+                'count': len(trades),
+                'source': 'DATABASE'
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'user_id parameter required for database fallback'
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error getting Exness trades: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/broker/exness/trade-summary', methods=['GET'])
+def exness_trade_summary():
+    """Get aggregate trade statistics and summary"""
+    try:
+        user_id = request.args.get('user_id')
+        
+        # First try MT5 live data
+        summary = {
+            'totalTrades': 0,
+            'winningTrades': 0,
+            'losingTrades': 0,
+            'totalProfit': 0.0,
+            'totalLoss': 0.0,
+            'netProfit': 0.0,
+            'totalCommission': 0.0,
+            'winRate': 0.0,
+            'avgProfit': 0.0,
+            'avgLoss': 0.0,
+            'largestWin': 0.0,
+            'largestLoss': 0.0,
+            'profitFactor': 0.0,
+            'totalVolume': 0.0
+        }
+        
+        try:
+            import MetaTrader5 as mt5
+            
+            if mt5.initialize():
+                deals = mt5.history_deals_get(position=0)
+                
+                if deals and len(deals) > 0:
+                    winning_pnl = []
+                    losing_pnl = []
+                    total_commission = 0
+                    
+                    for deal in deals:
+                        profit = float(deal.profit)
+                        commission = float(deal.commission)
+                        
+                        summary['totalTrades'] += 1
+                        summary['totalVolume'] += deal.volume
+                        total_commission += commission
+                        
+                        if profit > 0:
+                            summary['winningTrades'] += 1
+                            summary['totalProfit'] += profit
+                            winning_pnl.append(profit)
+                        elif profit < 0:
+                            summary['losingTrades'] += 1
+                            summary['totalLoss'] += abs(profit)
+                            losing_pnl.append(profit)
+                    
+                    summary['netProfit'] = summary['totalProfit'] - summary['totalLoss']
+                    summary['totalCommission'] = total_commission
+                    summary['winRate'] = (summary['winningTrades'] / summary['totalTrades'] * 100) if summary['totalTrades'] > 0 else 0
+                    summary['avgProfit'] = (summary['totalProfit'] / summary['winningTrades']) if summary['winningTrades'] > 0 else 0
+                    summary['avgLoss'] = (summary['totalLoss'] / summary['losingTrades']) if summary['losingTrades'] > 0 else 0
+                    summary['largestWin'] = max(winning_pnl) if winning_pnl else 0
+                    summary['largestLoss'] = min(losing_pnl) if losing_pnl else 0
+                    summary['profitFactor'] = (summary['totalProfit'] / summary['totalLoss']) if summary['totalLoss'] > 0 else 0
+                    
+                    logger.info(f"✅ Generated trading summary from MT5: {summary['totalTrades']} trades, ${summary['netProfit']:.2f} net profit")
+                    
+                    return jsonify({
+                        'success': True,
+                        'summary': summary,
+                        'source': 'MT5_LIVE'
+                    }), 200
+        except ImportError:
+            logger.warning("MT5 SDK not available, falling back to database")
+        except Exception as mt5_error:
+            logger.warning(f"Error fetching from MT5: {mt5_error}, falling back to database")
+        
+        # Fallback to database
+        if user_id:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get all trades for this user
+            cursor.execute('''
+                SELECT * FROM exness_trade_profits 
+                WHERE user_id = ?
+            ''', (user_id,))
+            
+            trades = cursor.fetchall()
+            
+            if trades and len(trades) > 0:
+                winning_pnl = []
+                losing_pnl = []
+                
+                for trade in trades:
+                    profit = trade['profit_loss']
+                    commission = trade['commission']
+                    
+                    summary['totalTrades'] += 1
+                    summary['totalVolume'] += trade['volume']
+                    summary['totalCommission'] += commission if commission else 0
+                    
+                    if profit > 0:
+                        summary['winningTrades'] += 1
+                        summary['totalProfit'] += profit
+                        winning_pnl.append(profit)
+                    elif profit < 0:
+                        summary['losingTrades'] += 1
+                        summary['totalLoss'] += abs(profit)
+                        losing_pnl.append(profit)
+                
+                summary['netProfit'] = summary['totalProfit'] - summary['totalLoss']
+                summary['winRate'] = (summary['winningTrades'] / summary['totalTrades'] * 100) if summary['totalTrades'] > 0 else 0
+                summary['avgProfit'] = (summary['totalProfit'] / summary['winningTrades']) if summary['winningTrades'] > 0 else 0
+                summary['avgLoss'] = (summary['totalLoss'] / summary['losingTrades']) if summary['losingTrades'] > 0 else 0
+                summary['largestWin'] = max(winning_pnl) if winning_pnl else 0
+                summary['largestLoss'] = min(losing_pnl) if losing_pnl else 0
+                summary['profitFactor'] = (summary['totalProfit'] / summary['totalLoss']) if summary['totalLoss'] > 0 else 0
+            
+            conn.close()
+            
+            logger.info(f"✅ Generated trading summary from database: {summary['totalTrades']} trades, ${summary['netProfit']:.2f} net profit")
+            
+            return jsonify({
+                'success': True,
+                'summary': summary,
+                'source': 'DATABASE'
+            }), 200
+        else:
+            # Return default summary if no user_id and MT5 not available
+            return jsonify({
+                'success': True,
+                'summary': summary,
+                'source': 'DEFAULT'
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error getting Exness trade summary: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def shutdown_backup():
     """Create final backup before shutdown"""
     logger.info("🛑 Creating final backup on shutdown...")

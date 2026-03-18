@@ -44,6 +44,7 @@ import 'fxcm_withdrawal_screen.dart';
 import 'binance_withdrawal_screen.dart';
 import 'unified_broker_dashboard_screen.dart';
 import 'crypto_strategies_screen.dart';
+import 'trade_history_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -323,35 +324,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ── IG CONNECTION STATUS ──
+  // ── EXNESS MT5 ACCOUNT STATUS ──
   Widget _buildIGConnectionStatusCard() {
-    return Consumer<IGAutoConnectService>(
-      builder: (context, igService, _) {
-        final isConnected = igService.isConnected;
-        final isConnecting = igService.isConnecting;
-        final hasError = igService.state == IGConnectionState.error;
-        final info = igService.connectionInfo;
-
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _fetchExnessAccountInfo(),
+      builder: (context, snapshot) {
         Color statusColor;
         IconData statusIcon;
         String statusText;
+        String? accountId;
+        double? balance;
+        String? accountType;
 
-        if (isConnected) {
-          statusColor = const Color(0xFF69F0AE);
-          statusIcon = Icons.check_circle;
-          statusText = 'Exness Connected';
-        } else if (isConnecting) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           statusColor = const Color(0xFFFFD600);
           statusIcon = Icons.sync;
-          statusText = 'Connecting...';
-        } else if (hasError) {
+          statusText = 'Loading MT5 Account...';
+        } else if (snapshot.hasData && snapshot.data != null) {
+          final data = snapshot.data!;
+          accountId = data['accountId'] ?? 'Unknown';
+          balance = (data['balance'] as num?)?.toDouble() ?? 0.0;
+          accountType = data['accountType'] ?? 'DEMO';
+          statusColor = const Color(0xFF69F0AE);
+          statusIcon = Icons.check_circle;
+          statusText = 'MT5 Connected';
+        } else {
           statusColor = const Color(0xFFFF8A80);
           statusIcon = Icons.error_outline;
-          statusText = igService.errorMessage ?? 'Connection Error';
-        } else {
-          statusColor = Colors.white38;
-          statusIcon = Icons.cloud_off;
-          statusText = 'Exness Not Connected';
+          statusText = snapshot.hasError ? 'Connection Failed' : 'MT5 Not Available';
         }
 
         return _glassCard(
@@ -404,39 +404,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
-                  if (!isConnected && !isConnecting)
-                    _buildConnectButton(context, igService),
-                  if (isConnected)
-                    GestureDetector(
-                      onTap: () {
-                        igService.disconnect();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text('Disconnect', style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-                  if (isConnected)
+                  if (snapshot.hasData && accountType != null)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: info?.isLive == true ? Colors.red.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                        color: accountType == 'LIVE'
+                            ? Colors.red.withOpacity(0.2)
+                            : Colors.orange.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        info?.isLive == true ? 'LIVE' : 'DEMO',
+                        accountType == 'LIVE' ? 'LIVE' : 'DEMO',
                         style: GoogleFonts.poppins(
-                          color: info?.isLive == true ? Colors.redAccent : Colors.orangeAccent,
+                          color: accountType == 'LIVE'
+                              ? Colors.redAccent
+                              : Colors.orangeAccent,
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                  if (isConnecting)
+                  if (snapshot.connectionState == ConnectionState.waiting)
                     const SizedBox(
                       width: 24,
                       height: 24,
@@ -447,7 +435,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                 ],
               ),
-              if (isConnected && info != null) ...[
+              if (snapshot.hasData && accountId != null && balance != null) ...[
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -458,53 +446,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _igInfoItem('Account', info.accountId),
+                      _igInfoItem('Account', accountId),
                       Container(width: 1, height: 30, color: Colors.white12),
-                      _igInfoItem('Balance', '\$${info.balance.toStringAsFixed(2)}'),
+                      _igInfoItem('Balance', '\$${balance.toStringAsFixed(2)}'),
                       Container(width: 1, height: 30, color: Colors.white12),
-                      _igInfoItem('Currency', info.currency),
+                      _igInfoItem('Type', accountType ?? 'DEMO'),
                     ],
                   ),
-                ),
-              ],
-              if (hasError) ...[
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    GestureDetector(
-                      onTap: () {
-                        igService.disconnect();
-                        _showIGQuickConnect(context, igService);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF00B0FF)]),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'Edit Credentials',
-                          style: GoogleFonts.poppins(color: Colors.black, fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: () => igService.autoConnect(),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00E5FF).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'Retry',
-                          style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ],
@@ -514,226 +462,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildConnectButton(BuildContext context, IGAutoConnectService igService) {
-    return GestureDetector(
-      onTap: () => _showIGQuickConnect(context, igService),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF00B0FF)]),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          'Connect',
-          style: GoogleFonts.poppins(
-            color: Colors.black,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
+  /// Fetch Exness account info from backend via MT5
+  Future<Map<String, dynamic>> _fetchExnessAccountInfo() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/account'),
+        headers: {
+          'Authorization': 'Bearer ${Provider.of<AuthService>(context, listen: false).accessToken}',
+        },
+      ).timeout(const Duration(seconds: 10));
 
-  void _showIGQuickConnect(BuildContext context, IGAutoConnectService igService) {
-    final apiKeyCtrl = TextEditingController();
-    final usernameCtrl = TextEditingController();
-    final passwordCtrl = TextEditingController();
-    final accountIdCtrl = TextEditingController();
-    bool isLive = false;
-    bool saveForAutoConnect = true;
-
-    // Pre-fill from saved credentials
-    SharedPreferences.getInstance().then((prefs) {
-      apiKeyCtrl.text = prefs.getString('ig_api_key') ?? '';
-      usernameCtrl.text = prefs.getString('ig_username') ?? '';
-      passwordCtrl.text = prefs.getString('ig_password') ?? '';
-      accountIdCtrl.text = prefs.getString('ig_account_id') ?? '';
-    });
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setSheetState) {
-          return Container(
-            padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1A1F3A),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Connect to Exness',
-                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text('Enter your Exness MT5 credentials to connect automatically',
-                      style: GoogleFonts.poppins(color: Colors.white54, fontSize: 13)),
-                  const SizedBox(height: 24),
-                  _sheetTextField(apiKeyCtrl, 'API Key', Icons.key),
-                  const SizedBox(height: 14),
-                  _sheetTextField(usernameCtrl, 'Exness Account/Email', Icons.person),
-                  const SizedBox(height: 14),
-                  _sheetTextField(passwordCtrl, 'Exness Password', Icons.lock, obscure: true),
-                  const SizedBox(height: 14),
-                  _sheetTextField(accountIdCtrl, 'Account ID', Icons.account_box),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setSheetState(() => isLive = false),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: !isLive ? const Color(0xFF00E5FF).withOpacity(0.15) : Colors.white.withOpacity(0.05),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: !isLive ? const Color(0xFF00E5FF) : Colors.white12),
-                            ),
-                            child: Column(
-                              children: [
-                                Icon(Icons.school, color: !isLive ? const Color(0xFF00E5FF) : Colors.white38, size: 20),
-                                const SizedBox(height: 4),
-                                Text('DEMO', style: GoogleFonts.poppins(
-                                  color: !isLive ? const Color(0xFF00E5FF) : Colors.white38,
-                                  fontSize: 12, fontWeight: FontWeight.w600,
-                                )),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setSheetState(() => isLive = true),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: isLive ? Colors.red.withOpacity(0.15) : Colors.white.withOpacity(0.05),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: isLive ? Colors.redAccent : Colors.white12),
-                            ),
-                            child: Column(
-                              children: [
-                                Icon(Icons.warning_amber, color: isLive ? Colors.redAccent : Colors.white38, size: 20),
-                                const SizedBox(height: 4),
-                                Text('LIVE', style: GoogleFonts.poppins(
-                                  color: isLive ? Colors.redAccent : Colors.white38,
-                                  fontSize: 12, fontWeight: FontWeight.w600,
-                                )),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Checkbox(
-                          value: saveForAutoConnect,
-                          onChanged: (v) => setSheetState(() => saveForAutoConnect = v ?? true),
-                          activeColor: const Color(0xFF00E5FF),
-                          side: const BorderSide(color: Colors.white38),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text('Save for auto-connect on startup',
-                          style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        if (apiKeyCtrl.text.isEmpty || usernameCtrl.text.isEmpty || passwordCtrl.text.isEmpty || accountIdCtrl.text.isEmpty) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            const SnackBar(content: Text('All fields are required')),
-                          );
-                          return;
-                        }
-                        if (saveForAutoConnect) {
-                          await igService.saveCredentials(
-                            apiKey: apiKeyCtrl.text,
-                            username: usernameCtrl.text,
-                            password: passwordCtrl.text,
-                            accountId: accountIdCtrl.text,
-                            isLive: isLive,
-                          );
-                        }
-                        await igService.connect(
-                          apiKey: apiKeyCtrl.text,
-                          username: usernameCtrl.text,
-                          password: passwordCtrl.text,
-                          accountId: accountIdCtrl.text,
-                          isLive: isLive,
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00E5FF),
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      child: Text('Connect', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        });
-      },
-    );
-  }
-
-  Widget _sheetTextField(TextEditingController ctrl, String hint, IconData icon, {bool obscure = false}) {
-    return TextField(
-      controller: ctrl,
-      obscureText: obscure,
-      style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: GoogleFonts.poppins(color: Colors.white30, fontSize: 14),
-        prefixIcon: Icon(icon, color: const Color(0xFF00E5FF), size: 20),
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.06),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF00E5FF)),
-        ),
-      ),
-    );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to fetch account info');
+      }
+    } catch (e) {
+      throw Exception('Cannot connect to MT5: $e');
+    }
   }
 
   Widget _igInfoItem(String label, String value) {
@@ -1490,6 +1236,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }),
       _QuickAction('Bot Monitor', Icons.insights, const Color(0xFFFFD600), () {
         setState(() => _selectedIndex = 3);
+      }),
+      _QuickAction('Trade History', Icons.history, const Color(0xFF00E5FF), () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeHistoryScreen()));
       }),
       _QuickAction('Trade Analysis', Icons.analytics_outlined, const Color(0xFF00E5FF), () {
         Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeAnalysisScreen()));
