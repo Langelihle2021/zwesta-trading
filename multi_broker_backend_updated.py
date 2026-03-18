@@ -1260,9 +1260,11 @@ class MT5Connection(BrokerConnection):
                         # Successfully initialized, now try to login
                         logger.info(f"  ✓ MT5 SDK initialized (path: {self.mt5_path})")
                         
-                        # Wait for IPC to stabilize after initialization (critical for Exness)
-                        logger.info(f"  ⏳ Waiting 5 seconds for MT5 IPC stabilization...")
-                        time.sleep(5)
+                        # CRITICAL: Extended IPC stabilization wait for Exness (terminal must be fully ready)
+                        # On retry attempts (attempt > 1), use even longer wait after terminal restart
+                        ipc_wait = 20 if attempt > 1 else 15
+                        logger.info(f"  ⏳ Waiting {ipc_wait} seconds for MT5 IPC stabilization (Attempt {attempt}/3)...")
+                        time.sleep(ipc_wait)
                         
                         # Try login with password first
                         logger.info(f"  🔐 Attempting login with password...")
@@ -1307,6 +1309,12 @@ class MT5Connection(BrokerConnection):
                         # Both login methods failed
                         logger.warning(f"  ✗ Both login methods failed: {login_error}")
                         
+                        # Check if it's an IPC timeout - needs special handling
+                        error_code = login_error[0] if isinstance(login_error, tuple) else -1
+                        if error_code == -10005:  # IPC timeout error
+                            logger.warning(f"  ⚠️  IPC TIMEOUT DETECTED - Terminal may not be fully ready")
+                            logger.warning(f"     This typically means the terminal needs more time to initialize")
+                        
                         # Shutdown for retry
                         try:
                             self.mt5.shutdown()
@@ -1316,16 +1324,20 @@ class MT5Connection(BrokerConnection):
                     else:
                         init_error = self.mt5.last_error()
                         logger.warning(f"  ✗ MT5 initialization failed: {init_error}")
+                        # Check for IPC timeout during initialization
+                        error_code = init_error[0] if isinstance(init_error, tuple) else -1
+                        if error_code in [-10005, -10004]:  # IPC timeout or No IPC connection
+                            logger.warning(f"  ⚠️  IPC CONNECTION ISSUE - will wait longer before retry")
                         logger.debug(f"    (Terminal process may still be starting...)")
                 
                 except Exception as e:
                     logger.warning(f"  ✗ Error during attempt {attempt}: {e}")
                 
-                # Wait before retry, exponential backoff
+                # Wait before retry, exponential backoff (extra long for IPC issues)
                 if attempt < max_retries:
-                    # Exponential backoff: 8 sec, 15 sec, 25 sec
-                    wait_time = 5 + (5 * attempt * attempt)  
-                    logger.info(f"  ⏳ Waiting {wait_time} seconds before retry (exponential backoff)...")
+                    # Longer waits for IPC reliability: 20 sec, 30 sec, 40 sec
+                    wait_time = 20 + (10 * attempt)  
+                    logger.warning(f"  ⏳ EXTENDED WAIT: {wait_time} seconds before retry (IPC stabilization)...")
                     time.sleep(wait_time)
             
             # All retries exhausted
