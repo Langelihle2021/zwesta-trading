@@ -4795,7 +4795,7 @@ def list_commodities():
             # 1. Flat dictionary for UI market data lookup (by symbol)
             # 2. Categorized list for symbol selection
             
-            flat_market_data = {}  # {EURUSD: {signal, trend, etc}, GBPUSD: {signal, trend, etc}, ...}
+            flat_market_data = {}  # {EURUSDm: {signal, trend, etc}, BTCUSDm: {signal, trend, etc}, ...}
             categorized = {
                 'forex': [],
                 'commodities': [],
@@ -4805,42 +4805,26 @@ def list_commodities():
                 'stocks': []
             }
             
+            # EXNESS DEMO ACCOUNT - ONLY 5 TRADEABLE SYMBOLS AVAILABLE
+            # Showing only symbols that are verified to work on Exness MT5 demo account 298997455
             symbol_config = {
                 'forex': [
-                    {'symbol': 'EURUSD', 'name': 'Euro vs US Dollar', 'min_price': 1.08, 'max_price': 1.10},
-                    {'symbol': 'GBPUSD', 'name': 'British Pound vs US Dollar', 'min_price': 1.27, 'max_price': 1.29},
-                    {'symbol': 'USDCHF', 'name': 'US Dollar vs Swiss Franc', 'min_price': 0.89, 'max_price': 0.91},
-                    {'symbol': 'USDJPY', 'name': 'US Dollar vs Japanese Yen', 'min_price': 149.0, 'max_price': 151.0},
-                    {'symbol': 'USDCNH', 'name': 'US Dollar vs Chinese Yuan', 'min_price': 7.28, 'max_price': 7.30},
-                    {'symbol': 'AUDUSD', 'name': 'Australian Dollar vs US Dollar', 'min_price': 0.65, 'max_price': 0.67},
-                    {'symbol': 'NZDUSD', 'name': 'New Zealand Dollar vs US Dollar', 'min_price': 0.61, 'max_price': 0.63},
-                    {'symbol': 'USDCAD', 'name': 'US Dollar vs Canadian Dollar', 'min_price': 1.35, 'max_price': 1.37},
-                    {'symbol': 'USDSEK', 'name': 'US Dollar vs Swedish Krona', 'min_price': 10.88, 'max_price': 10.92},
+                    {'symbol': 'EURUSDm', 'name': 'Euro vs US Dollar (Exness)', 'min_price': 1.08, 'max_price': 1.10},
+                    {'symbol': 'USDJPYm', 'name': 'US Dollar vs Japanese Yen (Exness)', 'min_price': 149.0, 'max_price': 151.0},
                 ],
                 'precious_metals': [
-                    {'symbol': 'XAUUSD', 'name': '🥇 Gold (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 2100},
-                    {'symbol': 'XAGUSD', 'name': '⚪ Silver (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 28, 'max_price': 35},
-                    {'symbol': 'XPTUSD', 'name': 'Platinum (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 900, 'max_price': 950},
-                    {'symbol': 'XPDUSD', 'name': 'Palladium (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 1100, 'max_price': 1200},
+                    {'symbol': 'XAUUSDm', 'name': '🥇 Gold (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 2100},
                 ],
-                'energy': [
-                    {'symbol': 'OILK', 'name': '🛢️ Crude Oil (per barrel)', 'type': 'Energy', 'lucrative': True, 'min_price': 70, 'max_price': 90},
-                    {'symbol': 'NATGASUS', 'name': 'Natural Gas (per MMBtu)', 'type': 'Energy', 'lucrative': True, 'min_price': 2.0, 'max_price': 4.0},
-                ],
-                'indices': [
-                    {'symbol': 'SP500m', 'name': 'S&P 500 Index', 'min_price': 5000, 'max_price': 5500},
-                    {'symbol': 'DAX', 'name': 'DAX 40 (Germany)', 'min_price': 18000, 'max_price': 18500},
-                    {'symbol': 'US300', 'name': 'US 300 Index', 'min_price': 15000, 'max_price': 16000},
-                    {'symbol': 'US100', 'name': 'US 100 Index (Nasdaq)', 'min_price': 18000, 'max_price': 19000},
-                ],
-                'stocks': [
-                    {'symbol': 'AMD', 'name': 'Advanced Micro Devices Inc.', 'min_price': 180, 'max_price': 200},
-                    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'min_price': 400, 'max_price': 430},
-                    {'symbol': 'INTC', 'name': 'Intel Corporation', 'min_price': 45, 'max_price': 55},
-                    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'min_price': 850, 'max_price': 900},
-                    {'symbol': 'NIKL', 'name': 'Nikkei 225 Index', 'min_price': 28000, 'max_price': 30000},
-                ]
+                'energy': [],  # OILK not available on Exness demo
+                'indices': [],  # Indices not available on Exness demo
+                'stocks': []  # Stocks not available on Exness demo
             }
+            
+            # Add crypto symbols (available on Exness)
+            symbol_config['commodities'] = [
+                {'symbol': 'BTCUSDm', 'name': '₿ Bitcoin (BTC/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 40000, 'max_price': 70000},
+                {'symbol': 'ETHUSDm', 'name': 'Ethereum (ETH/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 2000, 'max_price': 4000},
+            ]
             
             # Build response by merging live data with config
             for category, items in symbol_config.items():
@@ -4855,9 +4839,9 @@ def list_commodities():
                     flat_market_data[symbol] = live_data
             
             # Log sample signals for debugging
-            eurusd_signal = flat_market_data.get('EURUSD', {}).get('signal', 'NO DATA')
-            oilk_signal = flat_market_data.get('OILK', {}).get('signal', 'NO DATA')
-            logger.info(f"[/api/commodities/list] Returning signals: EURUSD={eurusd_signal}, OILK={oilk_signal}")
+            eurusd_signal = flat_market_data.get('EURUSDm', {}).get('signal', 'NO DATA')
+            btc_signal = flat_market_data.get('BTCUSDm', {}).get('signal', 'NO DATA')
+            logger.info(f"[/api/commodities/list] Returning 5 Exness demo symbols: EURUSDm={eurusd_signal}, BTCUSDm={btc_signal}")
             
             return jsonify({
                 'success': True,
@@ -5340,7 +5324,7 @@ def validate_and_correct_symbols(symbols, broker_name=None):
 
     if broker_name in ('XM', 'XM Global'):
         if not symbols:
-            return ['EURUSD']
+            return ['EURUSDm']
         corrected = []
         for symbol in symbols:
             # Strip XM server suffixes (.r, .stp, .ecn, etc.)
@@ -5354,13 +5338,13 @@ def validate_and_correct_symbols(symbols, broker_name=None):
             elif symbol in VALID_SYMBOLS and symbol not in corrected:
                 corrected.append(symbol)
             else:
-                logger.warning(f'⚠️ Unknown XM symbol {symbol} -> defaulting to EURUSD')
-                if 'EURUSD' not in corrected:
-                    corrected.append('EURUSD')
-        return corrected[:5] or ['EURUSD']
+                logger.warning(f'⚠️ Unknown XM symbol {symbol} -> defaulting to EURUSDm')
+                if 'EURUSDm' not in corrected:
+                    corrected.append('EURUSDm')
+        return corrected[:5] or ['EURUSDm']
 
     if not symbols:
-        return ['EURUSD']  # Default fallback
+        return ['EURUSDm']  # Default fallback to Exness EURUSDm
     
     corrected = []
     for symbol in symbols:
@@ -5370,18 +5354,18 @@ def validate_and_correct_symbols(symbols, broker_name=None):
         elif symbol in SYMBOL_MAPPING:
             # Symbol is old - map to new one
             new_symbol = SYMBOL_MAPPING[symbol]
-            logger.warning(f"🔄 Auto-correcting symbol {symbol} -> {new_symbol} (not available on MetaQuotes-Demo)")
+            logger.warning(f"🔄 Auto-correcting symbol {symbol} -> {new_symbol} (Exness demo only supports 5 symbols)")
             if new_symbol not in corrected:
                 corrected.append(new_symbol)
         else:
-            # Unknown symbol - use fallback
-            logger.warning(f"⚠️  Unknown symbol {symbol} - using EURUSD fallback")
-            if 'EURUSD' not in corrected:
-                corrected.append('EURUSD')
+            # Unknown symbol - use fallback to valid Exness symbol
+            logger.warning(f"⚠️  Unknown symbol {symbol} - using EURUSDm fallback (Exness demo only)")
+            if 'EURUSDm' not in corrected:
+                corrected.append('EURUSDm')
     
     # Ensure we have at least one symbol
     if not corrected:
-        corrected = ['EURUSD']
+        corrected = ['EURUSDm']
     
     # Remove duplicates while preserving order
     seen = set()
