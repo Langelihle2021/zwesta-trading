@@ -546,7 +546,7 @@ def init_database():
             daily_profit REAL DEFAULT 0,
             total_profit REAL DEFAULT 0,
             broker_account_id TEXT,
-            symbols TEXT DEFAULT 'EURUSD',
+            symbols TEXT DEFAULT 'EURUSDm',
             created_at TEXT,
             updated_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -1436,9 +1436,9 @@ class MT5Connection(BrokerConnection):
                 logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: account_info OK (balance=${account_info.balance})")
                 
                 # STEP 2: Check symbol availability and data
-                test_symbol = "EURUSD"
+                test_symbol = "EURUSDm"  # Use actual Exness symbol with "m" suffix
                 if not self.mt5.symbol_select(test_symbol, True):
-                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: symbol_select(EURUSD) failed")
+                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: symbol_select({test_symbol}) failed")
                     time.sleep(check_interval)
                     continue
                 
@@ -1448,12 +1448,12 @@ class MT5Connection(BrokerConnection):
                     time.sleep(check_interval)
                     continue
                 
-                logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: EURUSD tick OK (bid={tick.bid}, ask={tick.ask})")
+                logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: {test_symbol} tick OK (bid={tick.bid}, ask={tick.ask})")
                 
                 # STEP 3: Check symbol info (trading rules, hours, etc)
                 symbol_info = self.mt5.symbol_info(test_symbol)
                 if symbol_info is None:
-                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: symbol_info(EURUSD) = None")
+                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: symbol_info({test_symbol}) = None")
                     time.sleep(check_interval)
                     continue
                 
@@ -5745,7 +5745,7 @@ def load_user_bots_from_database():
                 continue
             
             # Parse symbols
-            symbols = symbols_str.split(',') if symbols_str else ['EURUSD']
+            symbols = symbols_str.split(',') if symbols_str else ['EURUSDm']
             
             # Add to active_bots with default values for trading metrics
             now = datetime.now()
@@ -7586,7 +7586,7 @@ def create_bot():
             # Generate ABSOLUTELY unique bot_id (timestamp + uuid to ensure no collisions)
             import time
             bot_id = data.get('botId') or f"bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-            raw_symbols = data.get('symbols', ['EURUSD'])
+            raw_symbols = data.get('symbols', ['EURUSDm'])
             symbols = validate_and_correct_symbols(raw_symbols, broker_name)  # ✅ AUTO-CORRECT OLD SYMBOLS
             strategy = data.get('strategy', 'Trend Following')
             risk_per_trade = float(data.get('riskPerTrade', 100))
@@ -7891,7 +7891,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
                 
                 trades_placed = 0
-                symbols = bot_config.get('symbols', ['EURUSD'])
+                symbols = bot_config.get('symbols', ['EURUSDm'])
                 
                 for symbol in symbols[:3]:  # Max 3 trades per cycle
                     if bot_stop_flags.get(bot_id, False):
@@ -8496,7 +8496,7 @@ def start_bot():
         
         # ✅ VALIDATE & CORRECT BOT SYMBOLS IMMEDIATELY (in case they're old/unavailable)
         # This prevents users from being shown old symbols and ensures trades use valid ones
-        original_symbols = bot_config.get('symbols', ['EURUSD'])
+        original_symbols = bot_config.get('symbols', ['EURUSDm'])
         corrected_symbols = validate_and_correct_symbols(original_symbols, broker_type)
         if corrected_symbols != original_symbols:
             logger.info(f"📝 Bot {bot_id} symbols corrected: {original_symbols} → {corrected_symbols}")
@@ -8519,7 +8519,7 @@ def start_bot():
         logger.info(f"✅ Bot {bot_id}: All validation checks passed - ready to start trading")
         
         # Validate symbols are available
-        validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSD']), broker_type)
+        validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSDm']), broker_type)
         bot_config['symbols'] = validated_symbols
         logger.info(f"📍 Bot {bot_id}: Trading symbols validated: {validated_symbols}")
         
@@ -8638,7 +8638,7 @@ def bot_status():
             
             # Safely access symbols and other fields
             symbols = bot.get('symbols', [])
-            symbol = symbols[0] if symbols else 'EURUSD'
+            symbol = symbols[0] if symbols else 'EURUSDm'
             trade_history = bot.get('tradeHistory', [])
             last_trade_time = trade_history[-1].get('time') if trade_history else bot.get('createdAt', datetime.now().isoformat())
             
@@ -8726,7 +8726,7 @@ def bot_status_public():
             
             # Safely access symbols and strategy
             symbols = bot.get('symbols', [])
-            symbol = symbols[0] if symbols else 'EURUSD'
+            symbol = symbols[0] if symbols else 'EURUSDm'
             
             # Determine status based on whether thread is actively running
             if is_marked_running:
