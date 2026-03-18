@@ -470,7 +470,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/account'),
         headers: {
-          'Authorization': 'Bearer ${Provider.of<AuthService>(context, listen: false).accessToken}',
+          'Authorization': 'Bearer ${Provider.of<AuthService>(context, listen: false).token}',
         },
       ).timeout(const Duration(seconds: 10));
 

@@ -33,7 +33,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
   Future<Map<String, dynamic>> _fetchTradeHistory() async {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final userId = authService.userId ?? 'unknown';
+      final userId = authService.currentUser?.id ?? 'unknown';
 
       final response = await http
           .get(
@@ -41,7 +41,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
               '${EnvironmentConfig.apiUrl}/api/broker/exness/trades?user_id=$userId&limit=100',
             ),
             headers: {
-              'Authorization': 'Bearer ${authService.accessToken}',
+              'Authorization': 'Bearer ${authService.token}',
             },
           )
           .timeout(const Duration(seconds: 10));
@@ -59,7 +59,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
   Future<Map<String, dynamic>> _fetchTradeSummary() async {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final userId = authService.userId ?? 'unknown';
+      final userId = authService.currentUser?.id ?? 'unknown';
 
       final response = await http
           .get(
@@ -67,7 +67,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
               '${EnvironmentConfig.apiUrl}/api/broker/exness/trade-summary?user_id=$userId',
             ),
             headers: {
-              'Authorization': 'Bearer ${authService.accessToken}',
+              'Authorization': 'Bearer ${authService.token}',
             },
           )
           .timeout(const Duration(seconds: 10));
@@ -85,7 +85,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
   Future<Map<String, dynamic>> _fetchWithdrawalHistory() async {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final userId = authService.userId ?? 'unknown';
+      final userId = authService.currentUser?.id ?? 'unknown';
 
       final response = await http
           .get(
@@ -93,7 +93,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
               '${EnvironmentConfig.apiUrl}/api/broker/exness/withdrawal/history/$userId',
             ),
             headers: {
-              'Authorization': 'Bearer ${authService.accessToken}',
+              'Authorization': 'Bearer ${authService.token}',
             },
           )
           .timeout(const Duration(seconds: 10));
@@ -466,8 +466,8 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
           // Date
           Text(
             trade['closedAt'] ?? 'N/A',
-            style: const TextStyle(
-              color: Colors.white50,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.5),
               fontSize: 11,
             ),
           ),
@@ -482,8 +482,8 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.white50,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.5),
             fontSize: 10,
           ),
         ),
@@ -586,7 +586,6 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
               ],
             ),
           );
-        );
       },
     );
   }
@@ -673,16 +672,16 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
           // Date
           Text(
             'Created: ${withdrawal['created_at'] ?? 'N/A'}',
-            style: const TextStyle(
-              color: Colors.white50,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.5),
               fontSize: 11,
             ),
           ),
           if (withdrawal['completed_at'] != null)
             Text(
               'Completed: ${withdrawal['completed_at']}',
-              style: const TextStyle(
-                color: Colors.white50,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
                 fontSize: 11,
               ),
             ),

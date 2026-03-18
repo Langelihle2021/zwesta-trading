@@ -86,7 +86,7 @@ class _UserWalletScreenState extends State<UserWalletScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('user_id');
-      final sessionToken = prefs.getString('auth_token');
+      final sessionToken = prefs.getString('auth_token') ?? '';
 
       if (userId == null) throw Exception('User not authenticated');
 
