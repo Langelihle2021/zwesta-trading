@@ -5540,25 +5540,25 @@ SYMBOL_PARAMETERS = {
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
-    'TSMm': {  # Semiconductor - highly volatile
-        'atr_multiplier': 1.8,  # Wider stops for high volatility
+    'AMDm': {  # Semiconductor - highly volatile
+        'atr_multiplier': 1.8,
         'stop_loss_pips': 20,
         'take_profit_pips': 40,
         'max_slippage': 0.0015,
-        'min_signal_strength': 65,  # Higher threshold - more selective
+        'min_signal_strength': 65,
         'volatility_high': 3.0,
         'volatility_low': 1.0,
     },
-    'AMDm': {
+    'TSMm': {  # Semiconductor - highly volatile
         'atr_multiplier': 1.8,
-        'stop_loss_pips': 18,
-        'take_profit_pips': 36,
+        'stop_loss_pips': 20,
+        'take_profit_pips': 40,
         'max_slippage': 0.0015,
         'min_signal_strength': 65,
-        'volatility_high': 2.8,
+        'volatility_high': 3.0,
         'volatility_low': 1.0,
     },
-    'MSFTm': {
+    'MSFTm': {  # Tech mega-cap - moderate volatility
         'atr_multiplier': 1.5,
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
@@ -5566,6 +5566,24 @@ SYMBOL_PARAMETERS = {
         'min_signal_strength': 60,
         'volatility_high': 1.8,
         'volatility_low': 0.6,
+    },
+    'NVDAm': {  # GPU leader - high volatility
+        'atr_multiplier': 1.7,
+        'stop_loss_pips': 18,
+        'take_profit_pips': 36,
+        'max_slippage': 0.0015,
+        'min_signal_strength': 63,
+        'volatility_high': 2.8,
+        'volatility_low': 0.9,
+    },
+    'BACm': {  # Bank of America - moderate volatility
+        'atr_multiplier': 1.4,
+        'stop_loss_pips': 12,
+        'take_profit_pips': 24,
+        'max_slippage': 0.001,
+        'min_signal_strength': 58,
+        'volatility_high': 1.6,
+        'volatility_low': 0.4,
     },
     # PRECIOUS METALS - High volatility
     'XAUUSDm': {
