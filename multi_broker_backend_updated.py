@@ -5226,29 +5226,13 @@ def get_account_info_alias():
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
-    # Crypto Pair (2)
-    'BTCUSD',   # Bitcoin / USD
-    'ETHUSD',   # Ethereum / USD
-    # Forex (9) - All major pairs now available
-    'EURUSD',   # Euro / USD
-    'GBPUSD',   # British Pound / USD (NEW)
-    'USDJPY',   # USD / Japanese Yen
-    'USDCHF',   # USD / Swiss Franc (m = micro)
-    'AUDUSD',   # Australian Dollar / USD (m = micro)
-    'NZDUSD',   # New Zealand Dollar / USD (m = micro)
-    'USDCAD',   # USD / Canadian Dollar (m = micro)
-    'USDSEK',   # USD / Swedish Krona (m = micro)
-    # Precious Metals (4)
-    'XAUUSD',   # Gold / USD
-    'XAGUSD',   # Silver / USD (m = micro)
-    'XPTUSD',   # Platinum / USD (m = micro)
-    'XPDUSD',   # Palladium / USD (m = micro)
-    # Commodities (1)
-    'XNIUSd',   # Nickel / USD (m = micro)
-    # Stocks/Indices (4)
-    'NVDA',     # NVIDIA (m = micro)
-    'AMD',      # Advanced Micro Devices (m = micro)
-    'INTC',     # Intel (m = micro)
+    # Only these 5 symbols are available on Exness Demo Account 298997455
+    # Verified in MT5 Market Watch - these are the only tradeable symbols
+    'BTCUSD',   # Bitcoin / USD (shown as BTCUSDm in terminal)
+    'ETHUSD',   # Ethereum / USD (shown as ETHUSDm in terminal)
+    'EURUSD',   # Euro / USD (shown as EURUSDm in terminal)
+    'USDJPY',   # USD / Japanese Yen (shown as USDJPYm in terminal)
+    'XAUUSD',   # Gold / USD (shown as XAUUSDm in terminal)
 }
 
 BINANCE_VALID_SYMBOLS = {
@@ -5649,12 +5633,31 @@ position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
 
 # ==================== AUTO-INITIALIZE DEMO BOTS ====================
 def initialize_demo_bots():
-    """Auto-initialize demo trading bots on startup"""
+    """Auto-initialize demo trading bots on startup using VALID_SYMBOLS"""
+    # Convert VALID_SYMBOLS set to sorted list for consistent distribution
+    valid_symbols_list = sorted(list(VALID_SYMBOLS))
+    
+    # Dynamically distribute symbols across 3 demo bots
+    # Split symbols into 3 groups to ensure each bot has a different strategy focus
+    symbols_per_bot = len(valid_symbols_list) // 3
+    
+    forex_symbols = [s for s in valid_symbols_list if s in ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDSEK']]
+    metals_symbols = [s for s in valid_symbols_list if s in ['XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD']]
+    crypto_stock_symbols = [s for s in valid_symbols_list if s in ['BTCUSD', 'ETHUSD', 'XNIUSD', 'NVDA', 'AMD', 'INTC']]
+    
+    # Ensure we have symbols for each bot, fallback to evenly distributed if needed
+    if not forex_symbols:
+        forex_symbols = valid_symbols_list[:symbols_per_bot]
+    if not metals_symbols:
+        metals_symbols = valid_symbols_list[symbols_per_bot:2*symbols_per_bot]
+    if not crypto_stock_symbols:
+        crypto_stock_symbols = valid_symbols_list[2*symbols_per_bot:]
+    
     demo_bots_config = [
         {
             'botId': 'DemoBot_EURUSD_TrendFollow',
             'accountId': 'Demo MT5 - XM Global',
-            'symbols': ['EURUSD', 'GBPUSD', 'XAUUSD'],
+            'symbols': forex_symbols if forex_symbols else valid_symbols_list[:max(1, len(valid_symbols_list)//3)],
             'strategy': 'Trend Following',
             'riskPerTrade': 100,
             'maxDailyLoss': 500,
@@ -5666,7 +5669,7 @@ def initialize_demo_bots():
         {
             'botId': 'DemoBot_Commodities_MeanReversion',
             'accountId': 'Demo MT5 - XM Global',
-            'symbols': ['XPTUSD', 'OILK', 'USDCHF'],
+            'symbols': metals_symbols if metals_symbols else valid_symbols_list[max(1, len(valid_symbols_list)//3):max(2, 2*len(valid_symbols_list)//3)],
             'strategy': 'Mean Reversion',
             'riskPerTrade': 75,
             'maxDailyLoss': 400,
@@ -5676,16 +5679,16 @@ def initialize_demo_bots():
             'basePositionSize': 0.8
         },
         {
-            'botId': 'DemoBot_Indices_RangeTrading',
+            'botId': 'DemoBot_Crypto_AlternativeAssets',
             'accountId': 'Demo MT5 - XM Global',
-            'symbols': ['SP500m', 'DAX', 'USDCAD'],
-            'strategy': 'Range Trading',
-            'riskPerTrade': 125,
-            'maxDailyLoss': 600,
+            'symbols': crypto_stock_symbols if crypto_stock_symbols else valid_symbols_list[max(2, 2*len(valid_symbols_list)//3):],
+            'strategy': 'Momentum Trading',
+            'riskPerTrade': 80,
+            'maxDailyLoss': 450,
             'enabled': True,
             'autoSwitch': True,
             'dynamicSizing': True,
-            'basePositionSize': 1.2
+            'basePositionSize': 0.9
         }
     ]
     

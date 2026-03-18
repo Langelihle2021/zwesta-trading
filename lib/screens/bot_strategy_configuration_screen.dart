@@ -28,29 +28,13 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
   final List<String> _riskLevels = ['LOW', 'MEDIUM', 'HIGH'];
 
   final List<String> _commonSymbols = [
-    // Crypto
-    'BTCUSD',
-    'ETHUSD',
-    // Forex (Major Pairs)
-    'EURUSD',
-    'GBPUSD',
-    'USDJPY',
-    'USDCHF',
-    'AUDUSD',
-    'NZDUSD',
-    'USDCAD',
-    'USDSEK',
-    // Precious Metals
-    'XAUUSD',
-    'XAGUSD',
-    'XPTUSD',
-    'XPDUSD',
-    // Commodities
-    'XNIUSD',
-    // Stocks
-    'NVDA',
-    'AMD',
-    'INTC'
+    // Only tradeable symbols on Exness Demo Account 298997455
+    // Verified in MT5 Market Watch
+    'BTCUSD',   // Bitcoin
+    'ETHUSD',   // Ethereum
+    'EURUSD',   // Euro
+    'USDJPY',   // Japanese Yen
+    'XAUUSD',   // Gold
   ];
 
   @override
