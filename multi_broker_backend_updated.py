@@ -84,6 +84,9 @@ def repopulate_active_bots():
 # ==================== CONFIGURATION ====================
 # Environment Configuration (DEMO or LIVE)
 ENVIRONMENT = os.getenv('TRADING_ENV', 'DEMO')  # Set TRADING_ENV=LIVE in production
+AUTO_RESTART_BOTS_ON_STARTUP = os.getenv('AUTO_RESTART_BOTS_ON_STARTUP', 'false').lower() == 'true'
+BOT_STARTUP_RESTART_DELAY_SECONDS = max(0.0, float(os.getenv('BOT_STARTUP_RESTART_DELAY_SECONDS', '2')))
+BOT_STARTUP_RESTART_LIMIT = max(0, int(os.getenv('BOT_STARTUP_RESTART_LIMIT', '0')))
 
 # API Security Configuration
 API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production')
@@ -5975,6 +5978,10 @@ def _get_bot_thread_credentials(bot_config: Dict[str, Any]) -> Optional[Dict[str
 
 def start_enabled_bots_on_startup():
     """Restart previously enabled bots after a backend/VPS restart."""
+    if not AUTO_RESTART_BOTS_ON_STARTUP:
+        logger.warning("⏸️ Auto-restart of bots on backend startup is disabled (set AUTO_RESTART_BOTS_ON_STARTUP=true to enable)")
+        return 0
+
     restarted_bots = 0
 
     for bot_id, bot_config in active_bots.items():
@@ -5982,6 +5989,11 @@ def start_enabled_bots_on_startup():
             continue
         if bot_id in bot_threads and bot_threads[bot_id].is_alive():
             continue
+        if BOT_STARTUP_RESTART_LIMIT and restarted_bots >= BOT_STARTUP_RESTART_LIMIT:
+            logger.warning(
+                f"⏸️ Reached BOT_STARTUP_RESTART_LIMIT={BOT_STARTUP_RESTART_LIMIT}; remaining enabled bots were not auto-restarted"
+            )
+            break
 
         bot_config['symbols'] = validate_and_correct_symbols(
             bot_config.get('symbols', ['EURUSDm']),
@@ -6002,8 +6014,35 @@ def start_enabled_bots_on_startup():
         bot_thread.start()
         restarted_bots += 1
         logger.info(f"♻️ Restarted bot {bot_id} from persisted runtime state")
+        if BOT_STARTUP_RESTART_DELAY_SECONDS > 0:
+            time.sleep(BOT_STARTUP_RESTART_DELAY_SECONDS)
 
     return restarted_bots
+
+
+def stop_bot_runtime(bot_id: str, bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+        logger.info(f"🛑 Bot {bot_id}: Stopping background trading thread...")
+        bot_stop_flags[bot_id] = True
+        bot_threads[bot_id].join(timeout=30)
+        logger.info(f"✅ Bot {bot_id}: Background thread stopped")
+
+    bot_config['enabled'] = False
+    running_bots[bot_id] = False
+    persist_bot_runtime_state(bot_id)
+
+    logger.info(f"⏸️ Bot {bot_id} stopped (still in system, can be restarted)")
+    logger.info(f"   Total Trades: {bot_config.get('totalTrades', 0)}")
+    logger.info(f"   Total Profit: ${bot_config.get('totalProfit', 0):.2f}")
+
+    return {
+        'botId': bot_id,
+        'totalTrades': bot_config.get('totalTrades', 0),
+        'winningTrades': bot_config.get('winningTrades', 0),
+        'totalProfit': round(float(bot_config.get('totalProfit', 0.0) or 0.0), 2),
+        'mode': bot_config.get('mode', 'demo'),
+        'symbols': bot_config.get('symbols', []),
+    }
 
 
 def load_user_bots_from_database(enabled_only: bool = False):
@@ -9277,35 +9316,76 @@ def stop_bot(bot_id):
         if not db_bot or db_bot['user_id'] != user_id:
             return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
         
-        # Stop continuous trading thread if running
-        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
-            logger.info(f"🛑 Bot {bot_id}: Stopping background trading thread...")
-            bot_stop_flags[bot_id] = True
-            bot_threads[bot_id].join(timeout=30)
-            logger.info(f"✅ Bot {bot_id}: Background thread stopped")
-        
-        # Disable bot in config
-        bot_config['enabled'] = False
-        running_bots[bot_id] = False
-        persist_bot_runtime_state(bot_id)
-        
-        logger.info(f"⏸️ Bot {bot_id} stopped (still in system, can be restarted)")
-        logger.info(f"   Total Trades: {bot_config.get('totalTrades', 0)}")
-        logger.info(f"   Total Profit: ${bot_config.get('totalProfit', 0):.2f}")
+        final_stats = stop_bot_runtime(bot_id, bot_config)
         
         return jsonify({
             'success': True,
             'message': f'Bot {bot_id} stopped',
             'finalStats': {
-                'totalTrades': bot_config['totalTrades'],
-                'winningTrades': bot_config['winningTrades'],
-                'totalProfit': round(bot_config['totalProfit'], 2),
+                'totalTrades': final_stats['totalTrades'],
+                'winningTrades': final_stats['winningTrades'],
+                'totalProfit': final_stats['totalProfit'],
                 'note': 'Bot can be restarted later. Use /delete to permanently remove.'
             }
         }), 200
     
     except Exception as e:
         logger.error(f"Error stopping bot: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/stop-all', methods=['POST'])
+@require_session
+def stop_all_bots():
+    """Stop all matching bots for the authenticated user."""
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id') or request.user_id
+        mode_filter = (data.get('mode') or 'all').lower()
+        only_loss_making = bool(data.get('only_loss_making', False))
+
+        if not user_id:
+            return jsonify({'success': False, 'error': 'user_id required'}), 400
+        if mode_filter not in {'all', 'demo', 'live'}:
+            return jsonify({'success': False, 'error': 'mode must be one of: all, demo, live'}), 400
+
+        stopped_bots = []
+        skipped_bots = []
+
+        for bot_id, bot_config in list(active_bots.items()):
+            if bot_config.get('user_id') != user_id:
+                continue
+            if not bot_config.get('enabled'):
+                skipped_bots.append({'botId': bot_id, 'reason': 'already_disabled'})
+                continue
+
+            bot_mode = (bot_config.get('mode') or 'demo').lower()
+            if mode_filter != 'all' and bot_mode != mode_filter:
+                skipped_bots.append({'botId': bot_id, 'reason': f'mode_{bot_mode}'})
+                continue
+
+            total_profit = float(bot_config.get('totalProfit', 0.0) or 0.0)
+            daily_profit = float(bot_config.get('dailyProfit', 0.0) or 0.0)
+            if only_loss_making and total_profit >= 0 and daily_profit >= 0:
+                skipped_bots.append({'botId': bot_id, 'reason': 'not_loss_making'})
+                continue
+
+            stopped_bots.append(stop_bot_runtime(bot_id, bot_config))
+
+        logger.info(
+            f"🛑 Stopped {len(stopped_bots)} bots for user {user_id} "
+            f"(mode={mode_filter}, only_loss_making={only_loss_making})"
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'Stopped {len(stopped_bots)} bots',
+            'stoppedBots': stopped_bots,
+            'skippedBots': skipped_bots,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error stopping all bots: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
