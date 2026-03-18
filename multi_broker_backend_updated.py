@@ -1234,6 +1234,28 @@ class MT5Connection(BrokerConnection):
                 
                 try:
                     init_ok = False
+                    
+                    # On retry attempts, shutdown and restart terminal to clear IPC state
+                    if attempt > 1:
+                        logger.info(f"  🔄 Cleaning up previous MT5 state before retry...")
+                        try:
+                            self.mt5.shutdown()
+                        except:
+                            pass
+                        time.sleep(2)
+                        # Kill any lingering MT5 processes
+                        try:
+                            subprocess.run(['taskkill', '/F', '/IM', 'terminal64.exe'], 
+                                         stderr=subprocess.DEVNULL, check=False)
+                            subprocess.run(['taskkill', '/F', '/IM', 'terminal.exe'], 
+                                         stderr=subprocess.DEVNULL, check=False)
+                        except:
+                            pass
+                        time.sleep(2)
+                        # Restart terminal
+                        logger.info(f"  ⏳ Waiting 15 seconds for MT5 terminal to restart...")
+                        time.sleep(15)
+                    
                     # Prefer default initialize first (more reliable on VPS when terminal is already running)
                     init_ok = self.mt5.initialize()
 
