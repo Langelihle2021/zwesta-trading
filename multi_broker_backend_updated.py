@@ -113,34 +113,7 @@ ENVIRONMENT = os.getenv('TRADING_ENV', 'DEMO')  # Set TRADING_ENV=LIVE in produc
 API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production')
 
 # MT5 Credentials - DEMO (default)
-# Check multiple possible MT5 installation paths
-def find_mt5_path():
-    """Find MT5 installation path from common locations - returns path to terminal.exe or terminal64.exe"""
-    possible_paths = [
-        'C:\\Program Files\\MetaTrader 5',         # MetaQuotes MT5 (PRIMARY)
-        'C:\\Program Files (x86)\\MetaTrader 5',   # MT5 alternative
-        'C:\\Program Files\\XM Global MT5',        # XM installation
-        os.getenv('MT5_PATH', ''),                 # Environment variable
-    ]
-    
-    for path in possible_paths:
-        if path and os.path.exists(path):
-            # Check for terminal64.exe first (64-bit version, preferred)
-            terminal64_path = os.path.join(path, 'terminal64.exe')
-            if os.path.exists(terminal64_path):
-                logger.info(f"Found MT5 (64-bit) at: {terminal64_path}")
-                return terminal64_path  # Return FULL PATH to terminal64.exe
-            
-            # Fallback to terminal.exe (32-bit version)
-            terminal_path = os.path.join(path, 'terminal.exe')
-            if os.path.exists(terminal_path):
-                logger.info(f"Found MT5 (32-bit) at: {terminal_path}")
-                return terminal_path  # Return FULL PATH to terminal.exe
-    
-    logger.warning("MT5 not found in common paths - will use simulated trading as fallback")
-    return None  # Return None instead of default fallback
-
-# Exness MT5 Configuration (Default - DEMO)
+# Exness MT5 Configuration Only (NO standalone MT5 fallback)
 MT5_CONFIG = {
     'broker': 'Exness',
     'account': 298997455,  # Demo account
@@ -149,20 +122,22 @@ MT5_CONFIG = {
     'path': None
 }
 
-# Try to find Exness terminal specifically
+# Try to find Exness terminal specifically (PRIORITY: broker-specific only)
+exness_paths = [
+    r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+    r'C:\Program Files\Exness MT5\terminal64.exe',
+    r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+    r'C:\MT5\Exness\terminal64.exe',
+]
+for path in exness_paths:
+    if os.path.exists(path):
+        MT5_CONFIG['path'] = path
+        logger.info(f"Found Exness MT5 at: {path}")
+        break
+
 if MT5_CONFIG['path'] is None:
-    exness_paths = [
-        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
-        r'C:\Program Files\Exness MT5\terminal64.exe',
-        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
-        r'C:\MT5\Exness\terminal64.exe',
-    ]
-    for path in exness_paths:
-        if os.path.exists(path):
-            MT5_CONFIG['path'] = path
-            break
-    if MT5_CONFIG['path'] is None:
-        MT5_CONFIG['path'] = find_mt5_path()
+    logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
+    # Do NOT fallback to generic MT5 - require Exness-specific installation
 
 # Exness Credentials - Support DEMO and LIVE modes
 if ENVIRONMENT == 'LIVE':
@@ -1256,26 +1231,30 @@ class MT5Connection(BrokerConnection):
                         logger.info(f"  ⏳ Waiting 15 seconds for MT5 terminal to restart...")
                         time.sleep(15)
                     
-                    # Prefer default initialize first (more reliable on VPS when terminal is already running)
-                    init_ok = self.mt5.initialize()
+                    # ALWAYS use explicit Exness path (NO generic/standalone MT5 fallback)
+                    if not self.mt5_path:
+                        logger.error("❌ No Exness MT5 path configured - cannot continue without broker-specific MT5")
+                        continue
+                    
+                    # Initialize with Exness-specific path only
+                    normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
+                    if os.path.isdir(normalized_path):
+                        candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
+                        candidate_32 = os.path.join(normalized_path, 'terminal.exe')
+                        if os.path.isfile(candidate_64):
+                            normalized_path = candidate_64
+                        elif os.path.isfile(candidate_32):
+                            normalized_path = candidate_32
 
-                    # Fallback to explicit executable only when it is a real file path
-                    if not init_ok and self.mt5_path:
-                        normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
-                        if os.path.isdir(normalized_path):
-                            candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
-                            candidate_32 = os.path.join(normalized_path, 'terminal.exe')
-                            if os.path.isfile(candidate_64):
-                                normalized_path = candidate_64
-                            elif os.path.isfile(candidate_32):
-                                normalized_path = candidate_32
-
-                        if os.path.isfile(normalized_path):
-                            init_ok = self.mt5.initialize(path=normalized_path)
-                            if init_ok:
-                                self.mt5_path = normalized_path
-                            else:
-                                logger.warning(f"  ✗ MT5 initialize with explicit path failed: {self.mt5.last_error()}")
+                    if os.path.isfile(normalized_path):
+                        init_ok = self.mt5.initialize(path=normalized_path)
+                        if init_ok:
+                            self.mt5_path = normalized_path
+                        else:
+                            logger.warning(f"  ✗ Exness MT5 initialization failed: {self.mt5.last_error()}")
+                    else:
+                        logger.warning(f"  ✗ Exness MT5 path not found: {normalized_path}")
+                        init_ok = False
 
                     if init_ok:
                         # Successfully initialized, now try to login
