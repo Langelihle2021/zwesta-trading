@@ -5509,90 +5509,536 @@ def validate_and_correct_symbols(symbols, broker_name=None):
     
     return final[:5]  # Limit to 5 symbols max
 
-# ==================== BOT TRADING STRATEGY IMPLEMENTATIONS ====================
+# ==================== SYMBOL-SPECIFIC TRADING PARAMETERS ====================
+SYMBOL_PARAMETERS = {
+    # FOREX PAIRS - High liquidity, tight spreads
+    'EURUSDm': {
+        'atr_multiplier': 1.2,  # Tighter stops for liquid pairs
+        'stop_loss_pips': 8,
+        'take_profit_pips': 15,
+        'max_slippage': 0.0005,
+        'min_signal_strength': 50,
+        'volatility_high': 0.15,  # 0.15% is high volatility for FX
+        'volatility_low': 0.02,
+    },
+    'USDJPYm': {
+        'atr_multiplier': 1.2,
+        'stop_loss_pips': 8,
+        'take_profit_pips': 16,
+        'max_slippage': 0.0006,
+        'min_signal_strength': 50,
+        'volatility_high': 0.12,
+        'volatility_low': 0.02,
+    },
+    # STOCKS - Higher volatility, wider spreads
+    'AAPLm': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 15,
+        'take_profit_pips': 30,
+        'max_slippage': 0.001,
+        'min_signal_strength': 60,
+        'volatility_high': 2.0,
+        'volatility_low': 0.5,
+    },
+    'TSMm': {  # Semiconductor - highly volatile
+        'atr_multiplier': 1.8,  # Wider stops for high volatility
+        'stop_loss_pips': 20,
+        'take_profit_pips': 40,
+        'max_slippage': 0.0015,
+        'min_signal_strength': 65,  # Higher threshold - more selective
+        'volatility_high': 3.0,
+        'volatility_low': 1.0,
+    },
+    'AMDm': {
+        'atr_multiplier': 1.8,
+        'stop_loss_pips': 18,
+        'take_profit_pips': 36,
+        'max_slippage': 0.0015,
+        'min_signal_strength': 65,
+        'volatility_high': 2.8,
+        'volatility_low': 1.0,
+    },
+    'MSFTm': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 14,
+        'take_profit_pips': 28,
+        'max_slippage': 0.0012,
+        'min_signal_strength': 60,
+        'volatility_high': 1.8,
+        'volatility_low': 0.6,
+    },
+    # PRECIOUS METALS - High volatility
+    'XAUUSDm': {
+        'atr_multiplier': 1.6,
+        'stop_loss_pips': 12,
+        'take_profit_pips': 25,
+        'max_slippage': 0.001,
+        'min_signal_strength': 55,
+        'volatility_high': 1.5,
+        'volatility_low': 0.3,
+    },
+    # CRYPTOCURRENCIES - Extreme volatility
+    'BTCUSDm': {
+        'atr_multiplier': 2.0,  # Wide stops for crypto
+        'stop_loss_pips': 50,
+        'take_profit_pips': 100,
+        'max_slippage': 0.002,
+        'min_signal_strength': 70,
+        'volatility_high': 5.0,
+        'volatility_low': 1.0,
+    },
+    'ETHUSDm': {
+        'atr_multiplier': 2.0,
+        'stop_loss_pips': 40,
+        'take_profit_pips': 80,
+        'max_slippage': 0.002,
+        'min_signal_strength': 70,
+        'volatility_high': 4.0,
+        'volatility_low': 1.0,
+    },
+}
 
-def scalping_strategy(symbol, account_id, risk_amount):
-    """Scalping: Quick trades with small profits (2-5 pips). High win rate, low reward."""
-    import random
-    # Scalping: 70% win rate, small profits
-    is_winning = random.random() < 0.70
+# Default parameters for symbols not in the list
+DEFAULT_SYMBOL_PARAMS = {
+    'atr_multiplier': 1.5,
+    'stop_loss_pips': 15,
+    'take_profit_pips': 30,
+    'max_slippage': 0.001,
+    'min_signal_strength': 55,
+    'volatility_high': 2.0,
+    'volatility_low': 0.5,
+}
+
+# ==================== REAL TECHNICAL INDICATOR CALCULATIONS ====================
+
+def calculate_rsi(prices, period=14):
+    """Calculate Relative Strength Index (RSI) from price list
+    
+    RSI > 70 = Overbought (SELL signal)
+    RSI < 30 = Oversold (BUY signal)
+    RSI 30-70 = Neutral
+    """
+    if len(prices) < period + 1:
+        return 50  # Neutral if insufficient data
+    
+    # Calculate price changes
+    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+    
+    # Separate gains and losses
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+    
+    # Calculate average gain and loss
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+    
+    if avg_loss == 0:
+        return 100 if avg_gain > 0 else 50
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return min(100, max(0, rsi))
+
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """Calculate MACD (Moving Average Convergence Divergence)
+    
+    Returns: (macd_line, signal_line, histogram)
+    - MACD > Signal = BUY signal
+    - MACD < Signal = SELL signal
+    """
+    if len(prices) < slow + signal:
+        return 0, 0, 0
+    
+    # Calculate exponential moving averages
+    ema_fast = sum(prices[-fast:]) / fast
+    ema_slow = sum(prices[-slow:]) / slow
+    
+    macd_line = ema_fast - ema_slow
+    signal_line = (macd_line + sum([prices[i] - prices[i-1] for i in range(-signal, 0)]) / signal) / 2
+    histogram = macd_line - signal_line
+    
+    return macd_line, signal_line, histogram
+
+
+def calculate_moving_averages(prices, short=10, long=20):
+    """Calculate short and long moving averages
+    
+    Returns: (sma_short, sma_long)
+    - Price > MA20 = Uptrend
+    - Price < MA20 = Downtrend
+    - MA10 > MA20 = Strong uptrend
+    """
+    if len(prices) < long:
+        return prices[-1] if prices else 0, prices[-1] if prices else 0
+    
+    sma_short = sum(prices[-short:]) / short
+    sma_long = sum(prices[-long:]) / long
+    
+    return sma_short, sma_long
+
+
+def calculate_atr(highs, lows, closes, period=14):
+    """Calculate Average True Range (ATR) for volatility measurement
+    
+    Higher ATR = More volatile
+    Lower ATR = Less volatile
+    
+    Used for position sizing: wider stops on high ATR, tighter on low ATR
+    """
+    if len(closes) < period:
+        return 0.5  # Default minimum ATR
+    
+    true_ranges = []
+    for i in range(1, len(closes)):
+        high_low = highs[i] - lows[i]
+        high_close = abs(highs[i] - closes[i-1])
+        low_close = abs(lows[i] - closes[i-1])
+        tr = max(high_low, high_close, low_close)
+        true_ranges.append(tr)
+    
+    atr = sum(true_ranges[-period:]) / period if true_ranges else 0.5
+    return max(atr, 0.1)  # Ensure minimum of 0.1
+
+
+def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
+    """Evaluate a REAL trading signal based on technical indicators
+    
+    Returns: {
+        'signal': 'STRONG_BUY' | 'BUY' | 'SELL' | 'STRONG_SELL' | 'NEUTRAL',
+        'strength': 0-100,  # Signal confidence
+        'rsi': RSI value,
+        'trend': 'UP' | 'DOWN' | 'RANGING',
+        'volatility': 'HIGH' | 'MEDIUM' | 'LOW',
+        'entry_reason': string explanation,
+    }
+    """
+    try:
+        # Get price data from market_data
+        current_price = market_data.get('current_price', 0)
+        if current_price <= 0:
+            return {
+                'signal': 'NEUTRAL',
+                'strength': 0,
+                'rsi': 50,
+                'trend': 'RANGING',
+                'volatility': 'MEDIUM',
+                'entry_reason': 'Invalid price data',
+            }
+        
+        # Get price history
+        price_history = market_data.get('price_history', [current_price] * 30)[-30:]
+        if len(price_history) < 5:
+            price_history = [current_price] * 30
+        
+        # Calculate technical indicators
+        rsi = calculate_rsi(price_history, period=14)
+        ma_short, ma_long = calculate_moving_averages(price_history, short=10, long=20)
+        macd_line, signal_line, histogram = calculate_macd(price_history)
+        
+        # Determine trend
+        if current_price > ma_long:
+            if ma_short > ma_long:
+                trend = 'UP'
+            else:
+                trend = 'RANGING'
+        else:
+            trend = 'DOWN'
+        
+        # Determine volatility from market data
+        volatility_pct = market_data.get('volatility_pct', 1.0)
+        params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+        
+        if volatility_pct > params['volatility_high']:
+            volatility = 'HIGH'
+        elif volatility_pct > params['volatility_low']:
+            volatility = 'MEDIUM'
+        else:
+            volatility = 'LOW'
+        
+        # SIGNAL GENERATION
+        strength = 0
+        signal = 'NEUTRAL'
+        entry_reason = []
+        
+        # RSI-based signals (0-40)
+        if rsi < 30:
+            strength += 30
+            signal = 'BUY'
+            entry_reason.append(f'RSI oversold ({rsi:.0f})')
+        elif rsi > 70:
+            strength += 30
+            signal = 'SELL'
+            entry_reason.append(f'RSI overbought ({rsi:.0f})')
+        elif 45 < rsi < 55:
+            strength += 10
+            entry_reason.append(f'RSI neutral ({rsi:.0f})')
+        
+        # MACD-based signals (0-30)
+        if histogram > 0 and macd_line > signal_line:
+            strength += 20
+            if signal == 'NEUTRAL':
+                signal = 'BUY'
+            entry_reason.append('MACD bullish')
+        elif histogram < 0 and macd_line < signal_line:
+            strength += 20
+            if signal == 'NEUTRAL':
+                signal = 'SELL'
+            entry_reason.append('MACD bearish')
+        
+        # Trend-based signals (0-30)
+        if trend == 'UP':
+            if signal != 'SELL':
+                strength += 15
+                if signal == 'NEUTRAL':
+                    signal = 'BUY'
+                entry_reason.append('Uptrend confirmed')
+        elif trend == 'DOWN':
+            if signal != 'BUY':
+                strength += 15
+                if signal == 'NEUTRAL':
+                    signal = 'SELL'
+                entry_reason.append('Downtrend confirmed')
+        
+        # Volatility adjustment (0-10)
+        if volatility == 'LOW':
+            strength += 5
+            entry_reason.append('Low volatility - good for tight stops')
+        elif volatility == 'HIGH' and signal != 'NEUTRAL':
+            strength -= 10
+            entry_reason.append('High volatility - reduced confidence')
+        
+        # Determine signal strength category
+        if signal == 'NEUTRAL':
+            strength = 0
+        else:
+            # Amplify if multiple indicators agree
+            if len(entry_reason) > 2:
+                strength = min(100, strength + 20)
+                signal = f'STRONG_{signal}'
+        
+        strength = min(100, max(0, strength))
+        
+        return {
+            'signal': signal,
+            'strength': strength,
+            'rsi': round(rsi, 1),
+            'trend': trend,
+            'volatility': volatility,
+            'entry_reason': ' + '.join(entry_reason) if entry_reason else 'No clear signal',
+        }
+    
+    except Exception as e:
+        logger.warning(f"Error evaluating signal for {symbol}: {e}")
+        return {
+            'signal': 'NEUTRAL',
+            'strength': 0,
+            'rsi': 50,
+            'trend': 'RANGING',
+            'volatility': 'MEDIUM',
+            'entry_reason': f'Error: {str(e)}',
+        }
+
+
+# ==================== BOT TRADING STRATEGY IMPLEMENTATIONS (REAL MARKET BASED) ====================
+
+def scalping_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Scalping: Quick trades with small profits (2-3 pips). HIGH WIN RATE, LOW REWARD.
+    
+    Best for: Liquid pairs (EURUSD), low volatility
+    Entry: Strong support/resistance, RSI extreme
+    Exit: Quick profit or bounceback stop
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+    
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    
+    # Check if signal is strong enough
+    if signal_eval['strength'] < params['min_signal_strength']:
+        return None  # Don't trade on weak signal
+    
+    # Determine direction from signal
+    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+    
+    # Tight parameters for scalping
     return {
         'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(1.0, 3.0),
-        'stop_loss': 5,  # 5 pips
-        'take_profit': 3,  # 3 pips
-        'profit': risk_amount * 0.05 if is_winning else -risk_amount * 0.05,
+        'type': order_type,
+        'volume': 1.0 * (1.0 if signal_eval['strength'] > 70 else 0.7),  # Position size based on signal strength
+        'stop_loss': params['stop_loss_pips'] * 0.5,  # Half the normal stop for scalping
+        'take_profit': params['take_profit_pips'] * 0.3,  # Tight TP for quick exit
+        'signal': signal_eval,
+        'duration_seconds': 300,  # 5 minute scalp
     }
 
-def momentum_strategy(symbol, account_id, risk_amount):
-    """Momentum: Follow strong price movements. Moderate win rate, good rewards."""
-    import random
-    # Momentum: 60% win rate, higher rewards
-    is_winning = random.random() < 0.60
+
+def momentum_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Momentum: Follow strong price movements. MODERATE WIN RATE, GOOD REWARDS.
+    
+    Best for: Trending markets, moving averages aligned
+    Entry: Price breaks above/below key level with volume
+    Exit: Profit target or MA crossover
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+    
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    
+    # Only trade strong signals in momentum mode
+    if signal_eval['strength'] < params['min_signal_strength'] + 5:
+        return None
+    
+    # Only trade if trend exists
+    if signal_eval['trend'] == 'RANGING':
+        return None
+    
+    order_type = 'BUY' if signal_eval['trend'] == 'UP' else 'SELL'
+    
     return {
         'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.5, 2.0),
-        'stop_loss': 15,  # 15 pips
-        'take_profit': 30,  # 30 pips
-        'profit': risk_amount * 0.30 if is_winning else -risk_amount * 0.15,
+        'type': order_type,
+        'volume': 1.5 * (signal_eval['strength'] / 80),  # Scale with signal strength
+        'stop_loss': params['stop_loss_pips'],
+        'take_profit': params['take_profit_pips'] * 1.5,  # Bigger TP for momentum
+        'signal': signal_eval,
+        'duration_seconds': 900,  # 15 minutes
     }
 
-def trend_following_strategy(symbol, account_id, risk_amount):
-    """Trend Following: Hold trades longer (big trends). Lower win rate, higher rewards."""
-    import random
-    # Trend Following: 55% win rate, larger rewards
-    is_winning = random.random() < 0.55
+
+def trend_following_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Trend Following: Hold trades longer (big trends). LOWER WIN RATE, HIGHER REWARDS.
+    
+    Best for: Long-term trending markets
+    Entry: Breakout on trend confirmation
+    Exit: Trend reversal or fixed profit target
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+    
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    
+    # Trend following needs strong trend + strong signal
+    if signal_eval['trend'] == 'RANGING':
+        return None
+    
+    if signal_eval['strength'] < params['min_signal_strength']:
+        return None
+    
+    order_type = 'BUY' if signal_eval['trend'] == 'UP' else 'SELL'
+    
     return {
         'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.3, 1.5),
-        'stop_loss': 25,  # 25 pips
-        'take_profit': 50,  # 50 pips
-        'profit': risk_amount * 0.50 if is_winning else -risk_amount * 0.25,
+        'type': order_type,
+        'volume': 1.2,
+        'stop_loss': params['stop_loss_pips'] * 1.3,  # Wider stop for trend
+        'take_profit': params['take_profit_pips'] * 2.0,  # Large TP for big move
+        'signal': signal_eval,
+        'duration_seconds': 3600,  # 1 hour
     }
 
-def mean_reversion_strategy(symbol, account_id, risk_amount):
-    """Mean Reversion: Trade when price extreme. High win rate, medium rewards."""
-    import random
-    # Mean Reversion: 65% win rate, medium rewards
-    is_winning = random.random() < 0.65
+
+def mean_reversion_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Mean Reversion: Trade when price extreme. HIGH WIN RATE, MEDIUM REWARDS.
+    
+    Best for: Ranging markets, overbought/oversold conditions
+    Entry: RSI extreme (>70 or <30)
+    Exit: Return to mean or fixed profit
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+    
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    
+    # Mean reversion works best when price is extreme (RSI <30 or >70)
+    if not (signal_eval['rsi'] < 30 or signal_eval['rsi'] > 70):
+        return None  # Only trade at extremes
+    
+    if signal_eval['strength'] < params['min_signal_strength'] - 5:
+        return None
+    
+    # Trade against the extreme
+    order_type = 'BUY' if signal_eval['rsi'] > 70 else 'SELL'
+    
     return {
         'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.5, 2.0),
-        'stop_loss': 20,  # 20 pips
-        'take_profit': 25,  # 25 pips
-        'profit': risk_amount * 0.20 if is_winning else -risk_amount * 0.20,
+        'type': order_type,
+        'volume': 1.1,
+        'stop_loss': params['stop_loss_pips'],
+        'take_profit': params['take_profit_pips'],  # Standard TP
+        'signal': signal_eval,
+        'duration_seconds': 600,  # 10 minutes
     }
 
-def range_trading_strategy(symbol, account_id, risk_amount):
-    """Range Trading: Buy low, sell high within range. Very high win rate, lower rewards."""
-    import random
-    # Range Trading: 72% win rate, lower rewards
-    is_winning = random.random() < 0.72
+
+def range_trading_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Range Trading: Buy low, sell high within range. VERY HIGH WIN RATE, LOWER REWARDS.
+    
+    Best for: Consolidating markets with clear support/resistance
+    Entry: Price near support (BUY) or resistance (SELL)
+    Exit: Opposite level or reversal
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+    
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    
+    # Range trading only works in ranging market
+    if signal_eval['trend'] != 'RANGING':
+        return None
+    
+    if signal_eval['strength'] < params['min_signal_strength'] - 10:
+        return None
+    
+    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+    
     return {
         'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.8, 2.5),
-        'stop_loss': 10,  # 10 pips
-        'take_profit': 12,  # 12 pips
-        'profit': risk_amount * 0.08 if is_winning else -risk_amount * 0.08,
+        'type': order_type,
+        'volume': 1.3,
+        'stop_loss': params['stop_loss_pips'] * 0.7,  # Tighter stop for range
+        'take_profit': params['take_profit_pips'] * 0.7,  # Quick exit when range breaks
+        'signal': signal_eval,
+        'duration_seconds': 480,  # 8 minutes
     }
 
-def breakout_strategy(symbol, account_id, risk_amount):
-    """Breakout: Trade when price breaks support/resistance. Moderate win rate, high rewards."""
-    import random
-    # Breakout: 58% win rate, high rewards
-    is_winning = random.random() < 0.58
+
+def breakout_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Breakout: Trade when price breaks support/resistance. MODERATE WIN RATE, HIGH REWARDS.
+    
+    Best for: Price nearing key levels
+    Entry: Break above/below with momentum
+    Exit: Continuation target or failed breakout
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+    
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    
+    # Breakout needs strong signal and trend presence
+    if signal_eval['strength'] < params['min_signal_strength'] + 10:
+        return None
+    
+    if signal_eval['trend'] == 'RANGING':
+        return None
+    
+    order_type = 'BUY' if signal_eval['trend'] == 'UP' else 'SELL'
+    
     return {
         'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.4, 1.8),
-        'stop_loss': 28,  # 28 pips
-        'take_profit': 60,  # 60 pips
-        'profit': risk_amount * 0.60 if is_winning else -risk_amount * 0.28,
+        'type': order_type,
+        'volume': 1.0,
+        'stop_loss': params['stop_loss_pips'] * 1.2,  # Protective stop behind level
+        'take_profit': params['take_profit_pips'] * 2.5,  # Large profit target for breakout continuation
+        'signal': signal_eval,
+        'duration_seconds': 1200,  # 20 minutes
     }
 
 STRATEGY_MAP = {
@@ -8587,10 +9033,24 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         else:
                             position_size = bot_config.get('basePositionSize', 1.0)
                         
-                        # Get trade direction from strategy
-                        trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'])
+                        # Get market data for this symbol
+                        market_data = commodity_market_data.get(symbol, {'current_price': 0, 'volatility_pct': 1.0})
+                        
+                        # Get trade direction from REAL signal-based strategy
+                        trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'], market_data)
+                        
+                        # Skip trade if signal strength is too low
+                        if trade_params is None:
+                            logger.info(f"⏭️ Bot {bot_id}: Skipping {symbol} - signal strength insufficient")
+                            continue
+                        
                         adjusted_volume = trade_params['volume'] * position_size
                         order_type = trade_params['type']
+                        
+                        # Log signal details
+                        signal_info = trade_params.get('signal', {})
+                        logger.info(f"🎯 Bot {bot_id}: {signal_info.get('signal', 'UNKNOWN')} signal on {symbol}")
+                        logger.info(f"   Signal Strength: {signal_info.get('strength', 0):.0f}/100 | Reason: {signal_info.get('entry_reason', 'N/A')}")
                         
                         # Place order via broker with RETRY LOGIC
                         logger.info(f"📍 Bot {bot_id}: Placing {order_type} order on {symbol} via {broker_type} | Cycle: {trade_cycle}")
@@ -8717,16 +9177,41 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             break
                                 
                                 if matched_pos:
-                                    pos = matched_pos
-                                    pos_symbol = pos.get('symbol') or pos.get('instrument') or pos.get('epic', '')
-                                    pos_type = pos.get('type') or pos.get('direction', '')
+                                    # ==================== PROFIT-LOCKING SYSTEM ====================
+                                    # If position has reached 50% of profit target, move stop loss to breakeven
+                                    expected_max_profit = trade_params.get('take_profit', 30)  # In pips
+                                    breakeven_threshold = expected_max_profit * 0.5  # 50% of TP
                                     
-                                    # Use position PnL if matched by ticket, otherwise use strategy profit
-                                    if matched_by_ticket:
-                                        trade_profit = pos.get('pnl') or pos.get('profit_loss') or pos.get('unrealizedPL', 0)
-                                    else:
-                                        # Use strategy function profit (refined strategies with proper win rates)
-                                        trade_profit = trade_params.get('profit', 0)
+                                    if trade_profit > 0 and abs(trade_profit) >= breakeven_threshold:
+                                        logger.info(f"💰 Bot {bot_id}: Position on {symbol} at 50% profit (${trade_profit:.2f}) - MOVING STOP TO BREAKEVEN")
+                                        
+                                        # Update stop loss in MT5/broker
+                                        try:
+                                            if is_mt5 and mt5_conn:
+                                                # Move stop to entry price (breakeven)
+                                                mt5_conn.modify_position_stop_loss(
+                                                    ticket=pos.get('ticket'),
+                                                    new_stop_loss=trade['entryPrice']
+                                                )
+                                        except Exception as e:
+                                            logger.warning(f"Bot {bot_id}: Could not modify stop loss to breakeven: {e}")
+                                    
+                                    # If position has reached 75% of profit target, start trailing stop
+                                    trail_threshold = expected_max_profit * 0.75
+                                    if trade_profit > 0 and abs(trade_profit) >= trail_threshold:
+                                        logger.info(f"🚀 Bot {bot_id}: Position on {symbol} at 75% profit (${trade_profit:.2f}) - ENABLING TRAILING STOP (5 pips)")
+                                        
+                                        try:
+                                            if is_mt5 and mt5_conn:
+                                                # Set trailing stop at 5 pips
+                                                mt5_conn.set_trailing_stop(
+                                                    ticket=pos.get('ticket'),
+                                                    trail_pips=5
+                                                )
+                                        except Exception as e:
+                                            logger.warning(f"Bot {bot_id}: Could not set trailing stop: {e}")
+                                    
+                                    # ==================== END PROFIT-LOCKING ====================
                                     
                                     trade = {
                                             'ticket': pos.get('ticket') or pos.get('deal_id', ''),
