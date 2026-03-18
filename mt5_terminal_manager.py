@@ -3,87 +3,66 @@ import subprocess
 import time
 import sys
 
-# Mapping of broker name to MT5 terminal path
+# EXNESS MT5 ONLY - NO GENERIC/STANDALONE MT5 FALLBACK
+# Mapping of broker name to MT5 terminal path (Exness primary)
 MT5_TERMINALS = {
-    'MetaQuotes': r'C:\MT5\MetaQuotes\terminal64.exe',
-    'XM': r'C:\Program Files\XM Global MT5\terminal64.exe',
-    'XM Global': r'C:\Program Files\XM Global MT5\terminal64.exe',
     'Exness': r'C:\Program Files\Exness MT5\terminal64.exe',
+    'MetaQuotes': r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',  # Exness-branded MetaQuotes
 }
 
 # Track running processes
 running_terminals = {}
 
 
-def detect_default_mt5_terminal():
-    """Detect a standard local MT5 terminal path as fallback."""
-    candidates = [
-        r'C:\Program Files\MetaTrader 5\terminal64.exe',
-        r'C:\Program Files\MetaTrader 5\terminal.exe',
-        r'C:\Program Files (x86)\MetaTrader 5\terminal64.exe',
-        r'C:\Program Files (x86)\MetaTrader 5\terminal.exe',
+def detect_exness_mt5_terminal():
+    """Detect Exness-specific MT5 terminal paths ONLY (no generic fallback)."""
+    exness_candidates = [
+        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+        r'C:\Program Files\MetaTrader 5 EXNESS\terminal.exe',
+        r'C:\Program Files\Exness MT5\terminal64.exe',
+        r'C:\Program Files\Exness MT5\terminal.exe',
+        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+        r'C:\Program Files (x86)\Exness MT5\terminal.exe',
+        r'C:\MT5\Exness\terminal64.exe',
+        r'C:\MT5\Exness\terminal.exe',
     ]
-    for path in candidates:
+    for path in exness_candidates:
         if os.path.exists(path):
             return path
     return None
 
 
 def detect_broker_mt5_terminal(broker):
-    """Detect broker-specific MT5 terminal paths before falling back to generic MT5."""
-    broker_candidates = {
-        'XM': [
-            r'C:\Program Files\XM Global MT5\terminal64.exe',
-            r'C:\Program Files\XM Global MT5\terminal.exe',
-            r'C:\MT5\XMGlobal\terminal64.exe',
-            r'C:\MT5\XMGlobal\terminal.exe',
-        ],
-        'XM Global': [
-            r'C:\Program Files\XM Global MT5\terminal64.exe',
-            r'C:\Program Files\XM Global MT5\terminal.exe',
-            r'C:\MT5\XMGlobal\terminal64.exe',
-            r'C:\MT5\XMGlobal\terminal.exe',
-        ],
-        'Exness': [
-            r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
-            r'C:\Program Files\MetaTrader 5 EXNESS\terminal.exe',
-            r'C:\Program Files\Exness MT5\terminal64.exe',
-            r'C:\Program Files\Exness MT5\terminal.exe',
-            r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
-            r'C:\Program Files (x86)\Exness MT5\terminal.exe',
-            r'C:\MT5\Exness\terminal64.exe',
-            r'C:\MT5\Exness\terminal.exe',
-        ],
-        'MetaQuotes': [
-            r'C:\Program Files\MetaTrader 5\terminal64.exe',
-            r'C:\Program Files\MetaTrader 5\terminal.exe',
-            r'C:\Program Files (x86)\MetaTrader 5\terminal64.exe',
-            r'C:\Program Files (x86)\MetaTrader 5\terminal.exe',
-            r'C:\MT5\MetaQuotes\terminal64.exe',
-            r'C:\MT5\MetaQuotes\terminal.exe',
-        ],
-    }
-
-    for path in broker_candidates.get(broker, []):
-        if os.path.exists(path):
-            return path
-
-    return detect_default_mt5_terminal()
+    """Detect broker-specific MT5 terminal paths (Exness only, no generic MT5 fallback)."""
+    # For now, only Exness is supported with broker-specific paths
+    if broker and 'Exness' in broker:
+        return detect_exness_mt5_terminal()
+    
+    # Default to Exness for any MT5 broker
+    exness_path = detect_exness_mt5_terminal()
+    if exness_path:
+        return exness_path
+    
+    return None
 
 def launch_mt5_terminal(broker):
+    """Launch Exness MT5 terminal (broker-specific only, no generic MT5)."""
     path = MT5_TERMINALS.get(broker)
     if not path or not os.path.exists(path):
         fallback = detect_broker_mt5_terminal(broker)
         if fallback:
             path = fallback
-            print(f"[INFO] Using fallback MT5 terminal for {broker or 'default'}: {path}")
+            print(f"[INFO] Using Exness MT5 terminal for {broker}: {path}")
         else:
-            print(f"[WARN] Terminal for {broker} not found at {path}")
+            print(f"[ERROR] ❌ Exness MT5 terminal not found for broker '{broker}'")
+            print(f"        Please ensure Exness MT5 is installed at one of:")
+            print(f"        - C:\\Program Files\\Exness MT5\\terminal64.exe")
+            print(f"        - C:\\Program Files\\MetaTrader 5 EXNESS\\terminal64.exe")
             return None
     # Launch with /portable to keep data/config isolated
     proc = subprocess.Popen([path, '/portable'])
     running_terminals[broker] = proc
-    print(f"[INFO] Launched {broker} MT5 terminal (PID: {proc.pid})")
+    print(f"[INFO] ✓ Launched Exness MT5 terminal for {broker} (PID: {proc.pid})")
     return proc
 
 def ensure_mt5_running(broker):
