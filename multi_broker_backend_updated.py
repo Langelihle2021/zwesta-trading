@@ -11085,6 +11085,52 @@ def admin_withdrawals():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/withdrawals/pending', methods=['GET'])
+@require_admin
+def admin_get_pending_exness_withdrawals():
+    """Get list of pending Exness withdrawals for admin verification (Flutter UI)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                withdrawal_id,
+                user_id,
+                profit_from_trades,
+                commission_earned,
+                created_at
+            FROM exness_withdrawals 
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+        ''')
+        
+        withdrawals = []
+        for row in cursor.fetchall():
+            withdrawal_dict = dict(row)
+            # Get user name for display
+            cursor.execute('SELECT name FROM users WHERE user_id = ?', (withdrawal_dict['user_id'],))
+            user_row = cursor.fetchone()
+            if user_row:
+                withdrawal_dict['user_name'] = user_row['name']
+            
+            withdrawals.append(withdrawal_dict)
+        
+        conn.close()
+        
+        logger.info(f"Admin fetched {len(withdrawals)} pending Exness withdrawals")
+        
+        return jsonify({
+            'success': True,
+            'withdrawals': withdrawals,
+            'count': len(withdrawals)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error fetching pending Exness withdrawals: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/withdrawal/<withdrawal_id>/approve', methods=['POST'])
 @require_api_key
 def approve_withdrawal(withdrawal_id):

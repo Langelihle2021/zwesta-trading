@@ -42,6 +42,8 @@ import 'ig_withdrawal_screen.dart';
 import 'oanda_withdrawal_screen.dart';
 import 'fxcm_withdrawal_screen.dart';
 import 'binance_withdrawal_screen.dart';
+import 'admin_withdrawal_verification_screen.dart';
+import 'user_wallet_screen.dart';
 import 'unified_broker_dashboard_screen.dart';
 import 'crypto_strategies_screen.dart';
 import 'trade_history_screen.dart';
@@ -1619,6 +1621,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const BinanceWithdrawalScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF9C27B0)),
+            title: const Text('My Wallet', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('View earned balance & pending withdrawals', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const UserWalletScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.admin_panel_settings, color: Color(0xFFE74C3C)),
+            title: const Text('Admin: Verify Withdrawals', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Verify Exness withdrawals & split commission', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminWithdrawalVerificationScreen()));
             },
           ),
           const Divider(color: Colors.white12),
