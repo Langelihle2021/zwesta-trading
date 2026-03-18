@@ -339,6 +339,56 @@ class BotService extends ChangeNotifier {
     }
   }
 
+  /// Delete ALL bots - start fresh
+  Future<bool> deleteAllBots() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+
+      if (sessionToken == null || sessionToken.isEmpty) {
+        _errorMessage = 'Session expired. Please login again.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      final response = await http.post(
+        Uri.parse('$_apiUrl/api/bots/delete-all'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          print('✅ All bots deleted: ${data['deleted_count']} bots removed');
+          _activeBots = [];
+          _bot = null;
+          await fetchActiveBots();
+          return true;
+        }
+      } else if (response.statusCode == 401) {
+        _errorMessage = 'Session expired. Please login again.';
+      } else {
+        _errorMessage = jsonDecode(response.body)['error'] ?? 'Failed to delete all bots';
+      }
+      return false;
+    } catch (e) {
+      _errorMessage = 'Error deleting all bots: $e';
+      print('Delete all bots error: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _initializeBot() async {
     _isLoading = true;
     notifyListeners();

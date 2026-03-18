@@ -56,6 +56,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
       appBar: CustomAppBar(
         title: 'Account Management',
         showBackButton: true,
+        showLogo: false,
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -103,49 +104,51 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                   ],
                 ),
                 padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 120,
-                        height: 120,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [Colors.blue.shade400, Colors.purple.shade400],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [Colors.blue.shade400, Colors.purple.shade400],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.4),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.blue.withOpacity(0.4),
-                              blurRadius: 20,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.person,
-                          size: 60,
-                          color: Colors.white,
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(
-                        authService.currentUser?.fullName ?? 'User',
-                        style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
-                        ),
+                      child: const Icon(
+                        Icons.person,
+                        size: 60,
+                        color: Colors.white,
                       ),
-                      const SizedBox(height: AppSpacing.sm),
-                      Text(
-                        authService.currentUser?.email ?? '',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white70,
-                          fontSize: 13,
-                        ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      authService.currentUser?.fullName ?? 'User',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
                       ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      authService.currentUser?.email ?? '',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
+                    ),
                       const SizedBox(height: AppSpacing.md),
                       Container(
                         padding: const EdgeInsets.symmetric(

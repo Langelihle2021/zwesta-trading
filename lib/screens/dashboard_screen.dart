@@ -1647,6 +1647,102 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _showDeleteAllBotsConfirmation() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_rounded, color: Color(0xFFFF8A80)),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Delete All Bots?',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This will permanently delete all your bots and you will start fresh.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF8A80).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFF8A80).withOpacity(0.3)),
+              ),
+              child: const Text(
+                '⚠️  This action cannot be undone!',
+                style: TextStyle(color: Color(0xFFFF8A80), fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => _deleteAllBots(ctx),
+            icon: const Icon(Icons.delete_sweep),
+            label: const Text('Delete All'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF8A80),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteAllBots(BuildContext ctx) async {
+    Navigator.pop(ctx);
+    final botService = context.read<BotService>();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('🗑️  Deleting all bots...'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    final success = await botService.deleteAllBots();
+
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ All bots deleted successfully!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        setState(() {
+          _realBotsList = [];
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: ${botService.errorMessage ?? "Failed to delete bots"}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildDrawerMenu(AppLocalizations loc) {
     return Drawer(
       backgroundColor: const Color(0xFF111633),
@@ -1979,6 +2075,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             },
           ),
           const Divider(color: Colors.white12),
+          ListTile(
+            leading: const Icon(Icons.delete_sweep, color: Color(0xFFFF8A80)),
+            title: const Text('Delete All Bots', style: TextStyle(color: Color(0xFFFF8A80))),
+            subtitle: const Text('Remove all bots and start fresh', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              _showDeleteAllBotsConfirmation();
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.logout, color: Color(0xFFFF8A80)),
             title: const Text('Logout', style: TextStyle(color: Color(0xFFFF8A80))),

@@ -379,6 +379,52 @@ def cleanup_demo_bots():
         logger.error(f"❌ Error cleaning up demo/test bots: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/bots/delete-all', methods=['POST'])
+@require_session
+def delete_all_user_bots():
+    """Delete ALL bots for the current user to start fresh"""
+    try:
+        user_id = request.user_id  # From session decorator
+        
+        # Get all bot IDs for this user
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT bot_id FROM user_bots WHERE user_id = ?', (user_id,))
+        bot_ids = [row[0] for row in cursor.fetchall()]
+        
+        # Delete all bots from database
+        cursor.execute('DELETE FROM user_bots WHERE user_id = ?', (user_id,))
+        conn.commit()
+        conn.close()
+        
+        # Stop and remove from memory
+        removed_count = 0
+        for bot_id in bot_ids:
+            if bot_id in active_bots:
+                # Stop the bot thread if running
+                bot = active_bots[bot_id]
+                if bot.get('running'):
+                    bot['stop_event'].set()
+                    if bot.get('thread') and bot['thread'].is_alive():
+                        bot['thread'].join(timeout=2)
+                del active_bots[bot_id]
+                removed_count += 1
+        
+        logger.info(f"✅ Deleted {len(bot_ids)} bots for user {user_id} ({removed_count} were running)")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully deleted {len(bot_ids)} bots',
+            'deleted_count': len(bot_ids),
+            'stopped_count': removed_count
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error deleting all bots for user: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def init_database():
     """Initialize SQLite database with referral and commission tables"""
     conn = sqlite3.connect(DATABASE_PATH, timeout=30.0, check_same_thread=False)
@@ -8210,8 +8256,8 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             logger.error(error_msg)
             return None, error_msg
         
-        # ✅ METATRADER 5 - MetaQuotes or XM Global
-        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']:
+        # ✅ METATRADER 5 - MetaQuotes, XM Global, or Exness
+        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness']:
             logger.info(f"[Broker Switch] Bot {bot_id}: Using MetaTrader 5 SDK")
             account_number = cred['account_number']
             password = cred['password']
@@ -8228,15 +8274,26 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 server = 'XMGlobal-Demo' if not is_live else 'XMGlobal-Live'
             elif 'metaquotes' in server.lower():
                 server = 'MetaQuotes-Demo' if not is_live else 'MetaQuotes-Live'
+            elif 'exness' in server.lower():
+                # Keep Exness server as is (e.g., Exness-MT5Trial9, Exness-MT5)
+                pass
             
             logger.info(f"Bot {bot_id}: Connecting to MT5 - Account: {account_number}, Server: {server}")
             
             # Create MT5 connection
+            # Determine broker name for MT5 connection initialization
+            if broker_name in ['XM', 'XM Global']:
+                broker_for_mt5 = 'XM'
+            elif broker_name == 'Exness':
+                broker_for_mt5 = 'Exness'
+            else:
+                broker_for_mt5 = 'MetaQuotes'
+            
             mt5_conn = MT5Connection(credentials={
                 'account': int(account_number),
                 'password': password,
                 'server': server,
-                'broker': 'XM' if broker_name in ['XM', 'XM Global'] else 'MetaQuotes',
+                'broker': broker_for_mt5,
                 'path': MT5_CONFIG.get('path')
             })
             
@@ -8249,7 +8306,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 return None, error_msg
         
         else:
-            error_msg = f"Unknown broker type: {broker_name}. Supported: IG Markets, MetaQuotes, XM Global/XM, Binance, FXCM, OANDA"
+            error_msg = f"Unknown broker type: {broker_name}. Supported: IG Markets, MetaQuotes, XM Global/XM, Exness, Binance, FXCM, OANDA"
             logger.error(error_msg)
             return None, error_msg
     
