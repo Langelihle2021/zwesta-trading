@@ -585,7 +585,8 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
                 ),
               ],
             ),
-          );
+          ),
+        );
       },
     );
   }
