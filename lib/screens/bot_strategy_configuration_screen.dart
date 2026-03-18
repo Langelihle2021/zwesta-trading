@@ -29,12 +29,12 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
 
   final List<String> _commonSymbols = [
     // Only tradeable symbols on Exness Demo Account 298997455
-    // Verified in MT5 Market Watch
-    'BTCUSD',   // Bitcoin
-    'ETHUSD',   // Ethereum
-    'EURUSD',   // Euro
-    'USDJPY',   // Japanese Yen
-    'XAUUSD',   // Gold
+    // with "m" suffix (micro lot size) as shown in MT5 Market Watch
+    'BTCUSDm',   // Bitcoin
+    'ETHUSDm',   // Ethereum
+    'EURUSDm',   // Euro
+    'USDJPYm',   // Japanese Yen
+    'XAUUSDm',   // Gold
   ];
 
   @override

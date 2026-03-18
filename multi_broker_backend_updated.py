@@ -5227,12 +5227,12 @@ def get_account_info_alias():
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
     # Only these 5 symbols are available on Exness Demo Account 298997455
-    # Verified in MT5 Market Watch - these are the only tradeable symbols
-    'BTCUSD',   # Bitcoin / USD (shown as BTCUSDm in terminal)
-    'ETHUSD',   # Ethereum / USD (shown as ETHUSDm in terminal)
-    'EURUSD',   # Euro / USD (shown as EURUSDm in terminal)
-    'USDJPY',   # USD / Japanese Yen (shown as USDJPYm in terminal)
-    'XAUUSD',   # Gold / USD (shown as XAUUSDm in terminal)
+    # Verified in MT5 Market Watch - note the "m" suffix (micro lot size)
+    'BTCUSDm',   # Bitcoin / USD
+    'ETHUSDm',   # Ethereum / USD
+    'EURUSDm',   # Euro / USD
+    'USDJPYm',   # USD / Japanese Yen
+    'XAUUSDm',   # Gold / USD
 }
 
 BINANCE_VALID_SYMBOLS = {
