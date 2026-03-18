@@ -5861,13 +5861,15 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     bot_state['name'] = row['name']
     bot_state['accountId'] = row['broker_account_id']
     bot_state['credentialId'] = row['credential_id']
-    bot_state['brokerName'] = row['broker_name']
-    bot_state['broker_type'] = bot_state.get('broker_type') or row['broker_name'] or 'MT5'
+    broker_name = canonicalize_broker_name(row['broker_name']) if row['broker_name'] else 'MT5'
+    bot_state['brokerName'] = broker_name
+    bot_state['broker_type'] = bot_state.get('broker_type') or broker_name
     bot_state['mode'] = bot_state.get('mode') or ('live' if row['is_live'] else 'demo')
     bot_state['strategy'] = row['strategy']
     bot_state['enabled'] = bool(row['enabled'])
     bot_state['createdAt'] = row['created_at'] or bot_state.get('createdAt') or datetime.now().isoformat()
-    bot_state['symbols'] = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
+    restored_symbols = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
+    bot_state['symbols'] = validate_and_correct_symbols(restored_symbols, broker_name)
     bot_state['tradeHistory'] = bot_state.get('tradeHistory') or []
     bot_state['profitHistory'] = bot_state.get('profitHistory') or []
     bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
@@ -5981,9 +5983,14 @@ def start_enabled_bots_on_startup():
         if bot_id in bot_threads and bot_threads[bot_id].is_alive():
             continue
 
+        bot_config['symbols'] = validate_and_correct_symbols(
+            bot_config.get('symbols', ['EURUSDm']),
+            bot_config.get('brokerName') or bot_config.get('broker_type'),
+        )
         bot_stop_flags[bot_id] = False
         running_bots[bot_id] = True
-        bot_credentials = _get_bot_thread_credentials(bot_config) if bot_config.get('mode') == 'live' else None
+        bot_credentials = _get_bot_thread_credentials(bot_config)
+        persist_bot_runtime_state(bot_id)
 
         bot_thread = threading.Thread(
             target=continuous_bot_trading_loop,
@@ -6380,6 +6387,8 @@ def get_live_prices_from_mt5():
                 # Get previous price (use current if first time)
                 price_change = 0  # Default to no change
                 trend = 'FLAT'  # Default trend
+                momentum_change = 0.0
+                breakout_bias = None
                 
                 if symbol not in previous_prices or previous_prices[symbol] is None:
                     # First fetch - baseline the price, don't calculate change yet
@@ -6406,6 +6415,44 @@ def get_live_prices_from_mt5():
                     
                     # Update previous price for next cycle
                     previous_prices[symbol] = current_price
+
+                # Single-tick movement is often too small for FX pairs, so use short-term candle momentum
+                # as a fallback before classifying a symbol as consolidating.
+                try:
+                    recent_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 6)
+                except Exception:
+                    recent_rates = None
+
+                if recent_rates is not None and len(recent_rates) >= 4:
+                    closes = [float(rate['close']) for rate in recent_rates]
+                    highs = [float(rate['high']) for rate in recent_rates[-3:]]
+                    lows = [float(rate['low']) for rate in recent_rates[-3:]]
+                    anchor_close = closes[0]
+                    latest_close = closes[-1]
+
+                    if anchor_close:
+                        momentum_change = ((latest_close - anchor_close) / anchor_close) * 100
+
+                    recent_high = max(highs)
+                    recent_low = min(lows)
+                    range_span_pct = ((recent_high - recent_low) / latest_close * 100) if latest_close else 0.0
+
+                    if current_price >= recent_high * 0.9998:
+                        breakout_bias = 'UP'
+                    elif current_price <= recent_low * 1.0002:
+                        breakout_bias = 'DOWN'
+
+                    if trend == 'FLAT':
+                        if momentum_change > 0.01 or breakout_bias == 'UP':
+                            trend = 'UP'
+                            if abs(price_change) < abs(momentum_change):
+                                price_change = momentum_change
+                        elif momentum_change < -0.01 or breakout_bias == 'DOWN':
+                            trend = 'DOWN'
+                            if abs(price_change) < abs(momentum_change):
+                                price_change = momentum_change
+                        elif range_span_pct < 0.03:
+                            trend = 'FLAT'
                 
                 # Estimate volatility based on bid-ask spread
                 spread_percent = ((tick.ask - tick.bid) / current_price * 100) if current_price != 0 else 0
@@ -6449,9 +6496,12 @@ def get_live_prices_from_mt5():
                         else:
                             signal = '🟡 WEAK SELL'  # Tight spread = less conviction
                             
-                else:  # FLAT trend (current_price == previous_price, exactly same)
-                    # Only show FLAT signals if prices truly haven't moved
-                    if volatility == 'Very High' or volatility == 'High':
+                else:  # FLAT trend after checking tick + short-term momentum
+                    if breakout_bias == 'UP':
+                        signal = '🟢 WEAK BUY'
+                    elif breakout_bias == 'DOWN':
+                        signal = '🔴 WEAK SELL'
+                    elif volatility == 'Very High' or volatility == 'High':
                         signal = '🟡 VOLATILE - CAUTION'
                     else:
                         signal = '🟡 CONSOLIDATING'
@@ -8090,9 +8140,9 @@ def create_bot():
                 # Small delay to ensure bot is fully initialized in DB
                 time.sleep(0.5)
                 
-                # Retrieve MT5 credentials if LIVE mode
+                # Retrieve broker credentials when available so demo/live bots use the correct account and server.
                 bot_credentials = None
-                if mode == 'live':
+                if credential_id:
                     try:
                         conn = get_db_connection()
                         cursor = conn.cursor()
@@ -8110,17 +8160,17 @@ def create_bot():
                                     'api_key': cred_row['api_key'],
                                     'api_secret': cred_row['password'],
                                     'server': cred_row['server'] or 'spot',
-                                    'is_live': True,
+                                    'is_live': bool(is_live),
                                 }
                             else:
                                 bot_credentials = {
                                     'account_number': cred_row['account_number'] or account_number,
                                     'password': cred_row['password'],
                                     'server': cred_row['server'],
-                                    'is_live': True,
+                                    'is_live': bool(is_live),
                                 }
                     except Exception as e:
-                        logger.warning(f'Could not fetch broker credentials for live bot: {e}')
+                        logger.warning(f'Could not fetch broker credentials for bot startup: {e}')
                 
                 # Launch background trading thread
                 if bot_id not in bot_threads or not bot_threads[bot_id].is_alive():
@@ -8242,7 +8292,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 elif is_mt5:
                     # MT5 broker - connect via terminal SDK
                     try:
-                        if bot_config.get('mode') == 'live' and bot_credentials:
+                        if bot_credentials:
                             mt5_conn = MT5Connection(bot_credentials)
                         else:
                             mt5_conn = MT5Connection()
