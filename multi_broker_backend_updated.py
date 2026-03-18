@@ -1277,10 +1277,9 @@ class MT5Connection(BrokerConnection):
                         logger.info(f"  ✓ MT5 SDK initialized (path: {self.mt5_path})")
                         
                         # CRITICAL: Extended IPC stabilization wait for Exness (terminal must be fully ready)
-                        # On retry attempts (attempt > 1), use even longer wait after terminal restart
-                        # CRITICAL: Exness terminal needs significant time to establish IPC connection
-                        # First attempt: 30 seconds, Retry attempts: 60 seconds (terminal restart)
-                        ipc_wait = 60 if attempt > 1 else 30
+                        # Exness terminal REQUIRES 60+ seconds to establish stable IPC connection
+                        # ALL attempts use same 60-second wait (consistent timing requirement)
+                        ipc_wait = 60
                         logger.info(f"  ⏳ Waiting {ipc_wait} seconds for MT5 IPC stabilization (Attempt {attempt}/3)...")
                         logger.warning(f"     [IPC STABILITY PHASE] Do NOT interrupt - terminal is initializing...")
                         time.sleep(ipc_wait)
@@ -1354,11 +1353,12 @@ class MT5Connection(BrokerConnection):
                 
                 # Wait before retry, exponential backoff (extra long for IPC issues)
                 if attempt < max_retries:
-                    # CRITICAL: Extended waits between retries to give Exness terminal time to stabilize
-                    # After failed attempts: 60sec (1min), 90sec (1.5min), 120sec (2min)
-                    wait_time = 30 + (30 * attempt)  # 60, 90, 120 seconds
+                    # CRITICAL: Exness terminal needs VERY long recovery time between attempts
+                    # Retry waits: 120sec (2min), 180sec (3min), 240sec (4min)
+                    wait_time = 60 + (60 * attempt)  
                     logger.warning(f"  ⏳ CRITICAL WAIT: {wait_time} seconds before retry (IPC recovery phase)...")
                     logger.warning(f"     Terminal is recovering from IPC connection failure - please wait...")
+                    logger.warning(f"     This is normal for Exness MT5 - do NOT interrupt the process")
                     time.sleep(wait_time)
             
             # All retries exhausted
