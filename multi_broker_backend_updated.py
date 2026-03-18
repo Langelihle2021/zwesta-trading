@@ -1167,24 +1167,20 @@ class MT5Connection(BrokerConnection):
             }
 
         super().__init__(BrokerType.METATRADER5, credentials)
-        # Dynamically launch/check MT5 terminal for this broker
+        # CRITICAL FIX: DO NOT launch terminal on every connection attempt!
+        # Terminal should only be launched ONCE during backend startup
+        # Reuse the existing terminal for all subsequent connections
         broker = canonicalize_broker_name(credentials.get('broker', 'Exness'))
+        
+        # Check if terminal is already running (avoid duplicate launches)
         try:
-            import subprocess, sys
-            import os
-            # Call the terminal manager to ensure the terminal is running
-            mt5_mgr_path = os.path.join(os.path.dirname(__file__), 'mt5_terminal_manager.py')
-            if broker in ['Exness', 'MetaQuotes', 'XM', 'XM Global', 'MetaTrader 5'] and os.path.exists(mt5_mgr_path):
-                subprocess.Popen([sys.executable, mt5_mgr_path, broker])
-                # CRITICAL: Wait for terminal to fully initialize before SDK connection attempt
-                # This prevents IPC timeout errors during connection testing
-                logger.info(f"⏳ Waiting 15 seconds for {broker} MT5 terminal to fully initialize...")
-                time.sleep(15)
-                logger.info(f"✅ {broker} MT5 terminal initialization period complete - ready for SDK connection")
-            else:
-                logger.info(f"[MT5 Terminal Manager] Skipping terminal launch for broker={broker}")
+            import subprocess, sys, os
+            # Simply skip terminal launch - assume it was launched at startup
+            # If terminal crashes, MT5Connection.connect() will timeout and retry
+            logger.info(f"[MT5 Terminal] Using Exness MT5 terminal (launched on backend startup)")
         except Exception as e:
-            logger.error(f"[MT5 Terminal Manager] Could not launch/check terminal for {broker}: {e}")
+            logger.error(f"[MT5 Terminal Manager] Error checking terminal: {e}")
+        
         try:
             import MetaTrader5 as mt5
             self.mt5 = mt5
@@ -3091,6 +3087,7 @@ def canonicalize_broker_name(broker_name: str) -> str:
         'fxcm': 'FXCM',
         'fxm': 'FXCM',
         'oanda': 'OANDA',
+        'exness': 'Exness',
     }
     return broker_map.get(normalized, broker_name)
 
@@ -6508,6 +6505,7 @@ def save_broker_credentials():
     - Binance: api_key, api_secret, optional market/server
     - FXCM: token/api_key, optional account_number
     - OANDA: api_key, account_number
+    - Exness: account_number, password, server, is_live
     """
     try:
         user_id = request.user_id
@@ -6568,10 +6566,18 @@ def save_broker_credentials():
                 }), 400
             if not server:
                 server = 'MetaQuotes-Demo' if broker_name == 'MetaQuotes' else 'XMGlobal-Demo'
+        elif broker_name in ['Exness']:
+            if not account_number or not password:
+                return jsonify({
+                    'success': False,
+                    'error': 'Exness requires: account_number, password, server'
+                }), 400
+            if not server:
+                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
         else:
             return jsonify({
                 'success': False,
-                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, IG Markets, XM Global/XM, Binance, FXCM, OANDA'
+                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, IG Markets, XM Global/XM, Binance, FXCM, OANDA, Exness'
             }), 400
         
         created_at = datetime.now().isoformat()
@@ -6605,7 +6611,7 @@ def save_broker_credentials():
                     SET api_key = ?, username = ?, password = ?, is_live = ?, updated_at = ?
                     WHERE credential_id = ?
                 ''', (api_key, username, password, 1 if is_live else 0, created_at, credential_id))
-            elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']:
+            elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness']:
                 cursor.execute('''
                     UPDATE broker_credentials
                     SET account_number = ?, password = ?, server = ?, is_live = ?, updated_at = ?
@@ -6949,10 +6955,12 @@ def test_broker_connection():
                 }), 400
             
             # Fix server name for MT5 brokers
-            if broker.lower() in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5']:
-                broker_l = broker.lower()
+            broker_l = broker.lower()
+            if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness']:
                 if broker_l in ['xm', 'xm global']:
                     expected_server = 'XMGlobal-Demo' if not is_live else 'XMGlobal-Live'
+                elif broker_l == 'exness':
+                    expected_server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
                 else:
                     expected_server = 'MetaQuotes-Demo' if not is_live else 'MetaQuotes-Live'
 
@@ -7781,7 +7789,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 # Detect broker type
                 broker_type = bot_config.get('broker_type', 'MT5')
                 is_ig = broker_type == 'IG Markets'
-                is_mt5 = broker_type in ['MetaTrader 5', 'MetaQuotes', 'XM Global', 'XM', 'MT5']
+                is_mt5 = broker_type in ['MetaTrader 5', 'MetaQuotes', 'XM Global', 'XM', 'Exness', 'MT5']
                 
                 mt5_conn = None
                 ig_conn = None
@@ -8309,8 +8317,8 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             elif 'metaquotes' in server.lower():
                 server = 'MetaQuotes-Demo' if not is_live else 'MetaQuotes-Live'
             elif 'exness' in server.lower():
-                # Keep Exness server as is (e.g., Exness-MT5Trial9, Exness-MT5)
-                pass
+                # Normalize Exness server name based on live/demo mode
+                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
             
             logger.info(f"Bot {bot_id}: Connecting to MT5 - Account: {account_number}, Server: {server}")
             
