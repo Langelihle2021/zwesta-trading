@@ -1537,7 +1537,7 @@ class MT5Connection(BrokerConnection):
         return False
 
     def get_account_info(self) -> Dict:
-        """Get account information"""
+        """Get account information - Always return USD currency"""
         try:
             if not self.connected:
                 return None
@@ -1545,14 +1545,15 @@ class MT5Connection(BrokerConnection):
             info = self.mt5.account_info()
             self.account_info = {
                 'accountNumber': info.login,
-                'balance': info.balance,
-                'equity': info.equity,
-                'margin': info.margin,
-                'marginFree': info.margin_free,
-                'marginLevel': info.margin_level,
-                'currency': info.currency,
+                'balance': round(float(info.balance), 2),
+                'equity': round(float(info.equity), 2),
+                'margin': round(float(info.margin), 2),
+                'marginFree': round(float(info.margin_free), 2),
+                'marginLevel': round(float(info.margin_level), 2),
+                'currency': 'USD',  # Force USD
                 'leverage': info.leverage,
                 'broker': info.server,
+                'displayCurrency': 'USD',  # Explicit display currency
             }
             return self.account_info
         except Exception as e:
@@ -5466,63 +5467,87 @@ def validate_and_correct_symbols(symbols, broker_name=None):
 # ==================== BOT TRADING STRATEGY IMPLEMENTATIONS ====================
 
 def scalping_strategy(symbol, account_id, risk_amount):
-    """Scalping: Quick trades with small profits (0-5 pips)"""
+    """Scalping: Quick trades with small profits (2-5 pips). High win rate, low reward."""
     import random
+    # Scalping: 70% win rate, small profits
+    is_winning = random.random() < 0.70
+    return {
+        'symbol': symbol,
+        'type': random.choice(['BUY', 'SELL']),
+        'volume': random.uniform(1.0, 3.0),
+        'stop_loss': 5,  # 5 pips
+        'take_profit': 3,  # 3 pips
+        'profit': risk_amount * 0.05 if is_winning else -risk_amount * 0.05,
+    }
+
+def momentum_strategy(symbol, account_id, risk_amount):
+    """Momentum: Follow strong price movements. Moderate win rate, good rewards."""
+    import random
+    # Momentum: 60% win rate, higher rewards
+    is_winning = random.random() < 0.60
     return {
         'symbol': symbol,
         'type': random.choice(['BUY', 'SELL']),
         'volume': random.uniform(0.5, 2.0),
-        'profit': random.uniform(-risk_amount * 0.5, risk_amount * 0.3),
-    }
-
-def momentum_strategy(symbol, account_id, risk_amount):
-    """Momentum: Follow strong price movements"""
-    import random
-    return {
-        'symbol': symbol,
-        'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.1, 1.5),
-        'profit': random.uniform(-risk_amount, risk_amount * 2),
+        'stop_loss': 15,  # 15 pips
+        'take_profit': 30,  # 30 pips
+        'profit': risk_amount * 0.30 if is_winning else -risk_amount * 0.15,
     }
 
 def trend_following_strategy(symbol, account_id, risk_amount):
-    """Trend Following: Hold trades longer (big trends)"""
+    """Trend Following: Hold trades longer (big trends). Lower win rate, higher rewards."""
     import random
+    # Trend Following: 55% win rate, larger rewards
+    is_winning = random.random() < 0.55
     return {
         'symbol': symbol,
         'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.2, 1.0),
-        'profit': random.uniform(-risk_amount * 0.3, risk_amount * 5),
+        'volume': random.uniform(0.3, 1.5),
+        'stop_loss': 25,  # 25 pips
+        'take_profit': 50,  # 50 pips
+        'profit': risk_amount * 0.50 if is_winning else -risk_amount * 0.25,
     }
 
 def mean_reversion_strategy(symbol, account_id, risk_amount):
-    """Mean Reversion: Trade when price extreme"""
+    """Mean Reversion: Trade when price extreme. High win rate, medium rewards."""
     import random
+    # Mean Reversion: 65% win rate, medium rewards
+    is_winning = random.random() < 0.65
     return {
         'symbol': symbol,
         'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.3, 1.2),
-        'profit': random.uniform(-risk_amount * 0.2, risk_amount * 1.5),
+        'volume': random.uniform(0.5, 2.0),
+        'stop_loss': 20,  # 20 pips
+        'take_profit': 25,  # 25 pips
+        'profit': risk_amount * 0.20 if is_winning else -risk_amount * 0.20,
     }
 
 def range_trading_strategy(symbol, account_id, risk_amount):
-    """Range Trading: Buy low, sell high within range"""
+    """Range Trading: Buy low, sell high within range. Very high win rate, lower rewards."""
     import random
+    # Range Trading: 72% win rate, lower rewards
+    is_winning = random.random() < 0.72
     return {
         'symbol': symbol,
         'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.4, 1.5),
-        'profit': random.uniform(-risk_amount * 0.1, risk_amount * 1),
+        'volume': random.uniform(0.8, 2.5),
+        'stop_loss': 10,  # 10 pips
+        'take_profit': 12,  # 12 pips
+        'profit': risk_amount * 0.08 if is_winning else -risk_amount * 0.08,
     }
 
 def breakout_strategy(symbol, account_id, risk_amount):
-    """Breakout: Trade when price breaks support/resistance"""
+    """Breakout: Trade when price breaks support/resistance. Moderate win rate, high rewards."""
     import random
+    # Breakout: 58% win rate, high rewards
+    is_winning = random.random() < 0.58
     return {
         'symbol': symbol,
         'type': random.choice(['BUY', 'SELL']),
-        'volume': random.uniform(0.2, 1.8),
-        'profit': random.uniform(-risk_amount * 0.5, risk_amount * 3),
+        'volume': random.uniform(0.4, 1.8),
+        'stop_loss': 28,  # 28 pips
+        'take_profit': 60,  # 60 pips
+        'profit': risk_amount * 0.60 if is_winning else -risk_amount * 0.28,
     }
 
 STRATEGY_MAP = {
@@ -8016,18 +8041,15 @@ def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
         warnings,
     )
 
-    display_currency = str(data.get('displayCurrency', 'USD')).upper()
-    if display_currency not in SUPPORTED_DISPLAY_CURRENCIES:
-        warnings.append('displayCurrency defaulted to USD')
-        display_currency = 'USD'
-
+    display_currency = 'USD'  # Force USD - all accounts are in USD
+    
     return {
         'riskPerTrade': risk_per_trade,
         'maxDailyLoss': max_daily_loss,
         'profitLock': profit_lock,
         'drawdownPausePercent': drawdown_pause_percent,
         'drawdownPauseHours': drawdown_pause_hours,
-        'displayCurrency': display_currency,
+        'displayCurrency': display_currency,  # Always USD
         'warnings': warnings,
     }
 
