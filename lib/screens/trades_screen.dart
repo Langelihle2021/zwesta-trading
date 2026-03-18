@@ -285,7 +285,7 @@ class _TradesScreenState extends State<TradesScreen> {
       {'symbol': 'EURUSD', 'name': 'EUR/USD'},
       {'symbol': 'GBPUSD', 'name': 'GBP/USD'},
       {'symbol': 'XPTUSD', 'name': 'Platinum'},
-      {'symbol': 'OILK', 'name': 'Crude Oil'},
+      {'symbol': 'XAUUSDm', 'name': 'Gold (Only Available)'},
     ];
   }
 

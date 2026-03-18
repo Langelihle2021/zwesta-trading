@@ -26,7 +26,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
   List<Map<String, dynamic>> _liveTrades = [];
   int _totalScalps = 0;
 
-  final List<String> _symbols = ['EURUSD', 'GBPUSD', 'XPTUSD', 'OILK', 'SP500m', 'DAX', 'AMD', 'MSFT'];
+  final List<String> _symbols = ['BTCUSDm', 'ETHUSDm', 'EURUSDm', 'USDJPYm', 'XAUUSDm'];
   final List<String> _types = ['BUY', 'SELL'];
 
   @override

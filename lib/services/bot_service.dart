@@ -25,23 +25,12 @@ class BotService extends ChangeNotifier {
 
   // Updated list with all trading symbols including crypto and tech
   final List<String> availableTradingSymbols = [
-    // Forex
-    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-    
-    // Precious Metals
-    'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD',
-    
-    // Cryptocurrencies
-    'BTCUSD', 'ETHUSD',
-    
-    // Energy
-    'WTIUSD', 'BRENTUSD', 'NATGASUS',
-    
-    // Agriculture  
-    'CORNUSD', 'WHEATUSD', 'SOYBEANSUSD', 'COFFEEUSD', 'COCOAUSD', 'SUGARUSD',
-    
-    // Indices & Stocks
-    'SPX500', 'DAX40', 'FTSE100', 'NIKKEI225', 'TSLAUSD'
+    // Only these 5 symbols are available on Exness Demo Account 298997455
+    'BTCUSDm',   // Bitcoin / USD
+    'ETHUSDm',   // Ethereum / USD
+    'EURUSDm',   // Euro / USD
+    'USDJPYm',   // USD / Japanese Yen
+    'XAUUSDm',   // Gold / USD
   ];
 
   final List<String> availableStrategies = [

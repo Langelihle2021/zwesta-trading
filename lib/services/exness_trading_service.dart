@@ -499,17 +499,12 @@ class ExnessTradingService {
   /// Default Exness symbols (fallback)
   static List<String> _getDefaultExnessSymbols() {
     return [
-      // Major Forex
-      'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD',
-      'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY',
-      // Metals
-      'XAUUSD', 'XAGUSD', 'COPPER', 'PALLADIUM',
-      // Energy
-      'CRUDE', 'BRENT', 'NG',
-      // Indices
-      'US100', 'US30', 'US500', 'STOXX50', 'DAX40',
-      // Cryptocurrencies
-      'BTCUSD', 'ETHUSD', 'LTCUSD', 'XRPUSD',
+      // Only these 5 symbols are available on Exness Demo Account 298997455
+      'BTCUSDm',   // Bitcoin / USD
+      'ETHUSDm',   // Ethereum / USD
+      'EURUSDm',   // Euro / USD
+      'USDJPYm',   // USD / Japanese Yen
+      'XAUUSDm',   // Gold / USD
     ];
   }
 
