@@ -6175,7 +6175,7 @@ def get_live_prices_from_mt5():
                 }
                 
                 # Log signals for key forex/commodities to debug signal visibility
-                if symbol in ['EURUSD', 'GBPUSD', 'OILK', 'XPTUSD']:
+                if symbol in ['EURUSDm', 'XAUUSDm', 'BTCUSDm', 'ETHUSDm']:
                     logger.debug(f"[SIGNAL] {symbol}: price={current_price:.5f}, change={price_change:.6f}%, trend={trend}, signal={signal}")
                 
             except Exception as e:
@@ -6244,39 +6244,12 @@ def live_market_data_updater():
 # Commodity Market Sentiment Data
 # Tracks price trends, volatility, and trading signals
 commodity_market_data = {
-    # ===== FOREX PAIRS (9) =====
-    'EURUSD': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.65},
-    'GBPUSD': {'price': 1.2750, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs', 'profitability_score': 0.58},
-    'USDJPY': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.62},
-    'USDCHF': {'price': 0.8950, 'change': 0.25, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Safe haven currency - consolidating', 'profitability_score': 0.45},
-    'AUDUSD': {'price': 0.6580, 'change': 1.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong uptrend - excellent entry opportunity', 'profitability_score': 0.82},
-    'NZDUSD': {'price': 0.6125, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.72},
-    'USDCAD': {'price': 1.3550, 'change': -0.28, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs', 'profitability_score': 0.55},
-    'USDCNH': {'price': 7.2850, 'change': 0.15, 'trend': 'UP', 'volatility': 'Very Low', 'signal': '🟡 CONSOLIDATING', 'recommendation': 'Very Low volatility with no clear direction', 'profitability_score': 0.40},
-    'USDSEK': {'price': 10.8950, 'change': -0.42, 'trend': 'DOWN', 'volatility': 'Low', 'signal': '🔴 SELL', 'recommendation': 'Negative momentum - risky for longs', 'profitability_score': 0.53},
-    
-    # ===== PRECIOUS METALS (4) - High volatility, excellent for swing trading =====
-    'XAUUSD': {'price': 2076.44, 'change': 0.68, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Gold strong uptrend - excellent profitability', 'profitability_score': 0.88},
-    'XAGUSD': {'price': 31.25, 'change': 2.15, 'trend': 'UP', 'volatility': 'Very High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Silver volatile with strong upside momentum', 'profitability_score': 0.85},
-    'XPTUSD': {'price': 920.00, 'change': 0.68, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Platinum positive momentum - good entry point', 'profitability_score': 0.70},
-    'XPDUSD': {'price': 1150.00, 'change': 1.45, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Palladium strong uptrend - high volatility plays well', 'profitability_score': 0.86},
-    
-    # ===== ENERGY (2) =====
-    'OILK': {'price': 82.45, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Oil strong uptrend - excellent entry opportunity', 'profitability_score': 0.84},
-    'NATGASUS': {'price': 2.85, 'change': 1.25, 'trend': 'UP', 'volatility': 'Very High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Natural gas volatile with strong momentum', 'profitability_score': 0.79},
-    
-    # ===== INDICES (4) =====
-    'DAX': {'price': 18250.00, 'change': 0.65, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'DAX stable uptrend - good entry point', 'profitability_score': 0.68},
-    'SP500m': {'price': 5285.50, 'change': 1.02, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'S&P 500 positive momentum - solid entry', 'profitability_score': 0.72},
-    'US300': {'price': 15680.00, 'change': 0.85, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Broader US market showing strength', 'profitability_score': 0.71},
-    'US100': {'price': 18950.00, 'change': 1.35, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Tech stocks leading the market', 'profitability_score': 0.75},
-    
-    # ===== STOCKS (5) =====
-    'AMD': {'price': 185.75, 'change': 2.42, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'AMD strong uptrend - excellent opportunity', 'profitability_score': 0.81},
-    'MSFT': {'price': 415.50, 'change': 1.35, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'MSFT solid momentum - good entry point', 'profitability_score': 0.76},
-    'INTC': {'price': 48.25, 'change': -0.38, 'trend': 'DOWN', 'volatility': 'Medium', 'signal': '🔴 SELL', 'recommendation': 'Intel weak - avoid for now', 'profitability_score': 0.42},
-    'NVDA': {'price': 875.00, 'change': 3.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'NVIDIA strongest momentum in tech', 'profitability_score': 0.89},
-    'NIKL': {'price': 28900.00, 'change': 2.55, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Nikkei strong uptrend - Asian market strength', 'profitability_score': 0.83},
+    # ===== EXNESS DEMO - VALID SYMBOLS ONLY (5 total) =====
+    'EURUSDm': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.65},
+    'USDJPYm': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.62},
+    'XAUUSDm': {'price': 2076.44, 'change': 0.68, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Gold strong uptrend - excellent profitability', 'profitability_score': 0.88},
+    'BTCUSDm': {'price': 43560.00, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Bitcoin volatile with strong momentum', 'profitability_score': 0.85},
+    'ETHUSDm': {'price': 2280.45, 'change': 1.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Ethereum strong uptrend - excellent opportunity', 'profitability_score': 0.82},
 }
 
 # Store active bots configuration
@@ -8581,7 +8554,7 @@ def get_commodity_market_data():
             hold_count = sum(1 for s in commodity_market_data.values() if s.get('signal', '') == '🟡 HOLD')
             
             # Log actual signal values for key symbols
-            key_symbols = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD']
+            key_symbols = ['EURUSDm', 'XAUUSDm', 'BTCUSDm', 'ETHUSDm']
             for sym in key_symbols:
                 if sym in commodity_market_data:
                     sig = commodity_market_data[sym].get('signal', 'UNKNOWN')
