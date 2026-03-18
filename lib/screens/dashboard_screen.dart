@@ -339,7 +339,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (isConnected) {
           statusColor = const Color(0xFF69F0AE);
           statusIcon = Icons.check_circle;
-          statusText = 'IG Connected';
+          statusText = 'Exness Connected';
         } else if (isConnecting) {
           statusColor = const Color(0xFFFFD600);
           statusIcon = Icons.sync;
@@ -351,7 +351,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } else {
           statusColor = Colors.white38;
           statusIcon = Icons.cloud_off;
-          statusText = 'IG Not Connected';
+          statusText = 'Exness Not Connected';
         }
 
         return _glassCard(
@@ -373,7 +373,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'IG Markets API',
+                          'Exness MT5',
                           style: GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 15,
@@ -579,17 +579,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Text('Connect to IG Markets',
+                  Text('Connect to Exness',
                       style: GoogleFonts.poppins(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Text('Enter your IG API credentials to connect automatically',
+                  Text('Enter your Exness MT5 credentials to connect automatically',
                       style: GoogleFonts.poppins(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 24),
                   _sheetTextField(apiKeyCtrl, 'API Key', Icons.key),
                   const SizedBox(height: 14),
-                  _sheetTextField(usernameCtrl, 'IG Username', Icons.person),
+                  _sheetTextField(usernameCtrl, 'Exness Account/Email', Icons.person),
                   const SizedBox(height: 14),
-                  _sheetTextField(passwordCtrl, 'IG Password', Icons.lock, obscure: true),
+                  _sheetTextField(passwordCtrl, 'Exness Password', Icons.lock, obscure: true),
                   const SizedBox(height: 14),
                   _sheetTextField(accountIdCtrl, 'Account ID', Icons.account_box),
                   const SizedBox(height: 16),

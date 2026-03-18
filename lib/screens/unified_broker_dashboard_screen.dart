@@ -57,7 +57,7 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
         backgroundColor: const Color(0xFF1A1F3A),
         title: Text('Close ALL Positions?', style: GoogleFonts.poppins(color: Colors.redAccent, fontWeight: FontWeight.w600)),
         content: Text(
-          'This will close ALL open positions across ALL brokers (IG, OANDA, FXCM, Binance). This action cannot be undone.',
+          'This will close ALL open positions across ALL brokers (Exness, OANDA, FXCM, Binance). This action cannot be undone.',
           style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
         ),
         actions: [

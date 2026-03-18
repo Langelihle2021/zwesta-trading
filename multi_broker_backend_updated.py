@@ -1386,21 +1386,27 @@ class MT5Connection(BrokerConnection):
         
         subscribed = 0
         failed = 0
+        failed_symbols = []
         
         for symbol in VALID_SYMBOLS:
             try:
                 if self.mt5.symbol_select(symbol, True):
                     subscribed += 1
                 else:
-                    logger.debug(f"⚠️  Could not subscribe to {symbol}")
+                    logger.warning(f"⚠️  Could not subscribe to {symbol} - may not be available on this account/broker")
                     failed += 1
+                    failed_symbols.append(symbol)
             except Exception as e:
-                logger.debug(f"⚠️  Error subscribing to {symbol}: {e}")
+                logger.warning(f"⚠️  Error subscribing to {symbol}: {e}")
                 failed += 1
+                failed_symbols.append(symbol)
         
         logger.info(f"✅ Symbol subscription complete: {subscribed}/{len(VALID_SYMBOLS)} symbols ready for trading")
         if failed > 0:
-            logger.warning(f"⚠️  {failed} symbols unavailable (account may not have access)")
+            logger.warning(f"⚠️  {failed} symbols unavailable: {failed_symbols}")
+            logger.warning(f"   These symbols may not be tradable on your account/broker")
+            available = [s for s in VALID_SYMBOLS if s not in failed_symbols]
+            logger.warning(f"   Available symbols: {available}")
 
     def wait_for_mt5_ready(self, timeout_seconds: int = 60) -> bool:
         """
@@ -1577,19 +1583,59 @@ class MT5Connection(BrokerConnection):
             logger.error(f"Error getting MT5 positions: {e}")
             return []
 
+    def is_symbol_available(self, symbol: str) -> bool:
+        """Check if a symbol is available for trading on this account"""
+        try:
+            if not self.connected or not self.mt5:
+                return False
+            # Try to select the symbol and get tick data
+            if not self.mt5.symbol_select(symbol, True):
+                return False
+            tick = self.mt5.symbol_info_tick(symbol)
+            return tick is not None
+        except:
+            return False
+    
+    def get_fallback_symbol(self) -> str:
+        """Get the first available symbol from VALID_SYMBOLS for fallback"""
+        for symbol in sorted(VALID_SYMBOLS):
+            if self.is_symbol_available(symbol):
+                return symbol
+        return "EURUSDm"  # Last resort fallback
+
     def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
         """
-        Place order on MT5 with recovery logic for None responses
+        Place order on MT5 with enhanced validation and fallback logic
         """
         try:
             if not self.connected:
                 return {'success': False, 'error': 'Not connected'}
 
-            # Enforce minimum volume for specific symbols
+            # STEP 1: Validate requested symbol before attempting order
+            original_symbol = symbol
+            if not self.is_symbol_available(symbol):
+                logger.warning(f"⚠️  Symbol {symbol} is NOT available - checking if it's in VALID_SYMBOLS")
+                if symbol in VALID_SYMBOLS:
+                    logger.warning(f"   Symbol {symbol} IS in VALID_SYMBOLS but NOT available on this account")
+                    logger.warning(f"   This may be due to: insufficient permissions, broker restrictions, or initialization delay")
+                else:
+                    logger.warning(f"   Symbol {symbol} is NOT in VALID_SYMBOLS (list: {sorted(VALID_SYMBOLS)})")
+                
+                # Try to use a fallback symbol
+                fallback = self.get_fallback_symbol()
+                logger.info(f"🔄 Falling back from {original_symbol} to {fallback}")
+                symbol = fallback
+                
+                if not self.is_symbol_available(symbol):
+                    return {'success': False, 'error': f'Symbol {original_symbol} not available, and fallback {fallback} also unavailable'}
+
+            # STEP 2: Enforce minimum volume for specific symbols
             min_volumes = {
                 'OILK': 1.0,
                 'XAUUSD': 0.01,
                 'XAGUSD': 0.1,
+                'XAUUSDm': 0.01,
+                'XAGUSDm': 0.1,
                 # Add more as needed
             }
             min_volume = min_volumes.get(symbol, 0.01)
@@ -1597,11 +1643,11 @@ class MT5Connection(BrokerConnection):
                 logger.info(f"Adjusting volume for {symbol}: requested={volume}, min={min_volume}")
                 volume = min_volume
 
-            # First, select the symbol to ensure it's available in MT5
+            # STEP 3: Select symbol and get tick data
             if not self.mt5.symbol_select(symbol, True):
-                return {'success': False, 'error': f'Symbol {symbol} not found in MT5'}
+                return {'success': False, 'error': f'Failed to select symbol {symbol}'}
 
-            # Now get the tick data (bid/ask prices)
+            # Get the tick data (bid/ask prices)
             tick = self.mt5.symbol_info_tick(symbol)
             if tick is None:
                 return {'success': False, 'error': f'Cannot get tick data for {symbol}'}
@@ -8259,12 +8305,65 @@ def create_bot():
 
 # ==================== CONTINUOUS BOT TRADING LOOP ====================
 
+def evaluate_trade_signal_strength(symbol: str, strategy_params: Dict) -> float:
+    """
+    Evaluate how strong a profit signal is (0-100 scale)
+    
+    Returns: Signal strength score
+    - 0-30: Weak signal, don't trade
+    - 30-60: Medium signal, hold for better opportunity  
+    - 60-85: Strong signal, good time to trade
+    - 85-100: Very strong signal, excellent trade setup
+    """
+    try:
+        # Get live price data
+        if symbol not in commodity_market_data:
+            return 0
+        
+        market_data = commodity_market_data[symbol]
+        signal = market_data.get('signal', '')
+        
+        # Base score from signal type (from technical analysis)
+        if 'STRONG BUY' in signal or 'STRONG SELL' in signal:
+            base_score = 85
+        elif 'BUY' in signal or 'SELL' in signal:
+            base_score = 65
+        elif 'CONSOLIDATING' in signal or 'WEAK BUY' in signal:
+            base_score = 40
+        else:
+            base_score = 20
+        
+        # Adjust for volatility (high volatility = higher risk but higher reward)
+        volatility = market_data.get('volatility_pct', 1.0)
+        if volatility > 3:  # High volatility
+            base_score *= 1.1
+        elif volatility < 0.5:  # Very low volatility
+            base_score *= 0.9
+        
+        # Adjust for profitability score (historical performance)
+        if 'profitability_score' in market_data:
+            profit_score = market_data['profitability_score']
+            base_score = base_score * 0.6 + profit_score * 40
+        
+        # Cap at 100
+        return min(100, max(0, base_score))
+    except:
+        return 0
+
+
 def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict = None):
     """
     Continuously execute trading for a bot until stop is requested
     
+    Supports TWO MODES:
+    1. TIME-BASED (default): Execute trades every N seconds (5 min default)
+    2. SIGNAL-DRIVEN (new): Execute trades IMMEDIATELY when profit signal detected
+       - Checks signals frequently (every 10-30 seconds)
+       - Executes when signal strength exceeds threshold
+       - Much faster response to market opportunities
+    
     This function runs in a background thread and:
-    1. Executes trades every trading_interval seconds
+    1. Executes trades based on mode (time or signal)
     2. Updates bot stats after each trade cycle
     3. Manages position sizing and risk
     4. Stops when bot_stop_flags[bot_id] is set to True
@@ -8277,8 +8376,19 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
             logger.error(f"Bot {bot_id} not found in active_bots")
             return
         
-        trading_interval = bot_config.get('tradingInterval', 300)  # Default 5 minutes
-        logger.info(f"Bot {bot_id}: Trading interval set to {trading_interval} seconds ({trading_interval/60:.1f} minutes)")
+        # Get trading mode configuration
+        trading_mode = bot_config.get('tradingMode', 'interval')  # 'interval' or 'signal-driven'
+        trading_interval = bot_config.get('tradingInterval', 300)  # Default 5 minutes for time-based
+        signal_threshold = bot_config.get('signalThreshold', 65)    # 0-100, minimum signal strength
+        poll_interval = bot_config.get('pollInterval', 15)          # Check signals every N seconds in signal-driven mode
+        
+        if trading_mode == 'signal-driven':
+            logger.info(f"Bot {bot_id}: ⚡ SIGNAL-DRIVEN MODE enabled")
+            logger.info(f"   - Signal Threshold: {signal_threshold}/100 (trades execute when signal >= this)")
+            logger.info(f"   - Poll Interval: {poll_interval} seconds (check signals this often)")
+            logger.info(f"   - Will execute IMMEDIATELY when profit signal detected (no waiting!)")
+        else:
+            logger.info(f"Bot {bot_id}: ⏱️ TIME-BASED MODE - trades every {trading_interval}s ({trading_interval/60:.1f} min)")
         
         # Initialize stop flag if not exists
         if bot_id not in bot_stop_flags:
@@ -8652,13 +8762,41 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 
                 logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Total P&L: ${bot_config['totalProfit']:.2f}")
                 
-                # Wait for next trading interval
-                logger.info(f"⏳ Bot {bot_id}: Waiting {trading_interval} seconds until next cycle...")
-                time.sleep(trading_interval)
+                # DUAL MODE: TIME-BASED vs SIGNAL-DRIVEN waiting
+                if trading_mode == 'signal-driven':
+                    # ⚡ SIGNAL-DRIVEN MODE: Check signals every poll_interval seconds
+                    logger.info(f"⚡ Bot {bot_id}: Polling signals every {poll_interval}s (threshold: {signal_threshold}/100)...")
+                    
+                    poll_elapsed = 0
+                    while not bot_stop_flags.get(bot_id, False) and poll_elapsed < trading_interval:
+                        time.sleep(poll_interval)
+                        poll_elapsed += poll_interval
+                        
+                        # Check if strong signal exists for any symbol
+                        best_signal_strength = 0
+                        best_signal_symbol = None
+                        
+                        for symbol in bot_config.get('symbols', ['EURUSDm'])[:3]:
+                            signal_strength = evaluate_trade_signal_strength(symbol, {})
+                            if signal_strength > best_signal_strength:
+                                best_signal_strength = signal_strength
+                                best_signal_symbol = symbol
+                        
+                        if best_signal_strength >= signal_threshold:
+                            logger.info(f"🔥 Bot {bot_id}: STRONG SIGNAL DETECTED on {best_signal_symbol}!")
+                            logger.info(f"   Signal Strength: {best_signal_strength:.0f}/100 (threshold: {signal_threshold})")
+                            logger.info(f"   Executing trade IMMEDIATELY (no waiting)...")
+                            break  # Break inner loop, execute trade next cycle
+                        elif best_signal_strength > 0:
+                            logger.debug(f"📊 Bot {bot_id}: Signal on {best_signal_symbol}: {best_signal_strength:.0f}/100 (waiting for {signal_threshold}+)")
+                else:
+                    # ⏱️ TIME-BASED MODE: Wait fixed interval
+                    logger.info(f"⏳ Bot {bot_id}: Waiting {trading_interval} seconds until next cycle...")
+                    time.sleep(trading_interval)
             
             except Exception as e:
                 logger.error(f"Bot {bot_id}: Error in trading loop: {e}")
-                time.sleep(min(trading_interval, 60))  # Wait at least 60 seconds before retry
+                time.sleep(min(poll_interval if trading_mode == 'signal-driven' else trading_interval, 60))  # Wait at least 60 seconds before retry
         
         # Bot stopped
         logger.info(f"🛑 Bot {bot_id}: CONTINUOUS TRADING LOOP STOPPED")
@@ -9186,6 +9324,303 @@ def bot_status():
     
     except Exception as e:
         logger.error(f"Error getting bot status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/<bot_id>/performance', methods=['GET'])
+@require_session
+def get_bot_performance(bot_id):
+    """Get detailed performance metrics for a specific bot
+    
+    Returns:
+    - Account balance (from broker)
+    - Total trades and breakdown
+    - Profit/Loss
+    - Commission distribution
+    - Daily profits tracking
+    """
+    try:
+        user_id = g.user_id
+        
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        bot = active_bots[bot_id]
+        
+        # Get broker connection for live balance
+        credential_id = bot.get('credentialId')
+        broker_type = bot.get('broker_type', 'MT5')
+        current_balance = 0
+        
+        try:
+            if credential_id:
+                _, broker_conn = get_broker_connection(credential_id, user_id, bot_id)
+                account_info = broker_conn.get_account_info()
+                if account_info:
+                    current_balance = account_info.get('balance', account_info.get('equity', 0))
+        except:
+            current_balance = bot.get('accountBalance', 0)
+        
+        # Calculate metrics
+        total_trades = bot.get('totalTrades', 0)
+        winning_trades = bot.get('winningTrades', 0)
+        total_profit = bot.get('totalProfit', 0)
+        total_loss = bot.get('totalLosses', 0)
+        
+        win_rate = (winning_trades / max(total_trades, 1)) * 100
+        profit_factor = total_profit / max(total_loss, 0.01)
+        
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'botName': bot.get('name', bot_id),
+            'brokerType': broker_type,
+            'currentBalance': round(current_balance, 2),
+            'initialBalance': bot.get('initialBalance', 0),
+            'trades': {
+                'total': total_trades,
+                'winning': winning_trades,
+                'losing': total_trades - winning_trades,
+                'winRate': round(win_rate, 1)
+            },
+            'profitLoss': {
+                'totalProfit': round(total_profit, 2),
+                'totalLoss': round(total_loss, 2),
+                'netProfit': round(total_profit - total_loss, 2),
+                'roi': round(((total_profit - total_loss) / max(bot.get('initialBalance', 1), 1)) * 100, 2),
+                'profitFactor': round(profit_factor, 2)
+            },
+            'drawdown': {
+                'maxDrawdown': round(bot.get('maxDrawdown', 0), 2),
+                'peakProfit': round(bot.get('peakProfit', 0), 2),
+                'currentDrawdown': round(bot.get('peakProfit', 0) - total_profit, 2)
+            },
+            'dailyProfits': bot.get('dailyProfits', {}),
+            'created': bot.get('createdAt', 'Unknown'),
+            'status': 'Running' if bot.get('enabled', False) else 'Stopped',
+            'tradingMode': bot.get('tradingMode', 'interval'),
+            'symbol': bot.get('symbols', ['EURUSD'])[0] if bot.get('symbols') else 'EURUSD'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting bot performance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/<bot_id>/trades-detailed', methods=['GET'])
+@require_session
+def get_bot_trades_detailed(bot_id):
+    """Get detailed trade history for a specific bot with filters
+    
+    Query parameters:
+    - limit: max trades to return (default 50)
+    - offset: pagination offset (default 0)
+    - symbol: filter by symbol
+    - status: 'open', 'closed', 'all' (default all)
+    """
+    try:
+        user_id = g.user_id
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        symbol_filter = request.args.get('symbol', None)
+        status_filter = request.args.get('status', 'all')
+        
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        # Get trades from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        query = 'SELECT * FROM trades WHERE bot_id = ?'
+        params = [bot_id]
+        
+        if symbol_filter:
+            query += ' AND symbol = ?'
+            params.append(symbol_filter)
+        
+        if status_filter and status_filter != 'all':
+            query += ' AND status = ?'
+            params.append(status_filter)
+        
+        # Get total count
+        count_cursor = conn.cursor()
+        count_cursor.execute(f'SELECT COUNT(*) FROM trades WHERE bot_id = ?', [bot_id])
+        total_count = count_cursor.fetchone()[0]
+        
+        # Get paginated results
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        trades = [dict(row) for row in rows]
+        
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'trades': trades,
+            'pagination': {
+                'total': total_count,
+                'offset': offset,
+                'limit': limit,
+                'hasMore': offset + limit < total_count
+            }
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting bot trades: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/<bot_id>/commissions', methods=['GET'])
+@require_session
+def get_bot_commissions(bot_id):
+    """Get commission earnings from a specific bot
+    
+    Returns:
+    - Total commissions earned
+    - Commission distribution by date
+    - Pending withdrawals
+    """
+    try:
+        user_id = g.user_id
+        
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        # Get commission data from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get total commissions from this bot
+        cursor.execute('''
+            SELECT COALESCE(SUM(commission_amount), 0) as total,
+                   COUNT(*) as count
+            FROM commission_ledger 
+            WHERE bot_id = ? AND status = 'active'
+        ''', [bot_id])
+        
+        comm_row = cursor.fetchone()
+        total_commission = comm_row['total'] if comm_row else 0
+        
+        # Get commission history by date
+        cursor.execute('''
+            SELECT DATE(created_at) as date, 
+                   SUM(commission_amount) as daily_commission,
+                   COUNT(*) as trades
+            FROM commission_ledger 
+            WHERE bot_id = ?
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+        ''', [bot_id])
+        
+        commission_history = [dict(row) for row in cursor.fetchall()]
+        
+        # Get pending withdrawals
+        cursor.execute('''
+            SELECT * FROM withdrawal_requests
+            WHERE bot_id = ?
+            ORDER BY created_at DESC
+        ''', [bot_id])
+        
+        withdrawals = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'totalCommissions': round(total_commission, 2),
+            'commissionHistory': commission_history,
+            'withdrawals': withdrawals,
+            'pendingWithdrawal': sum(w['amount'] for w in withdrawals if w['status'] == 'pending'),
+            'completedWithdrawal': sum(w['amount'] for w in withdrawals if w['status'] == 'completed')
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting bot commissions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/dashboard/bots-summary', methods=['GET'])
+@require_session
+def get_dashboard_summary():
+    """Get summary of all user bots for dashboard display
+    
+    Returns array of bot summaries with:
+    - Bot name and ID
+    - Current balance per broker
+    - Performance metrics
+    - Trading mode
+    - Status
+    """
+    try:
+        user_id = g.user_id
+        
+        # Get all bots for this user
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM user_bots WHERE user_id = ?', [user_id])
+        user_bots = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        summary = []
+        
+        for bot_row in user_bots:
+            bot_id = bot_row['bot_id']
+            
+            if bot_id not in active_bots:
+                continue
+            
+            bot = active_bots[bot_id]
+            
+            # Get live balance from broker
+            credential_id = bot.get('credentialId')
+            broker_type = bot.get('broker_type', 'MT5')
+            current_balance = bot.get('accountBalance', 0)
+            
+            try:
+                if credential_id:
+                    _, broker_conn = get_broker_connection(credential_id, user_id, bot_id)
+                    account_info = broker_conn.get_account_info()
+                    if account_info:
+                        current_balance = account_info.get('balance', account_info.get('equity', 0))
+            except:
+                pass
+            
+            total_profit = bot.get('totalProfit', 0)
+            total_trades = bot.get('totalTrades', 0)
+            
+            summary.append({
+                'botId': bot_id,
+                'botName': bot.get('name', f'Bot-{bot_id[:8]}'),
+                'broker': {
+                    'type': broker_type,
+                    'accountNumber': bot_row.get('broker_account_id', 'N/A')
+                },
+                'balance': round(current_balance, 2),
+                'profit': round(total_profit, 2),
+                'trades': total_trades,
+                'winRate': round((bot.get('winningTrades', 0) / max(total_trades, 1)) * 100, 1) if total_trades > 0 else 0,
+                'status': 'Running' if bot.get('enabled', False) else 'Stopped',
+                'tradingMode': bot.get('tradingMode', 'interval'),
+                'createdAt': bot.get('createdAt', 'Unknown')
+            })
+        
+        return jsonify({
+            'success': True,
+            'botsCount': len(summary),
+            'botsRunning': sum(1 for b in summary if b['status'] == 'Running'),
+            'totalBalance': round(sum(b['balance'] for b in summary), 2),
+            'totalProfit': round(sum(b['profit'] for b in summary), 2),
+            'bots': summary,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting dashboard summary: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
