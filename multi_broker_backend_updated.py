@@ -61,6 +61,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ==================== GLOBAL MT5 CONNECTION LOCK ====================
+# Prevents multiple simultaneous MT5 connections which cause IPC conflicts
+# Only ONE thread should connect to MT5 at a time
+mt5_connection_lock = threading.Lock()
+logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connections")
 
 app = Flask(__name__)
 CORS(app)
@@ -1192,7 +1197,18 @@ class MT5Connection(BrokerConnection):
     def connect(self) -> bool:
         """
         Connect to MT5 with retry logic and better error handling
+        CRITICAL: Uses global lock to prevent simultaneous MT5 connections
         """
+        global mt5_connection_lock
+        
+        # Acquire lock to ensure only ONE thread connects to MT5 at a time
+        logger.info(f"⏳ Waiting for exclusive MT5 connection lock (sequential connection mode)...")
+        with mt5_connection_lock:
+            logger.info(f"✅ Acquired MT5 connection lock - proceeding with connection")
+            return self._connect_with_lock()
+    
+    def _connect_with_lock(self) -> bool:
+        """Internal connection method - always called within mt5_connection_lock"""
         try:
             if not self.mt5:
                 logger.error("MetaTrader5 SDK not available")
@@ -1262,8 +1278,11 @@ class MT5Connection(BrokerConnection):
                         
                         # CRITICAL: Extended IPC stabilization wait for Exness (terminal must be fully ready)
                         # On retry attempts (attempt > 1), use even longer wait after terminal restart
-                        ipc_wait = 20 if attempt > 1 else 15
+                        # CRITICAL: Exness terminal needs significant time to establish IPC connection
+                        # First attempt: 30 seconds, Retry attempts: 60 seconds (terminal restart)
+                        ipc_wait = 60 if attempt > 1 else 30
                         logger.info(f"  ⏳ Waiting {ipc_wait} seconds for MT5 IPC stabilization (Attempt {attempt}/3)...")
+                        logger.warning(f"     [IPC STABILITY PHASE] Do NOT interrupt - terminal is initializing...")
                         time.sleep(ipc_wait)
                         
                         # Try login with password first
@@ -1335,9 +1354,11 @@ class MT5Connection(BrokerConnection):
                 
                 # Wait before retry, exponential backoff (extra long for IPC issues)
                 if attempt < max_retries:
-                    # Longer waits for IPC reliability: 20 sec, 30 sec, 40 sec
-                    wait_time = 20 + (10 * attempt)  
-                    logger.warning(f"  ⏳ EXTENDED WAIT: {wait_time} seconds before retry (IPC stabilization)...")
+                    # CRITICAL: Extended waits between retries to give Exness terminal time to stabilize
+                    # After failed attempts: 60sec (1min), 90sec (1.5min), 120sec (2min)
+                    wait_time = 30 + (30 * attempt)  # 60, 90, 120 seconds
+                    logger.warning(f"  ⏳ CRITICAL WAIT: {wait_time} seconds before retry (IPC recovery phase)...")
+                    logger.warning(f"     Terminal is recovering from IPC connection failure - please wait...")
                     time.sleep(wait_time)
             
             # All retries exhausted
