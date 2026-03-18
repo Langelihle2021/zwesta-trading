@@ -285,6 +285,22 @@ def require_session(f):
     
     return decorated_function
 
+def require_admin(f):
+    """Decorator to require admin authorization"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get API key for admin verification
+        valid, message = validate_api_key()
+        if not valid:
+            return jsonify({'success': False, 'error': 'Admin authentication required'}), 401
+        
+        # Optionally add additional admin role check from database if needed
+        # For now, API key validation is sufficient for admin endpoints
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
 class BrokerType(Enum):
     """Supported broker types"""
     METATRADER5 = "mt5"
@@ -624,6 +640,35 @@ def init_database():
         )
     ''')
     
+    # User wallets table - tracks user's earned profits available for withdrawal
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_wallets (
+            wallet_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            balance REAL DEFAULT 0,
+            currency TEXT DEFAULT 'USD',
+            last_updated TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
+    # Wallet transactions table - audit trail for wallet changes
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS wallet_transactions (
+            transaction_id TEXT PRIMARY KEY,
+            wallet_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            amount REAL NOT NULL,
+            transaction_type TEXT,
+            source_withdrawal_id TEXT,
+            status TEXT DEFAULT 'completed',
+            created_at TEXT,
+            FOREIGN KEY (wallet_id) REFERENCES user_wallets(wallet_id),
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            FOREIGN KEY (source_withdrawal_id) REFERENCES exness_withdrawals(withdrawal_id)
+        )
+    ''')
+
     # User sessions table - for authentication
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_sessions (
@@ -12924,6 +12969,147 @@ def exness_withdrawal_balance(user_id):
 
     except Exception as e:
         logger.error(f"Error getting Exness balance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== ADMIN: VERIFY EXNESS WITHDRAWAL & TRIGGER COMMISSION SPLIT ====================
+
+@app.route('/api/admin/withdrawal/exness/verify', methods=['POST'])
+@require_admin
+def admin_verify_exness_withdrawal():
+    """
+    Admin verifies that user actually withdrew from Exness.
+    Automatically splits commission: 30% to developer, 70% to user wallet.
+    """
+    try:
+        data = request.get_json()
+        withdrawal_id = data.get('withdrawal_id')
+        admin_notes = data.get('notes', '')
+        
+        if not withdrawal_id:
+            return jsonify({'success': False, 'error': 'withdrawal_id required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get withdrawal details
+        cursor.execute('SELECT * FROM exness_withdrawals WHERE withdrawal_id = ?', (withdrawal_id,))
+        withdrawal = cursor.fetchone()
+        
+        if not withdrawal:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Withdrawal not found'}), 404
+        
+        if withdrawal['status'] != 'pending':
+            conn.close()
+            return jsonify({
+                'success': False, 
+                'error': f"Can only verify pending withdrawals. Current status: {withdrawal['status']}"
+            }), 400
+        
+        user_id = withdrawal['user_id']
+        profit_amount = withdrawal['profit_from_trades']
+        
+        # ==================== COMMISSION SPLIT LOGIC ====================
+        developer_id = 'SYSTEM_OWNER_USER_ID'
+        dev_share = profit_amount * 0.30  # Developer gets 30%
+        user_share = profit_amount * 0.70  # User gets 70%
+        
+        now = datetime.now().isoformat()
+        
+        # STEP 1: Ensure user has a wallet
+        cursor.execute('SELECT wallet_id FROM user_wallets WHERE user_id = ?', (user_id,))
+        wallet_row = cursor.fetchone()
+        
+        if not wallet_row:
+            wallet_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO user_wallets (wallet_id, user_id, balance, currency, last_updated)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (wallet_id, user_id, user_share, 'USD', now))
+        else:
+            wallet_id = wallet_row['wallet_id']
+            # Update existing wallet balance
+            cursor.execute('''
+                UPDATE user_wallets 
+                SET balance = balance + ?, last_updated = ?
+                WHERE user_id = ?
+            ''', (user_share, now, user_id))
+        
+        # STEP 2: Record wallet transaction for user
+        transaction_id = str(uuid.uuid4())
+        cursor.execute('''
+            INSERT INTO wallet_transactions 
+            (transaction_id, wallet_id, user_id, amount, transaction_type, source_withdrawal_id, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            transaction_id, wallet_id, user_id, user_share, 
+            'profit_withdrawal', withdrawal_id, 'completed', now
+        ))
+        
+        # STEP 3: Record developer commission
+        commission_id = str(uuid.uuid4())
+        cursor.execute('''
+            INSERT INTO commissions 
+            (commission_id, earner_id, payer_id, amount, commission_type, source_id, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            commission_id, developer_id, user_id, dev_share,
+            'exness_profit_commission', withdrawal_id, 'earned', now
+        ))
+        
+        # STEP 4: Update withdrawal status to verified
+        cursor.execute('''
+            UPDATE exness_withdrawals 
+            SET status = 'verified', completed_at = ?, admin_notes = ?
+            WHERE withdrawal_id = ?
+        ''', (now, admin_notes, withdrawal_id))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ ADMIN verified withdrawal {withdrawal_id}: User {user_id}")
+        logger.info(f"   Commission split: Dev ${dev_share:.2f} (30%), User ${user_share:.2f} (70%)")
+        
+        return jsonify({
+            'success': True,
+            'withdrawal_id': withdrawal_id,
+            'status': 'verified',
+            'profit_amount': profit_amount,
+            'developer_commission': round(dev_share, 2),
+            'user_wallet_credit': round(user_share, 2),
+            'message': f'✅ Withdrawal verified! User will receive ${round(user_share, 2)} in their wallet. Developer earned ${round(dev_share, 2)}.'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error verifying Exness withdrawal: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== GET USER WALLET BALANCE ====================
+
+@app.route('/api/wallet/balance/<user_id>', methods=['GET'])
+def get_wallet_balance(user_id):
+    """Get user's available wallet balance"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT balance FROM user_wallets WHERE user_id = ?', (user_id,))
+        wallet = cursor.fetchone()
+        conn.close()
+        
+        balance = wallet['balance'] if wallet else 0
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'balance': round(balance, 2),
+            'currency': 'USD'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting wallet balance: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
