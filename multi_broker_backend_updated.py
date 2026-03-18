@@ -8676,12 +8676,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     pos_symbol = pos.get('symbol') or pos.get('instrument') or pos.get('epic', '')
                                     pos_type = pos.get('type') or pos.get('direction', '')
                                     
-                                    # Use position PnL only if matched by ticket (exact match)
-                                    # For symbol+direction fallback, PnL is ~0 since trade was just placed
+                                    # Use position PnL if matched by ticket, otherwise use strategy profit
                                     if matched_by_ticket:
                                         trade_profit = pos.get('pnl') or pos.get('profit_loss') or pos.get('unrealizedPL', 0)
                                     else:
-                                        trade_profit = 0
+                                        # Use strategy function profit (refined strategies with proper win rates)
+                                        trade_profit = trade_params.get('profit', 0)
                                     
                                     trade = {
                                             'ticket': pos.get('ticket') or pos.get('deal_id', ''),
@@ -12978,6 +12978,7 @@ def exness_get_trades():
             conn = get_db_connection()
             cursor = conn.cursor()
             
+            # Try exness_trade_profits table first
             cursor.execute('''
                 SELECT * FROM exness_trade_profits 
                 WHERE user_id = ? 
@@ -13002,7 +13003,42 @@ def exness_get_trades():
                 }
                 trades.append(trade)
             
+            # Also check trades table (for bot-executed trades)
+            try:
+                cursor.execute('''
+                    SELECT * FROM trades 
+                    WHERE user_id = ? 
+                    ORDER BY timestamp DESC
+                ''', (user_id,))
+                
+                for row in cursor.fetchall():
+                    try:
+                        trade_data = json.loads(row['trade_data'])
+                        trade = {
+                            'ticket': trade_data.get('ticket', ''),
+                            'symbol': trade_data.get('symbol', ''),
+                            'side': trade_data.get('type', ''),
+                            'volume': trade_data.get('volume', 0),
+                            'entryPrice': trade_data.get('entryPrice', 0),
+                            'exitPrice': trade_data.get('exitPrice', 0),
+                            'profitLoss': trade_data.get('profit', 0),
+                            'commission': trade_data.get('commission', 0),
+                            'pnlPercentage': ((trade_data.get('profit', 0) / (trade_data.get('entryPrice', 1) * trade_data.get('volume', 1))) * 100) if (trade_data.get('entryPrice', 0) * trade_data.get('volume', 0)) > 0 else 0,
+                            'closedAt': trade_data.get('exitTime', datetime.fromtimestamp(row['timestamp']/1000).isoformat()),
+                            'duration': trade_data.get('durationSec', 0),
+                            'strategy': trade_data.get('strategy', ''),
+                            'botId': trade_data.get('botId', '')
+                        }
+                        trades.append(trade)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse trade data: {row['trade_data']}")
+            except Exception as e:
+                logger.warning(f"Error querying trades table: {e}")
+            
             conn.close()
+            
+            # Sort by most recent first
+            trades.sort(key=lambda x: x.get('closedAt', ''), reverse=True)
             
             logger.info(f"✅ Retrieved {len(trades)} trades from database for user {user_id}")
             return jsonify({

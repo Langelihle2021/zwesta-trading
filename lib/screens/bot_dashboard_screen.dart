@@ -66,14 +66,14 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     double amount, {
     int decimals = 2,
   }) {
-    final convertedAmount = currencyProvider.convert(amount);
-    final symbol = _currencySymbol(currencyProvider.currency);
-    final absoluteAmount = convertedAmount.abs().toStringAsFixed(decimals);
+    // Always display as USD - no currency conversion (backend enforces USD)
+    const symbol = '\$';
+    final absoluteAmount = amount.abs().toStringAsFixed(decimals);
 
-    if (convertedAmount < 0) {
-      return '-$symbol $absoluteAmount';
+    if (amount < 0) {
+      return '-$symbol$absoluteAmount';
     }
-    return '$symbol $absoluteAmount';
+    return '$symbol$absoluteAmount';
   }
 
   @override
