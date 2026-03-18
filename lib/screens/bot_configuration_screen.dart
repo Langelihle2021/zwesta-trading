@@ -620,8 +620,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
       if (startResponse.statusCode == 200) {
         final data = jsonDecode(startResponse.body);
-        final tradesPlaced = data['tradesPlaced'] ?? 0;
-        print('✅ Bot started, trades placed: $tradesPlaced');
+        print('✅ Bot started, trades placed: ${data['tradesPlaced']}');
         print('💰 Commission tracking enabled for this bot');
 
         setState(() {
@@ -630,7 +629,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
               'Broker: ${_brokerService.activeCredential?.broker}\n'
               'Account: ${_brokerService.activeCredential?.accountNumber}\n'
               '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n'
-              'Trades placed: $tradesPlaced\n\n'
+              'Trades placed: ${data['tradesPlaced']}\n\n'
               '💰 Commissions will be tracked on every trade.\n'
               '📊 Earnings appear in your Commission Dashboard.';
           _isCreating = false;
@@ -1535,49 +1534,21 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           Center(
             child: Column(
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: _isCreating
-                        ? [Colors.grey.shade600, Colors.grey.shade700]
-                        : [Colors.purple.shade600, Colors.purple.shade700],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: (_isCreating ? Colors.grey : Colors.purple).withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _isCreating ? null : _createAndStartBot,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _isCreating
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.white)),
-                                )
-                              : const Icon(Icons.play_circle, size: 18),
-                            const SizedBox(width: 8),
-                            Text(
-                              _isCreating ? 'Creating Bot...' : 'Create & Start Bot',
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.white),
-                            ),
-                          ],
-                        ),
-                      ),
+                ElevatedButton.icon(
+                  onPressed: _isCreating ? null : _createAndStartBot,
+                  icon: _isCreating
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.play_circle),
+                  label: Text(_isCreating ? 'Creating Bot...' : 'Create & Start Bot'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
                     ),
                   ),
                 ),
