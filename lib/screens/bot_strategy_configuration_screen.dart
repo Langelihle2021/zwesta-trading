@@ -28,13 +28,29 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
   final List<String> _riskLevels = ['LOW', 'MEDIUM', 'HIGH'];
 
   final List<String> _commonSymbols = [
+    // Crypto
+    'BTCUSD',
+    'ETHUSD',
+    // Forex (Major Pairs)
     'EURUSD',
     'GBPUSD',
     'USDJPY',
+    'USDCHF',
     'AUDUSD',
+    'NZDUSD',
+    'USDCAD',
+    'USDSEK',
+    // Precious Metals
     'XAUUSD',
-    'BTCUSD',
-    'ETHUSD'
+    'XAGUSD',
+    'XPTUSD',
+    'XPDUSD',
+    // Commodities
+    'XNIUSD',
+    // Stocks
+    'NVDA',
+    'AMD',
+    'INTC'
   ];
 
   @override

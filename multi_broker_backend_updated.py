@@ -5226,15 +5226,29 @@ def get_account_info_alias():
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
-    # Exness Demo Account Available Symbols (confirmed in Market Watch)
-    # Crypto Pair (2) - High volatility
+    # Crypto Pair (2)
     'BTCUSD',   # Bitcoin / USD
     'ETHUSD',   # Ethereum / USD
-    # Forex (2) - Most Reliable
-    'EURUSD',   # Euro / USD - Primary pair
+    # Forex (9) - All major pairs now available
+    'EURUSD',   # Euro / USD
+    'GBPUSD',   # British Pound / USD (NEW)
     'USDJPY',   # USD / Japanese Yen
-    # Precious Metals (1) - High volatility
-    'XAUUSD',   # Gold / USD - Most liquid precious metal
+    'USDCHF',   # USD / Swiss Franc (m = micro)
+    'AUDUSD',   # Australian Dollar / USD (m = micro)
+    'NZDUSD',   # New Zealand Dollar / USD (m = micro)
+    'USDCAD',   # USD / Canadian Dollar (m = micro)
+    'USDSEK',   # USD / Swedish Krona (m = micro)
+    # Precious Metals (4)
+    'XAUUSD',   # Gold / USD
+    'XAGUSD',   # Silver / USD (m = micro)
+    'XPTUSD',   # Platinum / USD (m = micro)
+    'XPDUSD',   # Palladium / USD (m = micro)
+    # Commodities (1)
+    'XNIUSd',   # Nickel / USD (m = micro)
+    # Stocks/Indices (4)
+    'NVDA',     # NVIDIA (m = micro)
+    'AMD',      # Advanced Micro Devices (m = micro)
+    'INTC',     # Intel (m = micro)
 }
 
 BINANCE_VALID_SYMBOLS = {
@@ -5640,7 +5654,7 @@ def initialize_demo_bots():
         {
             'botId': 'DemoBot_EURUSD_TrendFollow',
             'accountId': 'Demo MT5 - XM Global',
-            'symbols': ['EURUSD', 'USDJPY', 'XAUUSD'],
+            'symbols': ['EURUSD', 'GBPUSD', 'XAUUSD'],
             'strategy': 'Trend Following',
             'riskPerTrade': 100,
             'maxDailyLoss': 500,
@@ -8572,7 +8586,7 @@ def get_commodity_market_data():
             hold_count = sum(1 for s in commodity_market_data.values() if s.get('signal', '') == '🟡 HOLD')
             
             # Log actual signal values for key symbols
-            key_symbols = ['EURUSD', 'USDJPY', 'XAUUSD', 'BTCUSD']
+            key_symbols = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD']
             for sym in key_symbols:
                 if sym in commodity_market_data:
                     sig = commodity_market_data[sym].get('signal', 'UNKNOWN')
