@@ -73,38 +73,9 @@ CORS(app)
 # ==================== BOT CLEANUP & REPOPULATION ====================
 def repopulate_active_bots():
     """Repopulate active_bots from user_bots table on backend startup"""
-    global active_bots
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM user_bots WHERE enabled = 1')
-        rows = cursor.fetchall()
-        for row in rows:
-            bot_id = row['bot_id']
-            # Minimal config; extend as needed
-            active_bots[bot_id] = {
-                'botId': bot_id,
-                'user_id': row['user_id'],
-                'accountId': row['broker_account_id'],
-                'strategy': row['strategy'],
-                'symbols': row['symbols'].split(',') if row['symbols'] else [],
-                'enabled': row['enabled'],
-                'createdAt': row['created_at'],
-                'totalTrades': 0,
-                'winningTrades': 0,
-                'totalProfit': 0,
-                'totalLosses': 0,
-                'totalInvestment': 0,
-                'profitHistory': [],
-                'tradeHistory': [],
-                'dailyProfits': {},
-                'dailyProfit': 0,
-                'maxDrawdown': 0,
-                'peakProfit': 0,
-                'profit': 0,  # Always include profit field
-            }
-        conn.close()
-        logger.info(f"✅ Repopulated {len(active_bots)} bots from database on startup.")
+        restored_count = load_user_bots_from_database(enabled_only=True)
+        logger.info(f"✅ Repopulated {restored_count} bots from database on startup.")
     except Exception as e:
         logger.error(f"❌ Error repopulating active_bots: {e}")
 
@@ -552,6 +523,11 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+
+    cursor.execute("PRAGMA table_info(user_bots)")
+    user_bots_columns = {row[1] for row in cursor.fetchall()}
+    if 'runtime_state' not in user_bots_columns:
+        cursor.execute("ALTER TABLE user_bots ADD COLUMN runtime_state TEXT")
     
     # Broker credentials table - stores user's broker connections
     cursor.execute('''
@@ -5777,63 +5753,292 @@ def initialize_demo_bots():
         logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
 
 
-def load_user_bots_from_database():
-    """Load all user-created bots from database into active_bots memory"""
+PERSISTED_BOT_STATE_FIELDS = {
+    'accountBalance',
+    'accountId',
+    'allowedVolatility',
+    'autoSwitch',
+    'basePositionSize',
+    'botId',
+    'brokerName',
+    'broker_type',
+    'createdAt',
+    'credentialId',
+    'dailyProfit',
+    'dailyProfits',
+    'displayCurrency',
+    'drawdownPauseHours',
+    'drawdownPausePercent',
+    'drawdownPauseUntil',
+    'dynamicSizing',
+    'enabled',
+    'lastStrategySwitch',
+    'maxDailyLoss',
+    'maxDrawdown',
+    'mode',
+    'name',
+    'peakProfit',
+    'profit',
+    'profitHistory',
+    'profitLock',
+    'riskPerTrade',
+    'startTime',
+    'strategy',
+    'strategyHistory',
+    'symbols',
+    'totalInvestment',
+    'totalLosses',
+    'totalProfit',
+    'totalTrades',
+    'user_id',
+    'volatilityLevel',
+    'winningTrades',
+}
+
+
+def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
+    created_at = row['created_at'] or datetime.now().isoformat()
+    daily_profit = float(row['daily_profit'] or 0.0)
+    total_profit = float(row['total_profit'] or 0.0)
+
+    return {
+        'botId': row['bot_id'],
+        'user_id': row['user_id'],
+        'name': row['name'],
+        'accountId': row['broker_account_id'],
+        'credentialId': row['credential_id'],
+        'brokerName': row['broker_name'],
+        'broker_type': row['broker_name'] or 'MT5',
+        'mode': 'live' if row['is_live'] else 'demo',
+        'symbols': row['symbols'].split(',') if row['symbols'] else ['EURUSDm'],
+        'strategy': row['strategy'],
+        'enabled': bool(row['enabled']),
+        'riskPerTrade': 20.0,
+        'maxDailyLoss': 60.0,
+        'profitLock': 80.0,
+        'drawdownPausePercent': 5.0,
+        'drawdownPauseHours': 6.0,
+        'allowedVolatility': ['Low', 'Medium'],
+        'displayCurrency': 'USD',
+        'totalTrades': 0,
+        'winningTrades': 0,
+        'totalProfit': total_profit,
+        'totalLosses': 0.0,
+        'totalInvestment': 0.0,
+        'createdAt': created_at,
+        'startTime': created_at,
+        'profitHistory': [],
+        'tradeHistory': [],
+        'dailyProfits': {},
+        'dailyProfit': daily_profit,
+        'maxDrawdown': 0.0,
+        'peakProfit': max(total_profit, 0.0),
+        'strategyHistory': [],
+        'lastStrategySwitch': created_at,
+        'volatilityLevel': 'Medium',
+        'profit': total_profit,
+        'drawdownPauseUntil': None,
+        'accountBalance': 0.0,
+    }
+
+
+def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
+    bot_state = _default_bot_runtime_state(row)
+    runtime_state_raw = row['runtime_state']
+
+    if runtime_state_raw:
+        try:
+            runtime_state = json.loads(runtime_state_raw)
+            if isinstance(runtime_state, dict):
+                for key, value in runtime_state.items():
+                    if key in PERSISTED_BOT_STATE_FIELDS:
+                        bot_state[key] = value
+        except Exception as e:
+            logger.warning(f"Could not restore runtime state for bot {row['bot_id']}: {e}")
+
+    bot_state['botId'] = row['bot_id']
+    bot_state['user_id'] = row['user_id']
+    bot_state['name'] = row['name']
+    bot_state['accountId'] = row['broker_account_id']
+    bot_state['credentialId'] = row['credential_id']
+    bot_state['brokerName'] = row['broker_name']
+    bot_state['broker_type'] = bot_state.get('broker_type') or row['broker_name'] or 'MT5'
+    bot_state['mode'] = bot_state.get('mode') or ('live' if row['is_live'] else 'demo')
+    bot_state['strategy'] = row['strategy']
+    bot_state['enabled'] = bool(row['enabled'])
+    bot_state['createdAt'] = row['created_at'] or bot_state.get('createdAt') or datetime.now().isoformat()
+    bot_state['symbols'] = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
+    bot_state['tradeHistory'] = bot_state.get('tradeHistory') or []
+    bot_state['profitHistory'] = bot_state.get('profitHistory') or []
+    bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
+    bot_state['strategyHistory'] = bot_state.get('strategyHistory') or []
+    bot_state['displayCurrency'] = str(bot_state.get('displayCurrency') or 'USD').upper()
+    bot_state['profit'] = bot_state.get('totalProfit', 0.0) or 0.0
+
+    return bot_state
+
+
+def _extract_persistable_bot_state(bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: bot_config.get(key)
+        for key in PERSISTED_BOT_STATE_FIELDS
+        if key in bot_config
+    }
+
+
+def persist_bot_runtime_state(bot_id: str):
+    """Persist bot runtime metrics so they can be restored after a VPS restart."""
+    bot_config = active_bots.get(bot_id)
+    if not bot_config:
+        return
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    daily_profit = float(bot_config.get('dailyProfits', {}).get(today, bot_config.get('dailyProfit', 0.0)) or 0.0)
+    total_profit = float(bot_config.get('totalProfit', 0.0) or 0.0)
+    bot_config['dailyProfit'] = daily_profit
+    bot_config['profit'] = total_profit
+
+    runtime_state = _extract_persistable_bot_state(bot_config)
+    updated_at = datetime.now().isoformat()
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # Get all active bots from database
-        cursor.execute('''
-            SELECT bot_id, user_id, name, strategy, broker_account_id, symbols, enabled, created_at
-            FROM user_bots
-            WHERE status = 'active'
-        ''')
+        cursor.execute(
+            '''
+            UPDATE user_bots
+            SET enabled = ?,
+                daily_profit = ?,
+                total_profit = ?,
+                runtime_state = ?,
+                updated_at = ?
+            WHERE bot_id = ?
+            ''',
+            (
+                1 if bot_config.get('enabled', False) else 0,
+                daily_profit,
+                total_profit,
+                json.dumps(runtime_state),
+                updated_at,
+                bot_id,
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Could not persist runtime state for bot {bot_id}: {e}")
+
+
+def _get_bot_thread_credentials(bot_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    credential_id = bot_config.get('credentialId')
+    if not credential_id:
+        return None
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            SELECT broker_name, account_number, password, server, is_live, api_key
+            FROM broker_credentials
+            WHERE credential_id = ?
+            ''',
+            (credential_id,),
+        )
+        credential_row = cursor.fetchone()
+        conn.close()
+        if not credential_row:
+            return None
+
+        broker_name = canonicalize_broker_name(credential_row['broker_name'])
+        if broker_name == 'Binance':
+            return {
+                'api_key': credential_row['api_key'],
+                'api_secret': credential_row['password'],
+                'account_number': credential_row['account_number'],
+                'server': credential_row['server'] or 'spot',
+                'is_live': bool(credential_row['is_live']),
+            }
+
+        return {
+            'account_number': credential_row['account_number'],
+            'password': credential_row['password'],
+            'server': credential_row['server'],
+            'is_live': bool(credential_row['is_live']),
+        }
+    except Exception as e:
+        logger.warning(f"Could not load broker credentials for bot {bot_config.get('botId')}: {e}")
+        return None
+
+
+def start_enabled_bots_on_startup():
+    """Restart previously enabled bots after a backend/VPS restart."""
+    restarted_bots = 0
+
+    for bot_id, bot_config in active_bots.items():
+        if not bot_config.get('enabled'):
+            continue
+        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+            continue
+
+        bot_stop_flags[bot_id] = False
+        running_bots[bot_id] = True
+        bot_credentials = _get_bot_thread_credentials(bot_config) if bot_config.get('mode') == 'live' else None
+
+        bot_thread = threading.Thread(
+            target=continuous_bot_trading_loop,
+            args=(bot_id, bot_config.get('user_id'), bot_credentials),
+            daemon=True,
+            name=f"BotThread-{bot_id}",
+        )
+        bot_threads[bot_id] = bot_thread
+        bot_thread.start()
+        restarted_bots += 1
+        logger.info(f"♻️ Restarted bot {bot_id} from persisted runtime state")
+
+    return restarted_bots
+
+
+def load_user_bots_from_database(enabled_only: bool = False):
+    """Load user-created bots from database into active_bots memory."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = '''
+            SELECT
+                ub.bot_id,
+                ub.user_id,
+                ub.name,
+                ub.strategy,
+                ub.broker_account_id,
+                ub.symbols,
+                ub.enabled,
+                ub.created_at,
+                ub.daily_profit,
+                ub.total_profit,
+                ub.runtime_state,
+                bc.credential_id,
+                bcr.broker_name,
+                bcr.is_live
+            FROM user_bots ub
+            LEFT JOIN bot_credentials bc ON bc.bot_id = ub.bot_id AND bc.user_id = ub.user_id
+            LEFT JOIN broker_credentials bcr ON bcr.credential_id = bc.credential_id
+            WHERE ub.status = 'active'
+        '''
+        if enabled_only:
+            query += ' AND ub.enabled = 1'
+
+        cursor.execute(query)
         
         bots_loaded = 0
         for row in cursor.fetchall():
-            bot_id = row[0]
-            user_id = row[1]
-            name = row[2]
-            strategy = row[3]
-            account_id = row[4]
-            symbols_str = row[5]
-            enabled = row[6]
-            created_at = row[7]
-            
-            # Skip if already in active_bots (demo bots)
+            bot_id = row['bot_id']
+
             if bot_id in active_bots:
                 continue
-            
-            # Parse symbols
-            symbols = symbols_str.split(',') if symbols_str else ['EURUSDm']
-            
-            # Add to active_bots with default values for trading metrics
-            now = datetime.now()
-            active_bots[bot_id] = {
-                'botId': bot_id,
-                'user_id': user_id,
-                'name': name,
-                'accountId': account_id,
-                'symbols': symbols,
-                'strategy': strategy,
-                'enabled': bool(enabled),
-                'totalTrades': 0,
-                'winningTrades': 0,
-                'totalProfit': 0,
-                'totalLosses': 0,
-                'totalInvestment': 0,
-                'createdAt': created_at,
-                'startTime': created_at,
-                'profitHistory': [],
-                'tradeHistory': [],
-                'dailyProfits': {},
-                'maxDrawdown': 0,
-                'peakProfit': 0,
-                'strategyHistory': [],
-                'lastStrategySwitch': created_at,
-                'volatilityLevel': 'Medium',
-            }
+
+            active_bots[bot_id] = _restore_bot_runtime_state(row)
             bots_loaded += 1
         
         conn.close()
@@ -7867,6 +8072,7 @@ def create_bot():
             'drawdownPauseUntil': None,
             'profit': 0,  # Always include profit field
         }
+        persist_bot_runtime_state(bot_id)
         
         logger.info(f"✅ Created bot {bot_id} for user {user_id}")
         logger.info(f"   Broker: {broker_name} | Account: {account_number} | Mode: {mode}")
@@ -8325,6 +8531,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     if today not in bot_config['dailyProfits']:
                                         bot_config['dailyProfits'][today] = 0
                                     bot_config['dailyProfits'][today] += trade['profit']
+                                    bot_config['dailyProfit'] = bot_config['dailyProfits'][today]
+                                    bot_config['profit'] = bot_config['totalProfit']
                                     
                                     # Distribution commissions
                                     if trade['profit'] > 0:
@@ -8350,6 +8558,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             bot_config['accountBalance'] = account_info.get('balance', account_info.get('equity', 0))
                 except Exception as e:
                     logger.warning(f"Bot {bot_id}: Could not update account balance: {e}")
+
+                persist_bot_runtime_state(bot_id)
                 
                 logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Total P&L: ${bot_config['totalProfit']:.2f}")
                 
@@ -8716,9 +8926,9 @@ def start_bot():
                 cursor = conn.cursor()
                 cursor.execute('''
                     UPDATE user_bots 
-                    SET config = json_replace(config, '$.symbols', ?)
+                    SET symbols = ?, updated_at = ?
                     WHERE bot_id = ?
-                ''', (json.dumps(corrected_symbols), bot_id))
+                ''', (','.join(corrected_symbols), datetime.now().isoformat(), bot_id))
                 conn.commit()
                 conn.close()
             except Exception as e:
@@ -8742,6 +8952,8 @@ def start_bot():
         # ✅ REGISTER BOT AS RUNNING IMMEDIATELY (before thread starts)
         # This prevents dashboard from showing it as stopped during startup
         running_bots[bot_id] = True
+        bot_config['enabled'] = True
+        persist_bot_runtime_state(bot_id)
         
         bot_thread = threading.Thread(
             target=continuous_bot_trading_loop,
@@ -9025,6 +9237,7 @@ def stop_bot(bot_id):
         # Disable bot in config
         bot_config['enabled'] = False
         running_bots[bot_id] = False
+        persist_bot_runtime_state(bot_id)
         
         logger.info(f"⏸️ Bot {bot_id} stopped (still in system, can be restarted)")
         logger.info(f"   Total Trades: {bot_config.get('totalTrades', 0)}")
@@ -12229,6 +12442,9 @@ if __name__ == '__main__':
     user_bots_count = load_user_bots_from_database()
     logger.info(f"[OK] Loaded {user_bots_count} user bots from database")
     logger.info(f"[OK] Total bots ready: {len(active_bots)}")
+
+    restarted_bots = start_enabled_bots_on_startup()
+    logger.info(f"[OK] Auto-restarted {restarted_bots} enabled bots after backend startup")
     
     # Start live market data updater thread (fetches real prices from MT5)
     market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
