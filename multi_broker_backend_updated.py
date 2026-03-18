@@ -5248,40 +5248,48 @@ BINANCE_VALID_SYMBOLS = {
 }
 
 SYMBOL_MAPPING = {
+    # Exness "m" suffix mappings (symbols received without "m" need to map to "m" version)
+    'BTCUSD': 'BTCUSDm',
+    'ETHUSD': 'ETHUSDm',
+    'EURUSD': 'EURUSDm',
+    'USDJPY': 'USDJPYm',
+    'XAUUSD': 'XAUUSDm',
+    
     # OLD -> NEW SYMBOL CORRECTIONS
     # Metals
-    'GOLD': 'XAUUSD', 'XAUUSD': 'XAUUSD',
-    'SILVER': 'XAGUSD', 'XAGUSD': 'XAGUSD',
-    'PLATINUM': 'XPTUSD',
-    'PALLADIUM': 'XPDUSD', 'XPDUSD': 'XPDUSD',
-    'COPPER': 'XAUUSD',
+    'GOLD': 'XAUUSDm', 'XAGUSD': 'XAUUSDm',
+    'SILVER': 'XAUUSDm',
+    'PLATINUM': 'XAUUSDm',
+    'PALLADIUM': 'XAUUSDm',
+    'COPPER': 'XAUUSDm',
     
-    # Energy
-    'WTIUSD': 'OILK', 'CRUDE_OIL': 'OILK',
-    'BRENTUSD': 'OILK',
-    'NATGASUS': 'OILK', 'NATURAL_GAS': 'OILK',
+    # Energy (not available on Exness demo - map to EURUSDm)
+    'WTIUSD': 'EURUSDm', 'CRUDE_OIL': 'EURUSDm',
+    'BRENTUSD': 'EURUSDm',
+    'NATGASUS': 'EURUSDm', 'NATURAL_GAS': 'EURUSDm',
+    'OILK': 'EURUSDm',
     
-    # Agriculture (map to EURUSD as fallback)
-    'CORNUSD': 'EURUSD', 'CORN': 'EURUSD',
-    'WHEATUSD': 'EURUSD', 'WHEAT': 'EURUSD',
-    'SOYBEANSUSD': 'EURUSD', 'SOYBEANS': 'EURUSD',
-    'COFFEEUSD': 'EURUSD', 'COFFEE': 'EURUSD',
-    'COCOAUSD': 'EURUSD', 'COCOA': 'EURUSD',
-    'SUGARUSD': 'EURUSD', 'SUGAR': 'EURUSD',
+    # Agriculture (not available on Exness demo - map to EURUSDm)
+    'CORNUSD': 'EURUSDm', 'CORN': 'EURUSDm',
+    'WHEATUSD': 'EURUSDm', 'WHEAT': 'EURUSDm',
+    'SOYBEANSUSD': 'EURUSDm', 'SOYBEANS': 'EURUSDm',
+    'COFFEEUSD': 'EURUSDm', 'COFFEE': 'EURUSDm',
+    'COCOAUSD': 'EURUSDm', 'COCOA': 'EURUSDm',
+    'SUGARUSD': 'EURUSDm', 'SUGAR': 'EURUSDm',
     
-    # Indices
-    'SPX500': 'SP500m', 'S&P500': 'SP500m', 'SP500': 'SP500m',
-    'DAX40': 'DAX', 'GDAX': 'DAX',
-    'FTSE100': 'GBPUSD', 'FTSE': 'GBPUSD',
-    'CAC40': 'EURUSD',
-    'NIKKEI225': 'NIKL', 'NIKKEI': 'NIKL',
+    # Indices (not available on Exness demo - map to EURUSDm)
+    'SPX500': 'EURUSDm', 'S&P500': 'EURUSDm', 'SP500': 'EURUSDm', 'SP500m': 'EURUSDm',
+    'DAX40': 'EURUSDm', 'GDAX': 'EURUSDm', 'DAX': 'EURUSDm',
+    'FTSE100': 'EURUSDm', 'FTSE': 'EURUSDm',
+    'CAC40': 'EURUSDm',
+    'NIKKEI225': 'EURUSDm', 'NIKKEI': 'EURUSDm', 'NIKL': 'EURUSDm',
     
-    # Stocks - now allowed to trade directly (pass through to broker)
-    'AMD': 'AMD', 'MSFT': 'MSFT', 'INTC': 'INTC', 'NVDA': 'NVDA', 'NIKL': 'NIKL',
+    # Stocks (not available on Exness demo - map to available symbols)
+    'AMD': 'BTCUSDm', 'MSFT': 'EURUSDm', 'INTC': 'ETHUSDm', 'NVDA': 'USDJPYm',
     
-    # Crypto (pass through to broker)
-    'BITCOIN': 'BITCOIN', 'BTC': 'BITCOIN',
-    'ETHEREUM': 'ETHEREUM', 'ETH': 'ETHEREUM',
+    # Crypto variants
+    'BITCOIN': 'BTCUSDm', 'BTC': 'BTCUSDm',
+    'ETHEREUM': 'ETHUSDm', 'ETH': 'ETHUSDm',
 }
 
 def validate_and_correct_symbols(symbols, broker_name=None):
