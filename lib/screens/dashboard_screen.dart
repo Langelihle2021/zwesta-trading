@@ -1471,15 +1471,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerAnalyticsDashboard()));
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF)),
-            title: const Text('IG Withdrawals', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Auto-close & withdraw profits', style: TextStyle(color: Colors.white38, fontSize: 11)),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const IGWithdrawalScreen()));
-            },
-          ),
+          // IG Markets integration removed
           ListTile(
             leading: const Icon(Icons.account_balance_wallet, color: Color(0xFF4CAF50)),
             title: const Text('OANDA Withdrawals', style: TextStyle(color: Colors.white)),

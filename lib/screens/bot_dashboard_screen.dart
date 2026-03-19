@@ -928,6 +928,12 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
+      
+      if (sessionToken == null || sessionToken.isEmpty) {
+        _showErrorSnackbar('⚠️ Session expired. Please login again.');
+        return;
+      }
+      
       final brokerService = BrokerCredentialsService();
       
       await brokerService.fetchCredentials();
@@ -968,7 +974,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/quick-create'),
         headers: {
           'Content-Type': 'application/json',
-          'X-Session-Token': sessionToken,
+          'X-Session-Token': sessionToken!,
         },
         body: jsonEncode({
           'credentialId': credential.credentialId,
