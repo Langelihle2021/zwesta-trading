@@ -9912,6 +9912,8 @@ def bot_status():
                 'lastTradeTime': last_trade_time,
                 'broker_type': bot.get('broker_type', 'MT5'),
                 'profitField': round(total_profit, 2),
+                'tradeHistory': trade_history,  # Include full trade history for analytics
+                'dailyProfits': daily_profits,  # Include daily profits map for charts
             }
             bots_list.append(enhanced_bot)
         
