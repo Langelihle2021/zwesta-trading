@@ -150,6 +150,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
       final totalTrades = widget.bot['totalTrades']?.toInt() ?? 0;
       final winRate = (widget.bot['winRate'] ?? 0).toDouble();
       final roi = (widget.bot['roi'] ?? 0).toDouble();
+      final profitability = (widget.bot['profitability'] ?? 0).toDouble();
       final runtimeFormatted = widget.bot['runtimeFormatted'] ?? '0h 0m';
       final dailyProfit = (widget.bot['dailyProfit'] ?? 0).toDouble();
       final avgProfitPerTrade = (widget.bot['avgProfitPerTrade'] ?? 0).toDouble();
@@ -197,6 +198,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                 totalTrades: totalTrades,
                 winRate: winRate,
                 roi: roi,
+                profitability: profitability,
                 avgProfitPerTrade: avgProfitPerTrade,
                 maxDrawdown: maxDrawdown,
               ),
@@ -255,7 +257,16 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ],
           onTap: (index) {
             if (index == 0) {
+              // Go to home/dashboard
               Navigator.of(context).popUntil((route) => route.isFirst);
+            } else if (index == 1) {
+              // Go to bot dashboard
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const BotDashboardScreen()),
+              );
+            } else if (index == 2) {
+              // Stay on analytics (already here)
+              Navigator.of(context).popUntil((route) => route.settings.name == runtimeType.toString());
             }
           },
         ),
@@ -404,6 +415,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     required int totalTrades,
     required double winRate,
     required double roi,
+    required double profitability,
     required double avgProfitPerTrade,
     required double maxDrawdown,
   }) {
@@ -437,6 +449,12 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           value: '${roi.toStringAsFixed(1)}%',
           color: Colors.orange,
           icon: Icons.percent,
+        ),
+        _buildMetricCard(
+          label: 'Profitability',
+          value: '\$${profitability.toStringAsFixed(2)}',
+          color: Colors.teal,
+          icon: Icons.monetization_on,
         ),
         _buildMetricCard(
           label: 'Avg Profit/Trade',

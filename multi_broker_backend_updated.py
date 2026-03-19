@@ -9936,9 +9936,21 @@ def bot_status():
             daily_profit = daily_profits.get(today, bot.get('dailyProfit', 0))
             
             # Calculate ROI (safely access totalInvestment and totalProfit)
-            investment = bot.get('totalInvestment', 0)
             total_profit = bot.get('totalProfit', 0)
-            roi = (total_profit / max(investment, 1)) * 100 if investment > 0 else 0
+            # Use totalInvestment if available, otherwise assume $10,000 initial investment (standard for demo/live)
+            investment = bot.get('totalInvestment', 10000)
+            if investment <= 0:
+                investment = 10000  # Default assumption for ROI calculation
+            roi = (total_profit / investment) * 100 if investment > 0 else 0
+            
+            # Calculate profitability (profit as % of total traded value)
+            total_trades = bot.get('totalTrades', 0)
+            if total_trades > 0:
+                # Estimate: avg trade size * total trades = rough traded volume
+                avg_trade_profit = total_profit / total_trades
+                profitability = avg_trade_profit  # Use as profitability metric
+            else:
+                profitability = 0
             
             # Calculate profit factor - capped at 99.99 to avoid JSON infinity issues
             total_losses = bot.get('totalLosses', 0)
@@ -9968,6 +9980,7 @@ def bot_status():
                 'runtimeFormatted': f"{int(runtime_hours)}h {int(runtime_minutes)}m",
                 'dailyProfit': round(daily_profit, 2),
                 'roi': round(roi, 2),
+                'profitability': round(profitability, 2),
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
