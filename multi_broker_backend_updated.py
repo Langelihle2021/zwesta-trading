@@ -118,6 +118,32 @@ if MT5_CONFIG['path'] is None:
     logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
     # Do NOT fallback to generic MT5 - require Exness-specific installation
 
+# XM Global MT5 Configuration - Support DEMO and LIVE modes
+XM_CONFIG = {
+    'broker': 'XM Global',
+    'account': int(os.getenv('XM_ACCOUNT', '12345678')),  # Demo account placeholder
+    'password': os.getenv('XM_PASSWORD', ''),
+    'server': os.getenv('XM_SERVER', 'XMGlobal-MT5Demo'),  # Demo server
+    'path': None
+}
+
+# Try to find XM Global terminal specifically
+xm_paths = [
+    r'C:\Program Files\MetaTrader 5 XM\terminal64.exe',
+    r'C:\Program Files\XM Global MT5\terminal64.exe',
+    r'C:\Program Files (x86)\XM MT5\terminal64.exe',
+    r'C:\MT5\XM\terminal64.exe',
+    r'C:\Program Files\MetaTrader 5\terminal64.exe',  # Generic MT5 can work with XM creds
+]
+for path in xm_paths:
+    if os.path.exists(path):
+        XM_CONFIG['path'] = path
+        logger.info(f"Found XM Global MT5 at: {path}")
+        break
+
+if XM_CONFIG['path'] is None:
+    logger.warning("⚠️  XM Global MT5 not found in common paths - ensure MetaTrader 5 is installed with XM credentials")
+
 # Exness Credentials - Support DEMO and LIVE modes
 if ENVIRONMENT == 'LIVE':
     MT5_CONFIG = {
@@ -3201,6 +3227,10 @@ broker_manager.add_connection('Exness MT5', BrokerType.METATRADER5, MT5_CONFIG)
 # Auto-add IG.com account with API credentials
 logger.info("Initializing with IG.com account")
 broker_manager.add_connection('IG Markets', BrokerType.IG, IG_CONFIG)
+
+# Auto-add XM Global MT5 account
+logger.info("Initializing with XM Global MT5 account")
+broker_manager.add_connection('XM Global MT5', BrokerType.METATRADER5, XM_CONFIG)
 
 # AUTO-CONNECT to Exness MT5 on startup (so dashboard shows real balance)
 def auto_connect_mt5():
