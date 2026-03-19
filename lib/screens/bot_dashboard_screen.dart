@@ -258,6 +258,40 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       ),
                       const SizedBox(height: 12),
 
+                      // ⭐ BINANCE QUICK BOT - One-Click Creation
+                      GestureDetector(
+                        onTap: () {
+                          // Show presets dialog or create directly
+                          _showBinanceQuickCreateDialog(context);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF3BA2F).withOpacity(0.15),
+                            border: Border.all(color: const Color(0xFFF3BA2F), width: 2),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text('₿ ', style: TextStyle(fontSize: 22)),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Quick Binance Bot',
+                                style: GoogleFonts.poppins(
+                                  color: const Color(0xFFF3BA2F),
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.flash_on, color: Color(0xFFF3BA2F), size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
                       // Quick Action Links for Popular Brokers
                       Text(
                         'Quick Create',
