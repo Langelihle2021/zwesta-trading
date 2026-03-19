@@ -9113,6 +9113,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     except Exception as e:
                                         logger.error(f"Bot {bot_id}: Error storing trade: {e}")
                                     
+                                    # ✅ ADD TO BOT'S TRADE HISTORY FOR ANALYTICS DASHBOARD
+                                    if 'tradeHistory' not in bot_config:
+                                        bot_config['tradeHistory'] = []
+                                    bot_config['tradeHistory'].append(trade)
+                                    
                                     # Update bot stats
                                     bot_config['totalTrades'] += 1
                                     bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
