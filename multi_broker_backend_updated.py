@@ -1676,16 +1676,26 @@ class MT5Connection(BrokerConnection):
                 if symbol in VALID_SYMBOLS:
                     logger.warning(f"   Symbol {symbol} IS in VALID_SYMBOLS but NOT available on this account")
                     logger.warning(f"   This may be due to: insufficient permissions, broker restrictions, or initialization delay")
+                    
+                    # ❌ CRITICAL FIX: Don't silently fall back for important symbols like BTC/ETH
+                    # This was causing BTC trades to execute as EUR/USD instead
+                    critical_symbols = {'BTCUSDm', 'ETHUSDm'}  # High-value symbols that must execute correctly
+                    if symbol in critical_symbols:
+                        logger.error(f"❌ CRITICAL: {symbol} requested but NOT available - refusing to fall back to another symbol")
+                        logger.error(f"   User requested {symbol}, but system would execute on wrong symbol if we fell back")
+                        logger.error(f"   This indicates MT5 initialization incomplete. Waiting for symbol to load...")
+                        return {'success': False, 'error': f'{symbol} not yet available on MT5. Please ensure Exness MT5 terminal is connected and symbols are loaded. Retry in a few seconds.', 'retry_after_seconds': 5}
                 else:
                     logger.warning(f"   Symbol {symbol} is NOT in VALID_SYMBOLS (list: {sorted(VALID_SYMBOLS)})")
                 
-                # Try to use a fallback symbol
-                fallback = self.get_fallback_symbol()
-                logger.info(f"🔄 Falling back from {original_symbol} to {fallback}")
-                symbol = fallback
-                
-                if not self.is_symbol_available(symbol):
-                    return {'success': False, 'error': f'Symbol {original_symbol} not available, and fallback {fallback} also unavailable'}
+                # For non-critical symbols, try fallback
+                if original_symbol not in critical_symbols:
+                    fallback = self.get_fallback_symbol()
+                    logger.info(f"🔄 Falling back from {original_symbol} to {fallback}")
+                    symbol = fallback
+                    
+                    if not self.is_symbol_available(symbol):
+                        return {'success': False, 'error': f'Symbol {original_symbol} not available, and fallback {fallback} also unavailable'}
 
             # STEP 2: Enforce minimum volume for specific symbols
             min_volumes = {
@@ -8726,7 +8736,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 order_result = {'success': False, 'error': str(e)}
                         elif is_mt5:
                             # MT5 - place order with retry/fallback logic
-                            symbols_to_try = [symbol, 'EURUSD']
+                            # ❌ FIX: Only try fallback for non-critical symbols
+                            critical_symbols = {'BTCUSDm', 'ETHUSDm'}
+                            if symbol in critical_symbols:
+                                symbols_to_try = [symbol]  # NO FALLBACK for BTC/ETH - fail instead
+                            else:
+                                symbols_to_try = [symbol, 'EURUSDm']  # Fallback only if primary fails
                             
                             for index, attempt_symbol in enumerate(symbols_to_try):
                                 try:
@@ -8740,8 +8755,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     )
                                     
                                     if order_result.get('success', False):
-                                        logger.info(f"✅ Bot {bot_id}: Order placed successfully on {attempt_symbol}")
-                                        symbol = attempt_symbol
+                                        # ✅ CRITICAL FIX: Log WARNING if traded symbol differs from requested
+                                        actual_symbol = order_result.get('symbol', attempt_symbol)
+                                        if actual_symbol != symbol:
+                                            logger.warning(f"⚠️ SYMBOL MISMATCH - Bot {bot_id}: Requested {symbol} but EXECUTED on {actual_symbol}")
+                                            logger.warning(f"   This may result in unexpected profits/losses if symbols trade differently")
+                                        logger.info(f"✅ Bot {bot_id}: Order placed successfully on {actual_symbol}")
+                                        symbol = actual_symbol  # Update to actual traded symbol
                                         break
                                     else:
                                         error_msg = order_result.get('error', '').lower()
@@ -8751,6 +8771,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol} ({order_result.get('error')}) - trying {symbols_to_try[index+1]}...")
                                             continue
                                         else:
+                                            # Check if this was a critical symbol that couldn't be retried
+                                            if attempt_symbol in critical_symbols:
+                                                logger.error(f"❌ CRITICAL SYMBOL FAILED: Bot {bot_id}: {attempt_symbol} failed and NO fallback allowed: {order_result.get('error')}")
                                             logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
                                             break
                                 except Exception as e:
