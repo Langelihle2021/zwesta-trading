@@ -1257,11 +1257,21 @@ class MT5Connection(BrokerConnection):
         """
         global mt5_connection_lock
         
-        # Acquire lock to ensure only ONE thread connects to MT5 at a time
-        logger.info(f"⏳ Waiting for exclusive MT5 connection lock (sequential connection mode)...")
-        with mt5_connection_lock:
+        # Acquire lock with timeout to prevent indefinite hangs when multiple bots compete
+        logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max 30 seconds, sequential mode)...")
+        lock_acquired = mt5_connection_lock.acquire(timeout=30.0)  # Timeout after 30 seconds
+        
+        if not lock_acquired:
+            logger.warning(f"⚠️ TIMEOUT: Could not acquire MT5 lock after 30 seconds - another bot may be stuck")
+            logger.warning(f"   Skipping this trade cycle - will retry in {self.credentials.get('tradingInterval', 300)} seconds")
+            return False  # Return False to signal connection failed, bot will retry next cycle
+        
+        try:
             logger.info(f"✅ Acquired MT5 connection lock - proceeding with connection")
             return self._connect_with_lock()
+        finally:
+            # CRITICAL: Always release the lock, even if connection fails
+            mt5_connection_lock.release()
     
     def _connect_with_lock(self) -> bool:
         """Internal connection method - always called within mt5_connection_lock"""
