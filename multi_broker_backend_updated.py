@@ -67,6 +67,12 @@ logger = logging.getLogger(__name__)
 mt5_connection_lock = threading.Lock()
 logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connections")
 
+# ==================== BOT CREATION LOCK ====================
+# Prevents multiple simultaneous bot creations which compete for MT5 resources
+# Only ONE bot should be created at a time to avoid MT5 lock contention
+bot_creation_lock = threading.Lock()
+logger.info("✅ Bot creation lock initialized - prevents concurrent bot creation")
+
 app = Flask(__name__)
 CORS(app)
 
@@ -8310,38 +8316,47 @@ def create_bot():
         "maxDailyLoss": 60
     }
     """
-    try:
-        data = request.json
-        if not data:
-            return jsonify({'success': False, 'error': 'No configuration provided'}), 400
+    # ==================== BOT CREATION LOCK ====================
+    # Only allow ONE bot creation at a time to prevent MT5 lock contention
+    # Multiple simultaneous creations cause competing MT5 connection attempts
+    global bot_creation_lock
+    logger.info("🔒 Waiting for exclusive bot creation lock...")
+    
+    with bot_creation_lock:
+        logger.info("✅ Acquired bot creation lock - proceeding with creation")
         
-        user_id = request.user_id  # From @require_session decorator
-        if not user_id:
-            return jsonify({'success': False, 'error': 'Not authenticated'}), 401
-        
-        # Get credential_id from request - REQUIRED
-        credential_id = data.get('credentialId')
-        if not credential_id:
-            return jsonify({'success': False, 'error': 'credentialId required - must setup broker integration first'}), 400
-        
-        # Verify user exists and credential belongs to user
-        conn = None
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
-            user_row = cursor.fetchone()
-            if not user_row:
-                return jsonify({'success': False, 'error': 'User not found'}), 404
+            data = request.json
+            if not data:
+                return jsonify({'success': False, 'error': 'No configuration provided'}), 400
+            
+            user_id = request.user_id  # From @require_session decorator
+            if not user_id:
+                return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+            
+            # Get credential_id from request - REQUIRED
+            credential_id = data.get('credentialId')
+            if not credential_id:
+                return jsonify({'success': False, 'error': 'credentialId required - must setup broker integration first'}), 400
+            
+            # Verify user exists and credential belongs to user
+            conn = None
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+                user_row = cursor.fetchone()
+                if not user_row:
+                    return jsonify({'success': False, 'error': 'User not found'}), 404
 
-            # Verify credential exists AND belongs to this user
-            cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
-                FROM broker_credentials 
-                WHERE credential_id = ? AND user_id = ?
-            ''', (credential_id, user_id))
+                # Verify credential exists AND belongs to this user
+                cursor.execute('''
+                    SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+                    FROM broker_credentials 
+                    WHERE credential_id = ? AND user_id = ?
+                ''', (credential_id, user_id))
 
-            credential_row = cursor.fetchone()
+                credential_row = cursor.fetchone()
             if not credential_row:
                 return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
 
@@ -8592,10 +8607,10 @@ def create_bot():
             'message': f'Bot {bot_id} created and starting...',
             'status': 'STARTING'
         }), 201
-    
-    except Exception as e:
-        logger.error(f"Error creating bot: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        
+        except Exception as e:
+            logger.error(f"Error creating bot: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ==================== CONTINUOUS BOT TRADING LOOP ====================
@@ -9427,42 +9442,50 @@ def quick_create_bot():
     
     RESPONSE: {bot_id, status, message, tradesPlaced, pairs}
     """
-    try:
-        data = request.json
-        if not data:
-            return jsonify({'success': False, 'error': 'No configuration provided'}), 400
+    # ==================== BOT CREATION LOCK ====================
+    # Only allow ONE bot creation at a time
+    global bot_creation_lock
+    logger.info("🔒 Waiting for exclusive bot creation lock (quick-create)...")
+    
+    with bot_creation_lock:
+        logger.info("✅ Acquired bot creation lock - proceeding with quick creation")
         
-        user_id = request.user_id  # From @require_session decorator
-        if not user_id:
-            return jsonify({'success': False, 'error': 'Not authenticated'}), 401
-        
-        credential_id = data.get('credentialId')
-        if not credential_id:
-            return jsonify({'success': False, 'error': 'credentialId required'}), 400
-        
-        preset = data.get('preset', 'top_edge')  # Default to top performers
-        
-        conn = None
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
+            data = request.json
+            if not data:
+                return jsonify({'success': False, 'error': 'No configuration provided'}), 400
             
-            # Verify credential exists and belongs to user AND is Binance
-            cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
-                FROM broker_credentials 
-                WHERE credential_id = ? AND user_id = ?
-            ''', (credential_id, user_id))
-
-            credential_row = cursor.fetchone()
-            if not credential_row:
-                return jsonify({'success': False, 'error': 'Broker credential not found'}), 404
-
-            credential_data = dict(credential_row)
-            broker_name = credential_data['broker_name']
+            user_id = request.user_id  # From @require_session decorator
+            if not user_id:
+                return jsonify({'success': False, 'error': 'Not authenticated'}), 401
             
-            # Only allow Binance for quick create
-            if canonicalize_broker_name(broker_name) != 'Binance':
+            credential_id = data.get('credentialId')
+            if not credential_id:
+                return jsonify({'success': False, 'error': 'credentialId required'}), 400
+            
+            preset = data.get('preset', 'top_edge')  # Default to top performers
+            
+            conn = None
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                # Verify credential exists and belongs to user AND is Binance
+                cursor.execute('''
+                    SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+                    FROM broker_credentials 
+                    WHERE credential_id = ? AND user_id = ?
+                ''', (credential_id, user_id))
+
+                credential_row = cursor.fetchone()
+                if not credential_row:
+                    return jsonify({'success': False, 'error': 'Broker credential not found'}), 404
+
+                credential_data = dict(credential_row)
+                broker_name = credential_data['broker_name']
+                
+                # Only allow Binance for quick create
+                if canonicalize_broker_name(broker_name) != 'Binance':
                 return jsonify({
                     'success': False, 
                     'error': f'Quick bot creation only works for Binance. You are using {broker_name}'
@@ -9634,10 +9657,10 @@ def quick_create_bot():
             'riskPerTrade': risk_per_trade,
             'tradingEnabled': trading_enabled,
         }), 201
-        
-    except Exception as e:
-        logger.error(f"Error in quick_create_bot: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+            
+        except Exception as e:
+            logger.error(f"Error in quick_create_bot: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/bot/start', methods=['POST'])
