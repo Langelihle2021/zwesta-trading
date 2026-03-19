@@ -1853,250 +1853,6 @@ class MT5Connection(BrokerConnection):
 
 
 # Removed: IGConnection class (IG Markets integration removed)
-        
-    def connect(self) -> bool:
-        """Connect to IG.com via REST API"""
-        try:
-            import requests
-            
-            api_key = self.credentials.get('api_key', IG_CONFIG['api_key'])
-            username = self.credentials.get('username', IG_CONFIG['username'])
-            password = self.credentials.get('password', IG_CONFIG['password'])
-            
-            if not api_key or not username or not password:
-                logger.error("IG.com: Missing API key, username, or password")
-                self.last_error = 'IG credentials incomplete: api_key/username/password required'
-                return False
-            
-            # IG.com authentication endpoint
-            auth_url = f"{self.base_url}/session"
-            headers = self._headers(version='2', content_type=True)
-            
-            payload = {
-                'identifier': username,
-                'password': password,
-            }
-            
-            response = requests.post(auth_url, json=payload, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                self.session_token = response.headers.get('CST')
-                self.client_token = response.headers.get('X-SECURITY-TOKEN')
-                if not self.session_token or not self.client_token:
-                    logger.error("IG.com authentication failed: CST/X-SECURITY-TOKEN headers missing")
-                    self.last_error = 'IG auth succeeded but CST/X-SECURITY-TOKEN headers missing'
-                    return False
-                self.connected = True
-                self.last_error = ''
-                
-                logger.info(f"✅ Connected to IG.com account (demo: {self.credentials.get('demo_mode', True)})")
-                self.get_account_info()
-                return True
-            else:
-                logger.error(f"IG.com authentication failed: {response.status_code} - {response.text}")
-                self.last_error = f"{response.status_code}: {response.text}"
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error connecting to IG.com: {e}")
-            self.last_error = str(e)
-            return False
-    
-    def disconnect(self) -> bool:
-        """Disconnect from IG.com"""
-        try:
-            if self.connected and self.session_token:
-                import requests
-                headers = self._headers(version='1', content_type=True)
-                response = requests.delete(f"{self.base_url}/session", headers=headers, timeout=10)
-                self.connected = False
-                logger.info("Disconnected from IG.com")
-                return True
-        except Exception as e:
-            logger.error(f"Error disconnecting from IG.com: {e}")
-        
-        return False
-    
-    def get_account_info(self) -> Dict:
-        """Get account information from IG.com"""
-        try:
-            if not self.connected:
-                return {}
-            
-            import requests
-            headers = self._headers(version='1', content_type=False)
-            
-            response = requests.get(f"{self.base_url}/accounts", headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                accounts = data.get('accounts', [])
-                if accounts:
-                    account = accounts[0]
-                    self.account_info = {
-                        'account_id': account.get('accountId'),
-                        'balance': float(account.get('balance', {}).get('balance', 0)),
-                        'equity': float(account.get('balance', {}).get('available', 0)),
-                        'currency': account.get('balance', {}).get('currency', 'USD'),
-                        'account_type': account.get('accountType', 'Unknown'),
-                        'status': account.get('status', 'Unknown')
-                    }
-                    return self.account_info
-        except Exception as e:
-            logger.error(f"Error getting IG.com account info: {e}")
-        
-        return {}
-    
-    def get_positions(self) -> List[Dict]:
-        """Get open positions from IG.com"""
-        try:
-            if not self.connected:
-                return []
-            
-            import requests
-            headers = self._headers(version='2', content_type=False)
-            
-            response = requests.get(f"{self.base_url}/positions", headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                positions = data.get('positions', [])
-                result = []
-                
-                for pos in positions:
-                    result.append({
-                        'deal_id': pos.get('position', {}).get('dealId'),
-                        'epic': pos.get('position', {}).get('epic'),
-                        'direction': pos.get('position', {}).get('direction'),
-                        'size': float(pos.get('position', {}).get('size', 0)),
-                        'level': float(pos.get('position', {}).get('level', 0)),
-                        'profit_loss': float(pos.get('position', {}).get('profitLoss', 0)),
-                        'broker': 'IG'
-                    })
-                
-                return result
-        except Exception as e:
-            logger.error(f"Error getting IG.com positions: {e}")
-        
-        return []
-    
-    def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
-        """Place an order on IG.com"""
-        try:
-            if not self.connected:
-                return {'success': False, 'error': 'Not connected to IG.com'}
-            
-            import requests
-            headers = self._headers(version='2', content_type=True)
-            
-            payload = {
-                'epic': symbol,
-                'expiry': kwargs.get('expiry', '-'),
-                'direction': 'BUY' if order_type.upper() == 'BUY' else 'SELL',
-                'size': volume,
-                'orderType': 'MARKET',
-                'timeInForce': 'EXECUTE_AND_ELIMINATE',
-                'stopDistance': kwargs.get('stop_loss', 50),
-                'profitDistance': kwargs.get('take_profit', 100),
-            }
-            
-            response = requests.post(
-                f"{self.base_url}/positions/otc",
-                json=payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    'success': True,
-                    'deal_id': data.get('dealReference'),
-                    'epic': symbol,
-                    'direction': order_type.upper(),
-                    'size': volume,
-                    'broker': 'IG'
-                }
-            else:
-                return {'success': False, 'error': response.text}
-                
-        except Exception as e:
-            logger.error(f"Error placing IG.com order: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def close_position(self, position_id: str) -> Dict:
-        """Close a position on IG.com"""
-        try:
-            if not self.connected:
-                return {'success': False, 'error': 'Not connected to IG.com'}
-            
-            import requests
-            headers = self._headers(version='1', content_type=True)
-            headers['_method'] = 'DELETE'
-            
-            payload = {
-                'dealId': position_id,
-                'size': 0,  # Close entire position
-                'direction': 'SELL',  # Opposite of current
-                'orderType': 'MARKET',
-                'timeInForce': 'EXECUTE_AND_ELIMINATE'
-            }
-            
-            response = requests.post(
-                f"{self.base_url}/positions/otc",
-                json=payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                return {
-                    'success': True,
-                    'deal_id': position_id,
-                    'broker': 'IG'
-                }
-            else:
-                return {'success': False, 'error': response.text}
-                
-        except Exception as e:
-            logger.error(f"Error closing IG.com position: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def get_trades(self) -> List[Dict]:
-        """Get trade history from IG.com"""
-        try:
-            if not self.connected:
-                return []
-            
-            import requests
-            headers = self._headers(version='2', content_type=False)
-            
-            response = requests.get(
-                f"{self.base_url}/history/transactions?pageSize=50",
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                transactions = data.get('transactions', [])
-                result = []
-                
-                for trans in transactions:
-                    result.append({
-                        'deal_id': trans.get('dealId'),
-                        'epic': trans.get('instrumentName', 'Unknown'),
-                        'type': trans.get('transactionType'),
-                        'profit': float(trans.get('profit', 0)),
-                        'time': trans.get('dateUtc', ''),
-                        'broker': 'IG'
-                    })
-                
-                return result
-        except Exception as e:
-            logger.error(f"Error getting IG.com trade history: {e}")
-        
-        return []
 
 
 class BinanceConnection(BrokerConnection):
@@ -3217,21 +2973,6 @@ def transfer_funds_api():
 # ==================== IG.COM API ENDPOINTS REMOVED ====================
 # NOTE: IG Markets integration has been removed from the system.
 # Legacy endpoints removed: /api/legacy/ig/*
-
-
-@app.route('/api/test/health', methods=['GET'])
-        if not ig_connection or not ig_connection.connected:
-            return jsonify({'success': False, 'error': 'IG.com not connected'}), 401
-        
-        account_info = ig_connection.get_account_info()
-        return jsonify({
-            'success': True,
-            'account': account_info,
-            'api_key': IG_CONFIG['api_key']
-        })
-    except Exception as e:
-        logger.error(f"Error getting IG account info: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/health', methods=['GET'])
@@ -4476,8 +4217,7 @@ def place_trade():
 
                 broker_name = 'MT5'
                 # IG Markets integration removed
-                    broker_name = 'IG'
-                elif isinstance(connection, XMConnection):
+                if isinstance(connection, XMConnection):
                     broker_name = 'XM'
 
                 demo_trade = {
@@ -7517,32 +7257,6 @@ def test_broker_connection():
                 'success': False,
                 'error': 'IG Markets integration has been removed. Supported brokers: Exness, XM Global, Binance, FXCM, OANDA'
             }), 400
-
-                logger.info(f"✅ IG Markets credentials saved for user {user_id}")
-
-                return jsonify({
-                    'success': True,
-                    'message': f'Successfully connected to IG Markets account {account_id}',
-                    'credential_id': credential_id,
-                    'broker': 'IG Markets',
-                    'account_number': account_id,
-                    'accountName': account_info.get('accountName', 'IG Account'),
-                    'currency': account_info.get('currency', 'USD'),
-                    'is_live': is_live,
-                    'status': 'CONNECTED',
-                    'timestamp': datetime.now().isoformat()
-                }), 200
-            except Exception as e:
-                logger.error(f"Exception during IG authentication for user {user_id}: {e}", exc_info=True)
-                if 'api-key-invalid' in str(e):
-                    return jsonify({
-                        'success': False,
-                        'error': 'IG API key is invalid for the selected environment (demo/live). Create or use a valid key in IG Labs, and ensure it is enabled.'
-                    }), 401
-                return jsonify({
-                    'success': False,
-                    'error': f'IG authentication failed: {str(e)}'
-                }), 500
 
         # ==================== BINANCE ====================
         elif broker == 'Binance':
@@ -14155,9 +13869,6 @@ if __name__ == '__main__':
     # AUTO-CONNECT to MT5 (so dashboard shows real account balance)
     # This will retry up to 3 times with increasing waits
     auto_connect_mt5()
-    
-    # AUTO-CONNECT to IG.com (using API key from screenshot: 9bbc3ef9ad291acec96dc409d80e50c4c805161a)
-    auto_connect_ig()
     
     # Initialize demo bots on startup (DISABLED for production cleanup)
     # logger.info("Initializing demo trading bots...")
