@@ -251,6 +251,47 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+
+                      // Quick Action Links for Popular Brokers
+                      Text(
+                        'Quick Create',
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white70),
+                      ),
+                      const SizedBox(height: 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            // Binance Quick Creator
+                            _quickBrokerButton(
+                              icon: '₿',
+                              label: 'Binance',
+                              color: const Color(0xFFF3BA2F),
+                              onTap: () => _createBotForBroker(context, 'Binance'),
+                              description: 'Crypto pairs',
+                            ),
+                            const SizedBox(width: 10),
+                            // Forex Quick Creator
+                            _quickBrokerButton(
+                              icon: Icons.currency_exchange,
+                              label: 'Forex',
+                              color: const Color(0xFF4CAF50),
+                              onTap: () => _createBotForBroker(context, 'Exness'),
+                              description: 'USD, EUR...',
+                            ),
+                            const SizedBox(width: 10),
+                            // Commodities Quick Creator
+                            _quickBrokerButton(
+                              icon: Icons.trending_up,
+                              label: 'Commodities',
+                              color: const Color(0xFFFF9800),
+                              onTap: () => _createBotForBroker(context, 'Exness'),
+                              description: 'Gold, Oil...',
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 20),
 
                       if (bots.isEmpty && !botService.isLoading)
@@ -791,6 +832,68 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Quick broker button for dashboard quick actions
+  Widget _quickBrokerButton({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    dynamic icon,
+    String? description,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          border: Border.all(color: color.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (icon is String)
+              Text(
+                icon,
+                style: const TextStyle(fontSize: 24),
+              )
+            else if (icon is IconData)
+              Icon(icon, color: color, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (description != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                description,
+                style: GoogleFonts.poppins(
+                  color: color.withOpacity(0.7),
+                  fontSize: 9,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Create bot for specific broker
+  void _createBotForBroker(BuildContext context, String brokerName) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const BotConfigurationScreen(),
       ),
     );
   }

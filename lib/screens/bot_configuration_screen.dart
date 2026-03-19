@@ -180,6 +180,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   late TextEditingController _maxDailyLossController;
   late TextEditingController _profitLockController;
   late TextEditingController _drawdownPauseController;
+  late TextEditingController _investmentAmountController;
   FundService _fundService = FundService();
 
   List<String> _allowedVolatility = ['Low', 'Medium'];
@@ -199,6 +200,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   double _maxProfit = 500; // For intelligent mode
   double _winRateMin = 60; // For intelligent mode
   bool _enableAutoWithdrawal = false;
+  
+  // Currency & Settings
+  String _currencyChoice = 'USD'; // 'USD' or 'ZAR' (Rand)
+  bool _useAutoSettings = true; // Toggle between auto and custom
+  double _customInvestmentAmount = 1000; // Custom amount in chosen currency
   
   // NEW: Broker integration
   late BrokerCredentialsService _brokerService;
@@ -461,6 +467,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _maxDailyLossController = TextEditingController(text: '60');
     _profitLockController = TextEditingController(text: '80');
     _drawdownPauseController = TextEditingController(text: '5');
+    _investmentAmountController = TextEditingController(text: '1000');
     
     // Initialize services
     _brokerService = BrokerCredentialsService();
@@ -476,6 +483,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       return;
     }
     _fetchTradingData();
+    // Apply auto settings if enabled
+    if (_useAutoSettings) {
+      _applyAutoSettings();
+    }
   }
 
   Future<void> _fetchTradingData() async {
@@ -567,7 +578,36 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _maxDailyLossController.dispose();
     _profitLockController.dispose();
     _drawdownPauseController.dispose();
+    _investmentAmountController.dispose();
     super.dispose();
+  }
+
+  /// Apply auto-recommended settings based on investment amount
+  void _applyAutoSettings() {
+    final investmentAmount = _customInvestmentAmount;
+    
+    // Calculate risk parameters as % of investment
+    // For beginners/conservative: Risk 2% per trade
+    double riskPerTrade = investmentAmount * 0.02;
+    
+    // Max daily loss: 5% of investment
+    double maxDailyLoss = investmentAmount * 0.05;
+    
+    // Daily profit target: 3% of investment (lock in after reaching)
+    double profitLock = investmentAmount * 0.03;
+    
+    // Clamp values to reasonable ranges
+    riskPerTrade = riskPerTrade.clamp(5, 100);
+    maxDailyLoss = maxDailyLoss.clamp(20, 500);
+    profitLock = profitLock.clamp(20, 1000);
+    
+    setState(() {
+      _riskPerTradeController.text = riskPerTrade.toStringAsFixed(0);
+      _maxDailyLossController.text = maxDailyLoss.toStringAsFixed(0);
+      _profitLockController.text = profitLock.toStringAsFixed(0);
+      _drawdownPauseController.text = '5'; // 5% drawdown pause
+      _allowedVolatility = ['Low', 'Medium']; // Conservative volatility
+    });
   }
 
   Future<void> _createAndStartBot() async {
@@ -1284,6 +1324,169 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                             ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // Currency Selection
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      border: Border.all(color: Colors.blue.withOpacity(0.5)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Transaction Currency',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: Colors.blue[200],
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ChoiceChip(
+                                label: const Text('\$ USD'),
+                                selected: _currencyChoice == 'USD',
+                                onSelected: (_) => setState(() => _currencyChoice = 'USD'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ChoiceChip(
+                                label: const Text('R ZAR (Rand)'),
+                                selected: _currencyChoice == 'ZAR',
+                                onSelected: (_) => setState(() => _currencyChoice = 'ZAR'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Settings Mode Selection
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Risk Configuration Mode',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: Colors.orange[200],
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  ChoiceChip(
+                                    label: const Text('⚡ Auto'),
+                                    selected: _useAutoSettings,
+                                    onSelected: (_) {
+                                      setState(() => _useAutoSettings = true);
+                                      _applyAutoSettings();
+                                    },
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'System chooses\nfor you',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  ChoiceChip(
+                                    label: const Text('⚙️ Custom'),
+                                    selected: !_useAutoSettings,
+                                    onSelected: (_) => setState(() => _useAutoSettings = false),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'You control\nall settings',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _useAutoSettings
+                              ? '✓ Smart settings based on your trading experience level'
+                              : '✓ Full control - customize all risk parameters',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _useAutoSettings ? Colors.green[300] : Colors.orange[300],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Custom Investment Amount (for non-Binance)
+                  if (!_isBinanceBroker)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Investment Amount',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _investmentAmountController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'Custom Amount ($_currencyChoice)',
+                            hintText: '1000',
+                            prefixText: _currencyChoice == 'USD' ? '\$ ' : 'R ',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            setState(() {
+                              _customInvestmentAmount = double.tryParse(value) ?? 1000;
+                            });
+                            // Reapply auto settings if in auto mode
+                            if (_useAutoSettings) {
+                              _applyAutoSettings();
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'This is your initial investment amount for this bot',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey[400],
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
                   const SizedBox(height: 16),
 
                   // Risk Management
