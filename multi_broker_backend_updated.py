@@ -8840,21 +8840,21 @@ def create_bot():
         return jsonify({
             'success': True,
             'botId': bot_id,
-            'user_id': user_id,
-            'credentialId': credential_id,
-            'accountId': account_id,
-            'broker': broker_name,
-            'account_number': account_number,
-            'mode': mode,
-            'displayCurrency': display_currency,
+            'user_id': user_id or '',
+            'credentialId': credential_id or '',
+            'accountId': account_id or '',
+            'broker': broker_name or 'Unknown',
+            'account_number': account_number or '',
+            'mode': mode or 'demo',
+            'displayCurrency': display_currency or 'USD',
             'appliedRiskConfig': {
-                'riskPerTrade': risk_per_trade,
-                'maxDailyLoss': max_daily_loss,
-                'profitLock': profit_lock,
-                'drawdownPausePercent': drawdown_pause_percent,
-                'drawdownPauseHours': drawdown_pause_hours,
+                'riskPerTrade': risk_per_trade or 20.0,
+                'maxDailyLoss': max_daily_loss or 60.0,
+                'profitLock': profit_lock or 80.0,
+                'drawdownPausePercent': drawdown_pause_percent or 0.0,
+                'drawdownPauseHours': drawdown_pause_hours or 6.0,
             },
-            'warnings': sanitized_risk_config['warnings'],
+            'warnings': (sanitized_risk_config or {}).get('warnings', []),
             'message': f'Bot {bot_id} created and starting...',
             'status': 'STARTING'
         }), 201
@@ -12748,13 +12748,12 @@ def exness_logout():
 
 
 @app.route('/api/broker/exness/account', methods=['GET'])
+@require_session
 def exness_account_info():
     """Get Exness account information"""
     try:
-        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        
-        if not session_token or not session_token.startswith('exness_'):
-            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        # @require_session decorator already validates authentication
+        # User is authenticated if we reach here
         
         try:
             import MetaTrader5 as mt5
@@ -12790,13 +12789,12 @@ def exness_account_info():
 
 
 @app.route('/api/broker/exness/trade', methods=['POST'])
+@require_session
 def exness_place_trade():
     """Place order on Exness MT5 account"""
     try:
-        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        
-        if not session_token or not session_token.startswith('exness_'):
-            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        # @require_session decorator already validates authentication
+        # User is authenticated if we reach here
         
         data = request.json or {}
         symbol = (data.get('symbol') or '').upper()
@@ -12888,13 +12886,11 @@ def exness_place_trade():
 
 
 @app.route('/api/broker/exness/orders', methods=['GET'])
+@require_session
 def exness_get_orders():
     """Get open orders/positions from Exness account"""
     try:
-        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        
-        if not session_token or not session_token.startswith('exness_'):
-            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        # @require_session decorator already validates authentication
         
         try:
             import MetaTrader5 as mt5
@@ -12938,13 +12934,11 @@ def exness_get_orders():
 
 
 @app.route('/api/broker/exness/orders/<order_id>/close', methods=['POST'])
+@require_session
 def exness_close_order(order_id):
     """Close a specific order/position on Exness"""
     try:
-        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        
-        if not session_token or not session_token.startswith('exness_'):
-            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        # @require_session decorator already validates authentication
         
         try:
             order_id_int = int(order_id)
@@ -13008,13 +13002,11 @@ def exness_close_order(order_id):
 
 
 @app.route('/api/broker/exness/orders/<order_id>', methods=['PATCH'])
+@require_session
 def exness_update_order(order_id):
     """Update stop loss and take profit for Exness order"""
     try:
-        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        
-        if not session_token or not session_token.startswith('exness_'):
-            return jsonify({'success': False, 'error': 'Invalid session token'}), 401
+        # @require_session decorator already validates authentication
         
         data = request.json or {}
         new_sl = data.get('stopLoss') or data.get('stop_loss')
