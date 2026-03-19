@@ -971,7 +971,7 @@ if __name__ == "__main__":
 def init_backup_system(app):
     """Initialize automatic backup and recovery system"""
     
-    db_path = 'zwesta_trading.db'
+    db_path = r'C:\backend\zwesta_trading.db'
     backup_mgr = BackupManager(db_path=db_path)
     recovery_mgr = RecoveryManager(db_path=db_path, backup_manager=backup_mgr)
     
@@ -4968,7 +4968,7 @@ def get_trades_alias():
         trades_list = []
         
         # Query database for user's bots and their associated trades
-        conn = sqlite3.connect('zwesta_trading.db')
+        conn = sqlite3.connect(r'C:\backend\zwesta_trading.db')
         cursor = conn.cursor()
         
         try:
@@ -9077,7 +9077,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     
                                     # Store in database
                                     try:
-                                        trade_conn = sqlite3.connect('zwesta_trading.db')
+                                        trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db')
                                         trade_cursor = trade_conn.cursor()
                                         trade_cursor.execute('''
                                             INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
