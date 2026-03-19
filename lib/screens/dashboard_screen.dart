@@ -353,7 +353,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } else {
           statusColor = const Color(0xFFFF8A80);
           statusIcon = Icons.error_outline;
-          statusText = snapshot.hasError ? 'Connection Failed' : 'MT5 Not Available';
+          // Show helpful error message
+          if (snapshot.error?.toString().contains('not connected') == true) {
+            statusText = 'Tap to connect Exness account';
+          } else if (snapshot.error?.toString().contains('Failed to connect') == true) {
+            statusText = 'Connection failed - verify credentials';
+          } else {
+            statusText = snapshot.hasError ? 'Connection Failed' : 'MT5 Not Available';
+          }
         }
 
         return _glassCard(
@@ -435,6 +442,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         valueColor: AlwaysStoppedAnimation(Color(0xFFFFD600)),
                       ),
                     ),
+                  // Add "Connect" button when not connected
+                  if (!snapshot.hasData || snapshot.hasError)
+                    SizedBox(
+                      height: 32,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
+                        icon: const Icon(Icons.add_link, size: 16),
+                        label: const Text('Connect'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                      ),
+                    ),
                 ],
               ),
               if (snapshot.hasData && accountId != null && balance != null) ...[
@@ -467,20 +488,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Fetch Exness account info from backend via MT5
   Future<Map<String, dynamic>> _fetchExnessAccountInfo() async {
     try {
+      final token = Provider.of<AuthService>(context, listen: false).token;
+      if (token == null || token.isEmpty) {
+        throw Exception('No authentication token available');
+      }
+
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/account'),
         headers: {
-          'Authorization': 'Bearer ${Provider.of<AuthService>(context, listen: false).token}',
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          return {
+            'accountId': data['accountId']?.toString() ?? 'Unknown',
+            'balance': (data['balance'] as num?)?.toDouble() ?? 0.0,
+            'equity': (data['equity'] as num?)?.toDouble() ?? 0.0,
+            'margin': (data['margin'] as num?)?.toDouble() ?? 0.0,
+            'marginFree': (data['marginFree'] as num?)?.toDouble() ?? 0.0,
+            'marginLevel': (data['marginLevel'] as num?)?.toDouble() ?? 0.0,
+            'currency': data['currency']?.toString() ?? 'USD',
+            'leverage': data['leverage']?.toString() ?? '1:1',
+            'accountType': data['accountType']?.toString() ?? 'DEMO',
+            'profitLoss': (data['profitLoss'] as num?)?.toDouble() ?? 0.0,
+          };
+        } else {
+          throw Exception(data['error'] ?? 'Backend returned error');
+        }
+      } else if (response.statusCode == 400) {
+        // No credentials saved yet
+        final data = jsonDecode(response.body);
+        throw Exception(data['error'] ?? 'Exness account not connected');
       } else {
-        throw Exception('Failed to fetch account info');
+        throw Exception('Server error: HTTP ${response.statusCode}');
       }
     } catch (e) {
-      throw Exception('Cannot connect to MT5: $e');
+      print('DEBUG: Exness account fetch error: $e');
+      throw Exception('Cannot fetch Exness account: $e');
     }
   }
 

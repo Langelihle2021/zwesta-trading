@@ -12750,41 +12750,83 @@ def exness_logout():
 @app.route('/api/broker/exness/account', methods=['GET'])
 @require_session
 def exness_account_info():
-    """Get Exness account information"""
+    """Get Exness account information - reconnects with user's saved credentials"""
     try:
-        # @require_session decorator already validates authentication
-        # User is authenticated if we reach here
+        user_id = request.user_id  # From @require_session
         
+        # Load user's latest active Exness credential
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT credential_id, account_number, password, server, is_live
+            FROM broker_credentials
+            WHERE user_id = ? AND broker_name = 'Exness' AND is_active = 1
+            ORDER BY created_at DESC
+            LIMIT 1
+        ''', (user_id,))
+        
+        cred_row = cursor.fetchone()
+        conn.close()
+        
+        if not cred_row:
+            return jsonify({
+                'success': False, 
+                'error': 'No Exness credentials found. Please connect your Exness account first.'
+            }), 400
+        
+        cred = dict(cred_row)
+        account = cred['account_number']
+        password = cred['password']
+        server = cred['server']
+        is_live = cred['is_live']
+        
+        # Reconnect with user's credentials
         try:
-            import MetaTrader5 as mt5
+            mt5_conn = MT5Connection(credentials={
+                'account': account,
+                'password': password,
+                'server': server,
+                'broker': 'Exness',
+            })
             
-            if not mt5.initialize():
-                return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
+            if not mt5_conn.connect():
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to connect to Exness MT5. Account: {account}, Server: {server}'
+                }), 500
             
-            account_info = mt5.account_info()
+            # Get account info from connected MT5 instance
+            if not mt5_conn.mt5:
+                return jsonify({'success': False, 'error': 'MT5 SDK not available'}), 500
+            
+            account_info = mt5_conn.mt5.account_info()
             if not account_info:
-                return jsonify({'success': False, 'error': 'Failed to get account info'}), 500
+                return jsonify({'success': False, 'error': 'Failed to retrieve account info from MT5'}), 500
             
             return jsonify({
                 'success': True,
-                'account': {
-                    'accountId': account_info.login,
-                    'balance': account_info.balance,
-                    'equity': account_info.equity,
-                    'margin': account_info.margin,
-                    'marginFree': account_info.margin_free,
-                    'marginLevel': account_info.margin_level if account_info.margin > 0 else 0,
-                    'currency': account_info.currency,
-                    'leverage': account_info.leverage,
-                    'profitLoss': account_info.equity - account_info.balance,
-                }
+                'accountId': account_info.login,
+                'balance': float(account_info.balance),
+                'equity': float(account_info.equity),
+                'margin': float(account_info.margin),
+                'marginFree': float(account_info.margin_free),
+                'marginLevel': float(account_info.margin_level) if account_info.margin > 0 else 0.0,
+                'currency': account_info.currency,
+                'leverage': int(account_info.leverage),
+                'accountType': 'LIVE' if is_live else 'DEMO',
+                'profitLoss': float(account_info.equity - account_info.balance),
             }), 200
             
-        except ImportError:
-            return jsonify({'success': False, 'error': 'MetaTrader5 SDK not available'}), 500
+        except Exception as e:
+            logger.error(f"Error connecting to Exness MT5 or retrieving account info: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Cannot connect to MT5: {str(e)}'
+            }), 500
             
     except Exception as e:
-        logger.error(f"Error getting Exness account info: {e}")
+        logger.error(f"Error in exness_account_info: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
