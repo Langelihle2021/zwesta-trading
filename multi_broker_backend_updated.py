@@ -4174,12 +4174,12 @@ def get_account_balances():
                     else:
                         error_msg = "Failed to connect to Exness MT5"
                 
-                elif broker_name == 'XM':
-                    # Connect to XM MT5
+                elif broker_name in ['XM', 'XM Global']:
+                    # Connect to XM Global MT5
                     mt5_conn = MT5Connection({
                         'account': int(account_num) if account_num else 0,
                         'password': cred['password'],
-                        'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-Demo'),
+                        'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'),
                     })
                     if mt5_conn.connect():
                         account_info = mt5_conn.get_account_info()
@@ -7282,7 +7282,12 @@ def save_broker_credentials():
                     'error': f'{broker_name} requires: account_number, password, server'
                 }), 400
             if not server:
-                server = 'MetaQuotes-Demo' if broker_name == 'MetaQuotes' else 'XMGlobal-Demo'
+                if broker_name == 'MetaQuotes':
+                    server = 'MetaQuotes-Demo'
+                elif broker_name in ['XM', 'XM Global']:
+                    server = 'XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'
+                else:  # MetaTrader 5
+                    server = 'MetaTrader5-Real' if is_live else 'MetaTrader5-Demo'
         elif broker_name in ['Exness']:
             if not account_number or not password:
                 return jsonify({
