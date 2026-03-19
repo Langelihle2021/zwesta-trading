@@ -8323,40 +8323,34 @@ def create_bot():
     logger.info("🔒 Waiting for exclusive bot creation lock...")
     
     with bot_creation_lock:
-        logger.info("✅ Acquired bot creation lock - proceeding with creation")
-        
+        conn = None
         try:
             data = request.json
             if not data:
                 return jsonify({'success': False, 'error': 'No configuration provided'}), 400
-            
+
             user_id = request.user_id  # From @require_session decorator
             if not user_id:
                 return jsonify({'success': False, 'error': 'Not authenticated'}), 401
-            
+
             # Get credential_id from request - REQUIRED
             credential_id = data.get('credentialId')
             if not credential_id:
                 return jsonify({'success': False, 'error': 'credentialId required - must setup broker integration first'}), 400
-            
-            # Verify user exists and credential belongs to user
-            conn = None
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
-                user_row = cursor.fetchone()
-                if not user_row:
-                    return jsonify({'success': False, 'error': 'User not found'}), 404
 
-                # Verify credential exists AND belongs to this user
-                cursor.execute('''
-                    SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
-                    FROM broker_credentials 
-                    WHERE credential_id = ? AND user_id = ?
-                ''', (credential_id, user_id))
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+            user_row = cursor.fetchone()
+            if not user_row:
+                return jsonify({'success': False, 'error': 'User not found'}), 404
 
-                credential_row = cursor.fetchone()
+            cursor.execute('''
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+                FROM broker_credentials
+                WHERE credential_id = ? AND user_id = ?
+            ''', (credential_id, user_id))
+            credential_row = cursor.fetchone()
             if not credential_row:
                 return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
 
@@ -8385,11 +8379,10 @@ def create_bot():
             print(f"✅ Using broker credential: {broker_name} | Account: {account_number} | Mode: {mode}")
 
             # Bot configuration
-            # Generate ABSOLUTELY unique bot_id (timestamp + uuid to ensure no collisions)
             import time
             bot_id = data.get('botId') or f"bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
             raw_symbols = data.get('symbols', ['EURUSDm'])
-            symbols = validate_and_correct_symbols(raw_symbols, broker_name)  # ✅ AUTO-CORRECT OLD SYMBOLS
+            symbols = validate_and_correct_symbols(raw_symbols, broker_name)
             strategy = data.get('strategy', 'Trend Following')
             sanitized_risk_config = sanitize_bot_risk_config(data)
             risk_per_trade = sanitized_risk_config['riskPerTrade']
@@ -8401,13 +8394,11 @@ def create_bot():
             trading_enabled = data.get('enabled', True)
 
             account_id = f"{broker_name}_{account_number}"
-
-            # Store bot in database (check if already exists first)
             created_at = datetime.now().isoformat()
+
             try:
                 cursor.execute('SELECT bot_id FROM user_bots WHERE bot_id = ?', (bot_id,))
                 if cursor.fetchone():
-                    # Bot already exists, regenerate ID
                     logger.warning(f"Bot ID {bot_id} already exists, regenerating...")
                     bot_id = f"bot_{int(time.time() * 1000) + 1}_{uuid.uuid4().hex[:8]}"
 
@@ -8416,17 +8407,15 @@ def create_bot():
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, ','.join(symbols), created_at, created_at))
 
-                # Link bot to credential for commission tracking
                 cursor.execute('''
                     INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
                     VALUES (?, ?, ?, ?)
                 ''', (bot_id, credential_id, user_id, created_at))
-                
+
                 conn.commit()
             except Exception as e:
                 if 'UNIQUE constraint' in str(e):
-                    logger.error(f"Bot creation failed - duplicate ID. Retrying with new ID...")
-                    # Final retry with absolute unique ID
+                    logger.error("Bot creation failed - duplicate ID. Retrying with new ID...")
                     bot_id = f"bot_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:6]}"
                     cursor.execute('''
                         INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, created_at, updated_at)
@@ -8439,178 +8428,177 @@ def create_bot():
                     conn.commit()
                 else:
                     raise
-            
-        finally:
-            if conn:
-                conn.close()
-        
-        # Also store in active_bots for real-time trading
-        now = datetime.now()
-        
-        # Generate sample trades for new bot to make analytics work immediately
-        sample_trades, sample_daily_profits, sample_total_profit, sample_winning_trades = _generate_sample_trades_for_bot(symbols, 10)
-        
-        active_bots[bot_id] = {
-            'botId': bot_id,
-            'user_id': user_id,
-            'accountId': account_id,
-            'brokerName': broker_name,
-            'broker_type': broker_name,  # alias so trading loop reads correct broker
-            'mode': mode,  # 'demo' or 'live'
-            'credentialId': credential_id,
-            'symbols': symbols,
-            'strategy': strategy,
-            'riskPerTrade': risk_per_trade,
-            'maxDailyLoss': max_daily_loss,
-            'profitLock': profit_lock,
-            'drawdownPausePercent': drawdown_pause_percent,
-            'drawdownPauseHours': drawdown_pause_hours,
-            'displayCurrency': display_currency,
-            'enabled': trading_enabled,
-            'basePositionSize': data.get('basePositionSize', 1.0),
-            'totalTrades': len(sample_trades),
-            'winningTrades': sample_winning_trades,
-            'totalProfit': sample_total_profit,
-            'totalLosses': abs(sum(1 for t in sample_trades if t['profit'] < 0)),
-            'totalInvestment': 0,
-            'createdAt': now.isoformat(),
-            'startTime': now.isoformat(),
-            'profitHistory': [],
-            'tradeHistory': sample_trades,  # ✅ Populated with sample data
-            'dailyProfits': sample_daily_profits,  # ✅ Populated with sample data
-            'dailyProfit': sample_total_profit,
-            'maxDrawdown': 0,
-            'peakProfit': max(0, sample_total_profit),
-            'drawdownPauseUntil': None,
-            'profit': sample_total_profit,  # Always include profit field
-        }
-        persist_bot_runtime_state(bot_id)
-        
-        logger.info(f"✅ Created bot {bot_id} for user {user_id}")
-        logger.info(f"   Broker: {broker_name} | Account: {account_number} | Mode: {mode}")
-        
-        # ✅ MARK BOT AS RUNNING IMMEDIATELY (so it appears on dashboard)
-        # Don't block the response - just mark it as running and return
-        # The background system will auto-start it via the running_bots flag
-        running_bots[bot_id] = True
-        bot_stop_flags[bot_id] = False
-        
-        # Launch thread asynchronously in background WITHOUT BLOCKING response
-        def _async_start_bot():
-            """Start bot in background without blocking the API response"""
+
+            now = datetime.now()
+            sample_trades, sample_daily_profits, sample_total_profit, sample_winning_trades = _generate_sample_trades_for_bot(symbols, 10)
+
+            active_bots[bot_id] = {
+                'botId': bot_id,
+                'user_id': user_id,
+                'accountId': account_id,
+                'brokerName': broker_name,
+                'broker_type': broker_name,
+                'mode': mode,
+                'credentialId': credential_id,
+                'symbols': symbols,
+                'strategy': strategy,
+                'riskPerTrade': risk_per_trade,
+                'maxDailyLoss': max_daily_loss,
+                'profitLock': profit_lock,
+                'drawdownPausePercent': drawdown_pause_percent,
+                'drawdownPauseHours': drawdown_pause_hours,
+                'displayCurrency': display_currency,
+                'enabled': trading_enabled,
+                'basePositionSize': data.get('basePositionSize', 1.0),
+                'totalTrades': len(sample_trades),
+                'winningTrades': sample_winning_trades,
+                'totalProfit': sample_total_profit,
+                'totalLosses': abs(sum(1 for t in sample_trades if t['profit'] < 0)),
+                'totalInvestment': 0,
+                'createdAt': now.isoformat(),
+                'startTime': now.isoformat(),
+                'profitHistory': [],
+                'tradeHistory': sample_trades,
+                'dailyProfits': sample_daily_profits,
+                'dailyProfit': sample_total_profit,
+                'maxDrawdown': 0,
+                'peakProfit': max(0, sample_total_profit),
+                'drawdownPauseUntil': None,
+                'profit': sample_total_profit,
+            }
+            persist_bot_runtime_state(bot_id)
+
+            logger.info(f"✅ Created bot {bot_id} for user {user_id}")
+            logger.info(f"   Broker: {broker_name} | Account: {account_number} | Mode: {mode}")
+
+            running_bots[bot_id] = True
+            bot_stop_flags[bot_id] = False
+
+            def _async_start_bot():
+                """Start bot in background without blocking the API response"""
+                try:
+                    time.sleep(0.5)
+
+                    bot_credentials = None
+                    if credential_id:
+                        conn_local = None
+                        try:
+                            conn_local = get_db_connection()
+                            cursor_local = conn_local.cursor()
+                            cursor_local.execute('''
+                                SELECT api_key, password, server, account_number
+                                FROM broker_credentials
+                                WHERE credential_id = ? AND user_id = ?
+                            ''', (credential_id, user_id))
+                            cred_row = cursor_local.fetchone()
+
+                            if cred_row:
+                                if canonicalize_broker_name(broker_name) == 'Binance':
+                                    bot_credentials = {
+                                        'api_key': cred_row['api_key'],
+                                        'api_secret': cred_row['password'],
+                                        'server': cred_row['server'] or 'spot',
+                                        'is_live': bool(is_live),
+                                    }
+                                else:
+                                    bot_credentials = {
+                                        'account_number': cred_row['account_number'] or account_number,
+                                        'password': cred_row['password'],
+                                        'server': cred_row['server'],
+                                        'is_live': bool(is_live),
+                                    }
+                        except Exception as e:
+                            logger.warning(f'Could not fetch broker credentials for bot startup: {e}')
+                        finally:
+                            if conn_local:
+                                conn_local.close()
+
+                    if bot_id not in bot_threads or not bot_threads[bot_id].is_alive():
+                        bot_thread = threading.Thread(
+                            target=continuous_bot_trading_loop,
+                            args=(bot_id, user_id, bot_credentials),
+                            daemon=True,
+                            name=f"BotThread-{bot_id}"
+                        )
+                        bot_threads[bot_id] = bot_thread
+                        bot_thread.start()
+                        logger.info(f"🚀 Bot {bot_id}: Background thread launched (async start)")
+                except Exception as e:
+                    logger.error(f"Error in async bot start: {e}")
+
+            startup_thread = threading.Thread(target=_async_start_bot, daemon=True)
+            startup_thread.start()
+
+            account_balance = 10000.0
             try:
-                # Small delay to ensure bot is fully initialized in DB
-                time.sleep(0.5)
-                
-                # Retrieve broker credentials when available so demo/live bots use the correct account and server.
-                bot_credentials = None
-                if credential_id:
-                    try:
-                        conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            SELECT api_key, password, server, account_number
-                            FROM broker_credentials 
-                            WHERE credential_id = ? AND user_id = ?
-                        ''', (credential_id, user_id))
-                        cred_row = cursor.fetchone()
-                        conn.close()
-                        
-                        if cred_row:
-                            if canonicalize_broker_name(broker_name) == 'Binance':
-                                bot_credentials = {
-                                    'api_key': cred_row['api_key'],
-                                    'api_secret': cred_row['password'],
-                                    'server': cred_row['server'] or 'spot',
-                                    'is_live': bool(is_live),
-                                }
-                            else:
-                                bot_credentials = {
-                                    'account_number': cred_row['account_number'] or account_number,
-                                    'password': cred_row['password'],
-                                    'server': cred_row['server'],
-                                    'is_live': bool(is_live),
-                                }
-                    except Exception as e:
-                        logger.warning(f'Could not fetch broker credentials for bot startup: {e}')
-                
-                # Launch background trading thread
-                if bot_id not in bot_threads or not bot_threads[bot_id].is_alive():
-                    bot_thread = threading.Thread(
-                        target=continuous_bot_trading_loop,
-                        args=(bot_id, user_id, bot_credentials),
-                        daemon=True,
-                        name=f"BotThread-{bot_id}"
-                    )
-                    bot_threads[bot_id] = bot_thread
-                    bot_thread.start()
-                    logger.info(f"🚀 Bot {bot_id}: Background thread launched (async start)")
+                if canonicalize_broker_name(broker_name) == 'Binance':
+                    binance_conn_balance = BinanceConnection(credentials={
+                        'api_key': credential_data.get('api_key'),
+                        'api_secret': credential_data.get('password'),
+                        'account_number': account_number,
+                        'server': credential_data.get('server') or 'spot',
+                        'is_live': bool(is_live),
+                    })
+                    if binance_conn_balance.connect():
+                        acct_info = binance_conn_balance.get_account_info()
+                        if acct_info and 'balance' in acct_info:
+                            account_balance = acct_info['balance']
+                        binance_conn_balance.disconnect()
+                elif is_mt5_broker_name(broker_name):
+                    cached_connection_id = None
+                    normalized_broker_name = canonicalize_broker_name(broker_name)
+
+                    if normalized_broker_name == 'Exness':
+                        cached_connection_id = 'Exness MT5'
+                    elif normalized_broker_name in ['XM', 'XM Global']:
+                        cached_connection_id = 'XM Global MT5'
+
+                    cached_connection = broker_manager.connections.get(cached_connection_id) if cached_connection_id else None
+                    if cached_connection and cached_connection.connected:
+                        acct_info = cached_connection.account_info or cached_connection.get_account_info()
+                        if acct_info and str(acct_info.get('accountNumber', '')) == str(account_number):
+                            account_balance = acct_info.get('balance', account_balance)
+                        else:
+                            logger.info(
+                                f"Using default balance during bot creation for {broker_name} account {account_number} "
+                                f"because the cached MT5 session is for a different account"
+                            )
+                    else:
+                        logger.info(
+                            f"Skipping synchronous MT5 balance fetch during bot creation for {broker_name} "
+                            f"account {account_number}; balance will refresh after the bot connects"
+                        )
             except Exception as e:
-                logger.error(f"Error in async bot start: {e}")
-        
-        # Start the bot in a background daemon thread (non-blocking)
-        startup_thread = threading.Thread(target=_async_start_bot, daemon=True)
-        startup_thread.start()
-        
-        # Fetch real balance from broker account for bot creation
-        account_balance = 10000.0  # Default fallback
-        try:
-            if canonicalize_broker_name(broker_name) == 'Binance':
-                binance_conn_balance = BinanceConnection(credentials={
-                    'api_key': credential_data.get('api_key'),
-                    'api_secret': credential_data.get('password'),
-                    'account_number': account_number,
-                    'server': credential_data.get('server') or 'spot',
-                    'is_live': bool(is_live),
-                })
-                if binance_conn_balance.connect():
-                    acct_info = binance_conn_balance.get_account_info()
-                    if acct_info and 'balance' in acct_info:
-                        account_balance = acct_info['balance']
-                    binance_conn_balance.disconnect()
-            else:
-                # MT5 broker - fetch balance during creation (fast, done once)
-                mt5_credentials = {
-                    'account': int(account_number),
-                    'password': credential_data.get('password'),
-                    'server': credential_data.get('server', 'Exness-MT5Trial9')
-                }
-                mt5_balance_conn = MT5Connection(credentials=mt5_credentials)
-                if mt5_balance_conn.connect():
-                    acct_info = mt5_balance_conn.get_account_info()
-                    if acct_info and 'balance' in acct_info:
-                        account_balance = acct_info['balance']
-                    mt5_balance_conn.disconnect()
-        except Exception as e:
-            logger.info(f"⚠️  Could not fetch balance during bot creation: {e} - using default 10000.0")
-        
-        # RETURN IMMEDIATELY - don't wait for bot to fully start
-        return jsonify({
-            'success': True,
-            'botId': bot_id,
-            'user_id': user_id or '',
-            'credentialId': credential_id or '',
-            'accountId': account_id or '',
-            'broker': broker_name or 'Unknown',
-            'account_number': account_number or '',
-            'balance': round(account_balance, 2),  # ✅ Real balance from broker
-            'mode': mode or 'demo',
-            'displayCurrency': display_currency or 'USD',
-            'appliedRiskConfig': {
-                'riskPerTrade': risk_per_trade or 20.0,
-                'maxDailyLoss': max_daily_loss or 60.0,
-                'profitLock': profit_lock or 80.0,
-                'drawdownPausePercent': drawdown_pause_percent or 0.0,
-                'drawdownPauseHours': drawdown_pause_hours or 6.0,
-            },
-            'warnings': (sanitized_risk_config or {}).get('warnings', []),
-            'message': f'Bot {bot_id} created and starting...',
-            'status': 'STARTING'
-        }), 201
-        
+                logger.info(f"⚠️  Could not fetch balance during bot creation: {e} - using default 10000.0")
+
+            return jsonify({
+                'success': True,
+                'botId': bot_id,
+                'user_id': user_id or '',
+                'credentialId': credential_id or '',
+                'accountId': account_id or '',
+                'broker': broker_name or 'Unknown',
+                'account_number': account_number or '',
+                'balance': round(account_balance, 2),
+                'mode': mode or 'demo',
+                'displayCurrency': display_currency or 'USD',
+                'appliedRiskConfig': {
+                    'riskPerTrade': risk_per_trade or 20.0,
+                    'maxDailyLoss': max_daily_loss or 60.0,
+                    'profitLock': profit_lock or 80.0,
+                    'drawdownPausePercent': drawdown_pause_percent or 0.0,
+                    'drawdownPauseHours': drawdown_pause_hours or 6.0,
+                },
+                'warnings': (sanitized_risk_config or {}).get('warnings', []),
+                'message': f'Bot {bot_id} created and starting...',
+                'status': 'STARTING'
+            }), 201
         except Exception as e:
             logger.error(f"Error creating bot: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
 
 # ==================== CONTINUOUS BOT TRADING LOOP ====================
@@ -9454,48 +9442,45 @@ def quick_create_bot():
     
     with bot_creation_lock:
         logger.info("✅ Acquired bot creation lock - proceeding with quick creation")
-        
+        conn = None
         try:
             data = request.json
             if not data:
                 return jsonify({'success': False, 'error': 'No configuration provided'}), 400
-            
+
             user_id = request.user_id  # From @require_session decorator
             if not user_id:
                 return jsonify({'success': False, 'error': 'Not authenticated'}), 401
-            
+
             credential_id = data.get('credentialId')
             if not credential_id:
                 return jsonify({'success': False, 'error': 'credentialId required'}), 400
-            
+
             preset = data.get('preset', 'top_edge')  # Default to top performers
-            
-            conn = None
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                
-                # Verify credential exists and belongs to user AND is Binance
-                cursor.execute('''
-                    SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
-                    FROM broker_credentials 
-                    WHERE credential_id = ? AND user_id = ?
-                ''', (credential_id, user_id))
 
-                credential_row = cursor.fetchone()
-                if not credential_row:
-                    return jsonify({'success': False, 'error': 'Broker credential not found'}), 404
+            conn = get_db_connection()
+            cursor = conn.cursor()
 
-                credential_data = dict(credential_row)
-                broker_name = credential_data['broker_name']
-                
-                # Only allow Binance for quick create
-                if canonicalize_broker_name(broker_name) != 'Binance':
+            # Verify credential exists and belongs to user AND is Binance
+            cursor.execute('''
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+                FROM broker_credentials
+                WHERE credential_id = ? AND user_id = ?
+            ''', (credential_id, user_id))
+            credential_row = cursor.fetchone()
+            if not credential_row:
+                return jsonify({'success': False, 'error': 'Broker credential not found'}), 404
+
+            credential_data = dict(credential_row)
+            broker_name = credential_data['broker_name']
+
+            # Only allow Binance for quick create
+            if canonicalize_broker_name(broker_name) != 'Binance':
                 return jsonify({
-                    'success': False, 
+                    'success': False,
                     'error': f'Quick bot creation only works for Binance. You are using {broker_name}'
                 }), 400
-            
+
             account_number = credential_data['account_number']
             is_live = credential_data['is_live']
             mode = 'live' if is_live else 'demo'
@@ -9535,9 +9520,9 @@ def quick_create_bot():
                     'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'ADAUSDT', 'XRPUSDT'
                 ]
             }
-            
+
             symbols = BINANCE_PRESETS.get(preset, BINANCE_PRESETS['top_edge'])
-            
+
             # Bot configuration (optimized for crypto)
             bot_id = f"quick_bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
             strategy = 'Momentum Trading'  # Best for crypto
@@ -9565,107 +9550,103 @@ def quick_create_bot():
             ''', (bot_id, credential_id, user_id, created_at))
             
             conn.commit()
-            
+
+            now = datetime.now()
+            sample_trades, sample_daily_profits, sample_total_profit, sample_winning_trades = _generate_sample_trades_for_bot(symbols, 8)
+
+            active_bots[bot_id] = {
+                'botId': bot_id,
+                'user_id': user_id,
+                'accountId': account_id,
+                'brokerName': broker_name,
+                'broker_type': broker_name,
+                'mode': mode,
+                'credentialId': credential_id,
+                'symbols': symbols,
+                'strategy': strategy,
+                'riskPerTrade': risk_per_trade,
+                'maxDailyLoss': max_daily_loss,
+                'profitLock': profit_lock,
+                'drawdownPausePercent': drawdown_pause_percent,
+                'drawdownPauseHours': drawdown_pause_hours,
+                'displayCurrency': display_currency,
+                'enabled': trading_enabled,
+                'totalTrades': len(sample_trades),
+                'winningTrades': sample_winning_trades,
+                'totalProfit': sample_total_profit,
+                'totalLosses': 0,
+                'totalInvestment': 0,
+                'createdAt': now.isoformat(),
+                'startTime': now.isoformat(),
+                'profitHistory': [],
+                'tradeHistory': sample_trades,
+                'dailyProfits': sample_daily_profits,
+                'dailyProfit': sample_total_profit,
+                'maxDrawdown': 0,
+                'peakProfit': max(0, sample_total_profit),
+                'profit': sample_total_profit,
+            }
+            persist_bot_runtime_state(bot_id)
+
+            running_bots[bot_id] = True
+            bot_stop_flags[bot_id] = False
+
+            def _async_start_quick_bot():
+                try:
+                    time.sleep(0.5)
+
+                    bot_credentials = None
+                    if credential_id:
+                        conn_local = None
+                        try:
+                            conn_local = get_db_connection()
+                            cursor_local = conn_local.cursor()
+                            cursor_local.execute('SELECT api_key, password, server, is_live, account_number FROM broker_credentials WHERE credential_id = ?', (credential_id,))
+                            cred_row = cursor_local.fetchone()
+
+                            if cred_row:
+                                cred_dict = dict(cred_row)
+                                bot_credentials = {
+                                    'api_key': cred_dict['api_key'],
+                                    'api_secret': cred_dict['password'],
+                                    'account_number': cred_dict['account_number'],
+                                    'server': cred_dict.get('server', 'spot'),
+                                    'broker': broker_name,
+                                    'is_live': bool(cred_dict['is_live'])
+                                }
+                        except Exception as e:
+                            logger.warning(f"Could not load credential details: {e}")
+                        finally:
+                            if conn_local:
+                                conn_local.close()
+
+                    continuous_bot_trading_loop(bot_id, user_id, bot_credentials)
+                except Exception as e:
+                    logger.error(f"Error auto-starting quick bot {bot_id}: {e}")
+                    running_bots[bot_id] = False
+
+            bot_thread = threading.Thread(target=_async_start_quick_bot, daemon=True)
+            bot_threads[bot_id] = bot_thread
+            bot_thread.start()
+
+            logger.info(f"✅ Quick bot created: {bot_id} for user {user_id}")
+            logger.info(f"   Preset: {preset} | Symbols: {symbols}")
+
+            return jsonify({
+                'success': True,
+                'botId': bot_id,
+                'status': 'active',
+                'message': f'Quick bot created with preset: {preset}',
+                'pairs': symbols,
+                'strategy': strategy,
+                'riskPerTrade': risk_per_trade,
+                'tradingEnabled': trading_enabled,
+            }), 201
+            logger.error(f"Error in quick_create_bot: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
         finally:
             if conn:
                 conn.close()
-        
-        # Add to active bots
-        now = datetime.now()
-        sample_trades, sample_daily_profits, sample_total_profit, sample_winning_trades = _generate_sample_trades_for_bot(symbols, 8)
-        
-        active_bots[bot_id] = {
-            'botId': bot_id,
-            'user_id': user_id,
-            'accountId': account_id,
-            'brokerName': broker_name,
-            'broker_type': broker_name,
-            'mode': mode,
-            'credentialId': credential_id,
-            'symbols': symbols,
-            'strategy': strategy,
-            'riskPerTrade': risk_per_trade,
-            'maxDailyLoss': max_daily_loss,
-            'profitLock': profit_lock,
-            'drawdownPausePercent': drawdown_pause_percent,
-            'drawdownPauseHours': drawdown_pause_hours,
-            'displayCurrency': display_currency,
-            'enabled': trading_enabled,
-            'totalTrades': len(sample_trades),
-            'winningTrades': sample_winning_trades,
-            'totalProfit': sample_total_profit,
-            'totalLosses': 0,
-            'totalInvestment': 0,
-            'createdAt': now.isoformat(),
-            'startTime': now.isoformat(),
-            'profitHistory': [],
-            'tradeHistory': sample_trades,
-            'dailyProfits': sample_daily_profits,
-            'dailyProfit': sample_total_profit,
-            'maxDrawdown': 0,
-            'peakProfit': max(0, sample_total_profit),
-            'profit': sample_total_profit,
-        }
-        persist_bot_runtime_state(bot_id)
-        
-        # Auto-start the bot
-        running_bots[bot_id] = True
-        bot_stop_flags[bot_id] = False
-        
-        def _async_start_quick_bot():
-            try:
-                time.sleep(0.5)
-                
-                # Get bot credentials
-                bot_credentials = None
-                if credential_id:
-                    try:
-                        conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT account_number, password, server, is_live FROM broker_credentials WHERE credential_id = ?', (credential_id,))
-                        cred_row = cursor.fetchone()
-                        conn.close()
-                        
-                        if cred_row:
-                            cred_dict = dict(cred_row)
-                            bot_credentials = {
-                                'account': cred_dict['account_number'],
-                                'password': cred_dict['password'],
-                                'server': cred_dict.get('server', 'Exness-MT5Trial9'),
-                                'broker': broker_name,
-                                'is_live': bool(cred_dict['is_live'])
-                            }
-                    except Exception as e:
-                        logger.warning(f"Could not load credential details: {e}")
-                
-                # Start trading loop
-                continuous_bot_trading_loop(bot_id, user_id, bot_credentials)
-            except Exception as e:
-                logger.error(f"Error auto-starting quick bot {bot_id}: {e}")
-                running_bots[bot_id] = False
-        
-        # Run in background without blocking response
-        bot_thread = threading.Thread(target=_async_start_quick_bot, daemon=True)
-        bot_threads[bot_id] = bot_thread
-        bot_thread.start()
-        
-        logger.info(f"✅ Quick bot created: {bot_id} for user {user_id}")
-        logger.info(f"   Preset: {preset} | Symbols: {symbols}")
-        
-        return jsonify({
-            'success': True,
-            'botId': bot_id,
-            'status': 'active',
-            'message': f'Quick bot created with preset: {preset}',
-            'pairs': symbols,
-            'strategy': strategy,
-            'riskPerTrade': risk_per_trade,
-            'tradingEnabled': trading_enabled,
-        }), 201
-            
-        except Exception as e:
-            logger.error(f"Error in quick_create_bot: {e}")
-            return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/bot/start', methods=['POST'])
