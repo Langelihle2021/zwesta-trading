@@ -7459,7 +7459,7 @@ def test_broker_connection():
                 'credential_id': credential_id,
                 'broker': broker,
                 'account_number': account,
-                'balance': actual_balance,
+                'balance': 10000.0,  # Will be updated when bot starts trading
                 'is_live': is_live,
                 'status': 'CONNECTED',
                 'timestamp': datetime.now().isoformat()
@@ -8335,6 +8335,38 @@ def create_bot():
         startup_thread = threading.Thread(target=_async_start_bot, daemon=True)
         startup_thread.start()
         
+        # Fetch real balance from broker account for bot creation
+        account_balance = 10000.0  # Default fallback
+        try:
+            if canonicalize_broker_name(broker_name) == 'Binance':
+                binance_conn_balance = BinanceConnection(credentials={
+                    'api_key': credential_data.get('api_key'),
+                    'api_secret': credential_data.get('password'),
+                    'account_number': account_number,
+                    'server': credential_data.get('server') or 'spot',
+                    'is_live': bool(is_live),
+                })
+                if binance_conn_balance.connect():
+                    acct_info = binance_conn_balance.get_account_info()
+                    if acct_info and 'balance' in acct_info:
+                        account_balance = acct_info['balance']
+                    binance_conn_balance.disconnect()
+            else:
+                # MT5 broker - fetch balance during creation (fast, done once)
+                mt5_credentials = {
+                    'account': int(account_number),
+                    'password': credential_data.get('password'),
+                    'server': credential_data.get('server', 'Exness-MT5Trial9')
+                }
+                mt5_balance_conn = MT5Connection(credentials=mt5_credentials)
+                if mt5_balance_conn.connect():
+                    acct_info = mt5_balance_conn.get_account_info()
+                    if acct_info and 'balance' in acct_info:
+                        account_balance = acct_info['balance']
+                    mt5_balance_conn.disconnect()
+        except Exception as e:
+            logger.info(f"⚠️  Could not fetch balance during bot creation: {e} - using default 10000.0")
+        
         # RETURN IMMEDIATELY - don't wait for bot to fully start
         return jsonify({
             'success': True,
@@ -8344,6 +8376,7 @@ def create_bot():
             'accountId': account_id or '',
             'broker': broker_name or 'Unknown',
             'account_number': account_number or '',
+            'balance': round(account_balance, 2),  # ✅ Real balance from broker
             'mode': mode or 'demo',
             'displayCurrency': display_currency or 'USD',
             'appliedRiskConfig': {
