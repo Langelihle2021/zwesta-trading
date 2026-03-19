@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Database path
-DB_PATH = os.path.join(os.path.dirname(__file__), 'zwesta_trading.db')
+DB_PATH = r'C:\backend\zwesta_trading.db'
 
 def get_db_connection():
     """Get database connection"""
