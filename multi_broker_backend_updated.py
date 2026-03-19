@@ -4119,6 +4119,158 @@ def list_accounts():
     return jsonify({'accounts': accounts})
 
 
+@app.route('/api/accounts/balances', methods=['GET'])
+@require_session
+def get_account_balances():
+    """Get account balances from all user's brokers (Exness, XM, Binance, etc.)
+    
+    Returns unified account summary with balances from all integrated brokers.
+    This is what displays in the dashboard showing real broker balances.
+    """
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all active broker credentials for this user
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+            FROM broker_credentials 
+            WHERE user_id = ? AND is_active = 1
+        ''', (user_id,))
+        
+        credentials = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        accounts_summary = {
+            'success': True,
+            'accounts': [],
+            'totalBalance': 0,
+            'totalEquity': 0,
+            'brokers': {},  # Grouped by broker: {Exness: {...}, XM: {...}, Binance: {...}}
+        }
+        
+        # Fetch balance from each broker
+        for cred in credentials:
+            broker_name = canonicalize_broker_name(cred['broker_name'])
+            account_num = cred['account_number']
+            is_live = cred['is_live']
+            mode = 'Live' if is_live else 'Demo'
+            
+            account_info = None
+            error_msg = None
+            
+            try:
+                if broker_name == 'Exness':
+                    # Connect to Exness MT5
+                    mt5_conn = MT5Connection({
+                        'account': int(account_num) if account_num else 0,
+                        'password': cred['password'],
+                        'server': cred['server'] or ('Exness-Real' if is_live else 'Exness-MT5Trial9'),
+                    })
+                    if mt5_conn.connect():
+                        account_info = mt5_conn.get_account_info()
+                        mt5_conn.disconnect()
+                    else:
+                        error_msg = "Failed to connect to Exness MT5"
+                
+                elif broker_name == 'XM':
+                    # Connect to XM MT5
+                    mt5_conn = MT5Connection({
+                        'account': int(account_num) if account_num else 0,
+                        'password': cred['password'],
+                        'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-Demo'),
+                    })
+                    if mt5_conn.connect():
+                        account_info = mt5_conn.get_account_info()
+                        mt5_conn.disconnect()
+                    else:
+                        error_msg = "Failed to connect to XM MT5"
+                
+                elif broker_name == 'Binance':
+                    # Connect to Binance API
+                    binance_conn = BinanceConnection({
+                        'api_key': cred['api_key'],
+                        'api_secret': cred['password'],
+                        'account_number': account_num,
+                        'is_live': is_live,
+                    })
+                    if binance_conn.connect():
+                        # Get Binance balance
+                        balance_info = binance_conn.get_balance()
+                        account_info = {
+                            'accountNumber': account_num,
+                            'balance': balance_info.get('balance', 0),
+                            'equity': balance_info.get('balance', 0),  # Binance only has balance, not equity
+                            'marginFree': balance_info.get('available', 0),
+                            'currency': balance_info.get('currency', 'USDT'),
+                            'displayCurrency': balance_info.get('currency', 'USDT'),
+                            'broker': 'Binance',
+                            'leverage': 1,
+                        }
+                        binance_conn.disconnect()
+                    else:
+                        error_msg = "Failed to connect to Binance API"
+                
+                else:
+                    # Generic MT5 fallback
+                    mt5_conn = MT5Connection({
+                        'account': int(account_num) if account_num else 0,
+                        'password': cred['password'],
+                        'server': cred['server'] or 'MetaQuotes-Demo',
+                    })
+                    if mt5_conn.connect():
+                        account_info = mt5_conn.get_account_info()
+                        mt5_conn.disconnect()
+                    else:
+                        error_msg = "Failed to connect to MT5"
+                
+            except Exception as e:
+                logger.warning(f"Error fetching balance from {broker_name} account {account_num}: {e}")
+                error_msg = str(e)
+            
+            # Build account entry
+            account_entry = {
+                'credentialId': cred['credential_id'],
+                'broker': broker_name,
+                'accountNumber': account_num,
+                'mode': mode,
+                'error': error_msg,
+            }
+            
+            if account_info:
+                account_entry.update({
+                    'balance': account_info.get('balance', 0),
+                    'equity': account_info.get('equity', account_info.get('balance', 0)),
+                    'marginFree': account_info.get('marginFree', 0),
+                    'currency': account_info.get('currency', 'USD'),
+                    'connected': True,
+                })
+                # Add to broker group
+                if broker_name not in accounts_summary['brokers']:
+                    accounts_summary['brokers'][broker_name] = []
+                accounts_summary['brokers'][broker_name].append(account_entry)
+                
+                # Accumulate totals
+                accounts_summary['totalBalance'] += account_entry['balance']
+                accounts_summary['totalEquity'] += account_entry['equity']
+            else:
+                account_entry['connected'] = False
+                if broker_name not in accounts_summary['brokers']:
+                    accounts_summary['brokers'][broker_name] = []
+                accounts_summary['brokers'][broker_name].append(account_entry)
+            
+            accounts_summary['accounts'].append(account_entry)
+        
+        logger.info(f"✅ Fetched account balances for user {user_id}: {len(accounts_summary['accounts'])} accounts, Total: ${accounts_summary['totalBalance']:.2f}")
+        
+        return jsonify(accounts_summary)
+    
+    except Exception as e:
+        logger.error(f"Error getting account balance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/trades/all', methods=['GET'])
 def get_all_trades():
     """Get trading history from all accounts"""
