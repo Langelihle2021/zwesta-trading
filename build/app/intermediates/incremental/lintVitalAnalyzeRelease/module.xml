@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="C:\zwesta-trader\Zwesta Flutter App\android\app"
+    name=":app"
+    type="APP"
+    maven="android:app:"
+    agpVersion="8.3.0"
+    buildFolder="C:\zwesta-trader\Zwesta Flutter App\build\app"
+    bootClassPath="C:\Users\zwexm\AppData\Local\Android\Sdk\platforms\android-35\android.jar;C:\Users\zwexm\AppData\Local\Android\Sdk\build-tools\34.0.0\core-lambda-stubs.jar"
+    javaSourceLevel="11"
+    compileTarget="android-35"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

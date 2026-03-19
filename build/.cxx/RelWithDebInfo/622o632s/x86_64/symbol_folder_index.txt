@@ -1,0 +1,1 @@
+C:\zwesta-trader\Zwesta Flutter App\build\app\intermediates\cxx\RelWithDebInfo\622o632s\obj\x86_64

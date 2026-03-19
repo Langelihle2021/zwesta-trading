@@ -818,10 +818,33 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
       return const SizedBox.shrink();
     }
 
+    // Convert to list and sort by date
+    final entries = dailyProfits.entries.toList()
+      ..sort((a, b) => a.key.toString().compareTo(b.key.toString()));
+    
+    // Get last 7 days
+    final last7 = entries.length > 7 ? entries.sublist(entries.length - 7) : entries;
+    
+    // Find min/max for scaling
+    double minProfit = 0, maxProfit = 0;
+    for (var entry in last7) {
+      final profit = double.tryParse(entry.value.toString()) ?? 0;
+      if (profit < minProfit) minProfit = profit;
+      if (profit > maxProfit) maxProfit = profit;
+    }
+    
+    // Add 20% padding
+    final range = maxProfit - minProfit;
+    final padding = range * 0.2;
+    minProfit -= padding;
+    maxProfit += padding;
+    if (maxProfit <= 0) maxProfit = 100;
+    if (minProfit < 0 && maxProfit > 0) minProfit = -maxProfit * 0.2;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader('Daily Profits'),
+        _buildSectionHeader('Daily Profits (Last 7 Days)'),
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(16),
@@ -830,11 +853,56 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
             borderRadius: BorderRadius.circular(8),
           ),
           height: 250,
-          child: const Center(
-            child: Text(
-              'Daily profits chart disabled for compatibility',
-              style: TextStyle(color: Colors.white70),
-            ),
+          child: Column(
+            children: [
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: last7.map((entry) {
+                    final profit = double.tryParse(entry.value.toString()) ?? 0;
+                    final height = (maxProfit != minProfit 
+                      ? ((profit - minProfit) / (maxProfit - minProfit)) * 180
+                      : 90) as double;
+                    final color = profit >= 0 ? Colors.green : Colors.red;
+                    
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          '\$${profit.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Container(
+                          width: 30,
+                          height: height.clamp(10.0, 180.0),
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.7),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: last7.map((entry) {
+                  final date = entry.key.toString().split('-').last;
+                  return Text(
+                    date,
+                    style: const TextStyle(color: Colors.white54, fontSize: 10),
+                  );
+                }).toList(),
+              ),
+            ],
           ),
         ),
       ],

@@ -1,0 +1,47 @@
+com.example.zwesta_trading.app-jetified-datastore-release-0 C:\Users\zwexm\.gradle\caches\8.9\transforms\02bcd906af14bfb382b1e9b7232e681f\transformed\jetified-datastore-release\res
+com.example.zwesta_trading.app-jetified-lifecycle-process-2.7.0-1 C:\Users\zwexm\.gradle\caches\8.9\transforms\0b9c8302446a0773b62f69c4f6a9cbad\transformed\jetified-lifecycle-process-2.7.0\res
+com.example.zwesta_trading.app-jetified-datastore-preferences-core-release-2 C:\Users\zwexm\.gradle\caches\8.9\transforms\11e066dc8a7428fc67b2b281044c6a30\transformed\jetified-datastore-preferences-core-release\res
+com.example.zwesta_trading.app-coordinatorlayout-1.0.0-3 C:\Users\zwexm\.gradle\caches\8.9\transforms\122e5b687f2dd1413fe00adf0170a439\transformed\coordinatorlayout-1.0.0\res
+com.example.zwesta_trading.app-lifecycle-viewmodel-2.7.0-4 C:\Users\zwexm\.gradle\caches\8.9\transforms\2095cea70cd7ffcdc1397205422854d6\transformed\lifecycle-viewmodel-2.7.0\res
+com.example.zwesta_trading.app-jetified-activity-ktx-1.8.1-5 C:\Users\zwexm\.gradle\caches\8.9\transforms\217a3f90430bfbd0c4c146646dd51699\transformed\jetified-activity-ktx-1.8.1\res
+com.example.zwesta_trading.app-jetified-lifecycle-livedata-core-ktx-2.7.0-6 C:\Users\zwexm\.gradle\caches\8.9\transforms\220a27a3107dd50079028bef7cd0ca00\transformed\jetified-lifecycle-livedata-core-ktx-2.7.0\res
+com.example.zwesta_trading.app-jetified-window-java-1.2.0-7 C:\Users\zwexm\.gradle\caches\8.9\transforms\239e4e889aef58c7602bf7d42e7ac9df\transformed\jetified-window-java-1.2.0\res
+com.example.zwesta_trading.app-media-1.1.0-8 C:\Users\zwexm\.gradle\caches\8.9\transforms\26514bbe63a6c5b595addbb17c03c62e\transformed\media-1.1.0\res
+com.example.zwesta_trading.app-appcompat-1.1.0-9 C:\Users\zwexm\.gradle\caches\8.9\transforms\2d14f121e1baf4670acedb0b369e5ae6\transformed\appcompat-1.1.0\res
+com.example.zwesta_trading.app-jetified-savedstate-1.2.1-10 C:\Users\zwexm\.gradle\caches\8.9\transforms\2fda7e3bf3cd358813e64e245126830c\transformed\jetified-savedstate-1.2.1\res
+com.example.zwesta_trading.app-lifecycle-livedata-core-2.7.0-11 C:\Users\zwexm\.gradle\caches\8.9\transforms\3275f9d6dcaa9c1e6430a8de495cd3ce\transformed\lifecycle-livedata-core-2.7.0\res
+com.example.zwesta_trading.app-jetified-fragment-ktx-1.7.1-12 C:\Users\zwexm\.gradle\caches\8.9\transforms\3b9cf93cdaa7ea41565ba077b6deee9b\transformed\jetified-fragment-ktx-1.7.1\res
+com.example.zwesta_trading.app-jetified-activity-1.8.1-13 C:\Users\zwexm\.gradle\caches\8.9\transforms\3c63d2e3d4fbeaa0954ae8e5a511bf9b\transformed\jetified-activity-1.8.1\res
+com.example.zwesta_trading.app-jetified-tracing-1.2.0-14 C:\Users\zwexm\.gradle\caches\8.9\transforms\46c94d8a04f87a6e945fb013c0085ca1\transformed\jetified-tracing-1.2.0\res
+com.example.zwesta_trading.app-jetified-startup-runtime-1.1.1-15 C:\Users\zwexm\.gradle\caches\8.9\transforms\5945c9a76c2faf8235b30990d058a4b6\transformed\jetified-startup-runtime-1.1.1\res
+com.example.zwesta_trading.app-core-runtime-2.2.0-16 C:\Users\zwexm\.gradle\caches\8.9\transforms\5ae9e28e6399fc2326d52968a89a7113\transformed\core-runtime-2.2.0\res
+com.example.zwesta_trading.app-jetified-appcompat-resources-1.1.0-17 C:\Users\zwexm\.gradle\caches\8.9\transforms\5e315bcf9bf1faa837e419ea10de04e2\transformed\jetified-appcompat-resources-1.1.0\res
+com.example.zwesta_trading.app-lifecycle-runtime-2.7.0-18 C:\Users\zwexm\.gradle\caches\8.9\transforms\63e42cd8241b79ac3bf3eead0a8f0a2b\transformed\lifecycle-runtime-2.7.0\res
+com.example.zwesta_trading.app-lifecycle-livedata-2.7.0-19 C:\Users\zwexm\.gradle\caches\8.9\transforms\6d6c5762f295167b57840dfe9270c9b1\transformed\lifecycle-livedata-2.7.0\res
+com.example.zwesta_trading.app-jetified-lifecycle-viewmodel-savedstate-2.7.0-20 C:\Users\zwexm\.gradle\caches\8.9\transforms\6fbcafb426cf9c4a62a120a4e20447eb\transformed\jetified-lifecycle-viewmodel-savedstate-2.7.0\res
+com.example.zwesta_trading.app-jetified-datastore-core-release-21 C:\Users\zwexm\.gradle\caches\8.9\transforms\78cc71b4ce40aff5b5f570b7a550ceb8\transformed\jetified-datastore-core-release\res
+com.example.zwesta_trading.app-jetified-core-ktx-1.13.1-22 C:\Users\zwexm\.gradle\caches\8.9\transforms\86d74197bb7586e2d6b7b360acbd8127\transformed\jetified-core-ktx-1.13.1\res
+com.example.zwesta_trading.app-jetified-datastore-preferences-release-23 C:\Users\zwexm\.gradle\caches\8.9\transforms\9003285d6ff998665dd105b4092e5a04\transformed\jetified-datastore-preferences-release\res
+com.example.zwesta_trading.app-core-1.13.1-24 C:\Users\zwexm\.gradle\caches\8.9\transforms\9f8685429f4bb4257dc3a38e719ca19d\transformed\core-1.13.1\res
+com.example.zwesta_trading.app-preference-1.2.1-25 C:\Users\zwexm\.gradle\caches\8.9\transforms\af807bf7ad21229d2e8467fe7eff8221\transformed\preference-1.2.1\res
+com.example.zwesta_trading.app-jetified-core-1.0.0-26 C:\Users\zwexm\.gradle\caches\8.9\transforms\bc5a38d3adc4686edae7af4b7e25664d\transformed\jetified-core-1.0.0\res
+com.example.zwesta_trading.app-jetified-annotation-experimental-1.4.0-27 C:\Users\zwexm\.gradle\caches\8.9\transforms\bcf5e5f36abf21954f2846be0ff86ce8\transformed\jetified-annotation-experimental-1.4.0\res
+com.example.zwesta_trading.app-jetified-lifecycle-viewmodel-ktx-2.7.0-28 C:\Users\zwexm\.gradle\caches\8.9\transforms\bf48ffd1eaa02661d028dadb5e45e33c\transformed\jetified-lifecycle-viewmodel-ktx-2.7.0\res
+com.example.zwesta_trading.app-slidingpanelayout-1.2.0-29 C:\Users\zwexm\.gradle\caches\8.9\transforms\c46393169104773f06dddc48ed049d3f\transformed\slidingpanelayout-1.2.0\res
+com.example.zwesta_trading.app-jetified-lifecycle-runtime-ktx-2.7.0-30 C:\Users\zwexm\.gradle\caches\8.9\transforms\c7a1343f66ae09569ab77f4ee2bf0f06\transformed\jetified-lifecycle-runtime-ktx-2.7.0\res
+com.example.zwesta_trading.app-jetified-profileinstaller-1.3.1-31 C:\Users\zwexm\.gradle\caches\8.9\transforms\c90aa7786ef80eccf48e88f1f1a630de\transformed\jetified-profileinstaller-1.3.1\res
+com.example.zwesta_trading.app-jetified-savedstate-ktx-1.2.1-32 C:\Users\zwexm\.gradle\caches\8.9\transforms\e3c6dea454e1ca03f772ac01aa432279\transformed\jetified-savedstate-ktx-1.2.1\res
+com.example.zwesta_trading.app-jetified-window-1.2.0-33 C:\Users\zwexm\.gradle\caches\8.9\transforms\ef91c06267294f259157173f6e462e3b\transformed\jetified-window-1.2.0\res
+com.example.zwesta_trading.app-transition-1.4.1-34 C:\Users\zwexm\.gradle\caches\8.9\transforms\f75813061a41be4401143b51c5022a1b\transformed\transition-1.4.1\res
+com.example.zwesta_trading.app-recyclerview-1.0.0-35 C:\Users\zwexm\.gradle\caches\8.9\transforms\fd43163f15c8f2e73c11c3d6c6911fbd\transformed\recyclerview-1.0.0\res
+com.example.zwesta_trading.app-fragment-1.7.1-36 C:\Users\zwexm\.gradle\caches\8.9\transforms\fe5c4a65c09e0118a51ae3d8e249cc81\transformed\fragment-1.7.1\res
+com.example.zwesta_trading.app-main-37 C:\zwesta-trader\Zwesta Flutter App\android\app\src\main\res
+com.example.zwesta_trading.app-release-38 C:\zwesta-trader\Zwesta Flutter App\android\app\src\release\res
+com.example.zwesta_trading.app-pngs-39 C:\zwesta-trader\Zwesta Flutter App\build\app\generated\res\pngs\release
+com.example.zwesta_trading.app-resValues-40 C:\zwesta-trader\Zwesta Flutter App\build\app\generated\res\resValues\release
+com.example.zwesta_trading.app-packageReleaseResources-41 C:\zwesta-trader\Zwesta Flutter App\build\app\intermediates\incremental\release\packageReleaseResources\merged.dir
+com.example.zwesta_trading.app-packageReleaseResources-42 C:\zwesta-trader\Zwesta Flutter App\build\app\intermediates\incremental\release\packageReleaseResources\stripped.dir
+com.example.zwesta_trading.app-release-43 C:\zwesta-trader\Zwesta Flutter App\build\app\intermediates\merged_res\release\mergeReleaseResources
+com.example.zwesta_trading.app-release-44 C:\zwesta-trader\Zwesta Flutter App\build\flutter_local_notifications\intermediates\packaged_res\release\packageReleaseResources
+com.example.zwesta_trading.app-release-45 C:\zwesta-trader\Zwesta Flutter App\build\path_provider_android\intermediates\packaged_res\release\packageReleaseResources
+com.example.zwesta_trading.app-release-46 C:\zwesta-trader\Zwesta Flutter App\build\shared_preferences_android\intermediates\packaged_res\release\packageReleaseResources

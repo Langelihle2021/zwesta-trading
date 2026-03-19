@@ -8613,6 +8613,32 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 trades_placed = 0
                 symbols = bot_config.get('symbols', ['EURUSDm'])
                 
+                # CHECK PROFIT LOCK AND DAILY LOSS LIMITS BEFORE TRADING
+                profit_lock = bot_config.get('profitLock', 0.0) or 0.0
+                max_daily_loss = bot_config.get('maxDailyLoss', 0.0) or 0.0
+                today = datetime.now().strftime('%Y-%m-%d')
+                daily_profit = bot_config.get('dailyProfits', {}).get(today, 0.0)
+                
+                pause_reason = None
+                if profit_lock > 0 and daily_profit >= profit_lock:
+                    pause_reason = f"🔒 Daily profit lock reached: ${daily_profit:.2f} >= ${profit_lock:.2f}"
+                elif max_daily_loss > 0 and daily_profit < -max_daily_loss:
+                    pause_reason = f"⚠️ Daily loss limit hit: ${abs(daily_profit):.2f} >= ${max_daily_loss:.2f}"
+                
+                if pause_reason:
+                    logger.info(f"[PAUSE] Bot {bot_id}: {pause_reason} - PAUSING TRADES FOR TODAY")
+                    bot_config['status'] = 'PAUSED'
+                    bot_config['pauseReason'] = pause_reason
+                    persist_bot_runtime_state(bot_id)
+                    # Wait for trading interval before next cycle
+                    time.sleep(trading_interval)
+                    continue
+                else:
+                    # Trading is allowed
+                    if bot_config.get('status') == 'PAUSED':
+                        bot_config['status'] = 'ACTIVE'
+                        bot_config['pauseReason'] = None
+                
                 # ENHANCED LOGGING: Log signal evaluation for ALL symbols upfront
                 signal_threshold = bot_config.get('signalThreshold', 50)
                 signal_summary = []
@@ -9712,6 +9738,7 @@ def bot_status():
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
+                'pauseReason': bot.get('pauseReason'),  # ✅ Include pause reason if bot is paused
                 'displayCurrency': bot.get('displayCurrency', 'USD'),
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
