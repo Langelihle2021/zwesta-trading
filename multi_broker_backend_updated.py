@@ -332,7 +332,7 @@ class BrokerType(Enum):
 
 # ==================== DATABASE SETUP ====================
 # ==================== DATABASE SETUP ====================
-DATABASE_PATH = 'zwesta_trading.db'
+DATABASE_PATH = r'C:\backend\zwesta_trading.db'
 
 # ==================== CLEANUP ENDPOINT ====================
 @app.route('/api/bots/cleanup', methods=['POST'])
@@ -1738,7 +1738,32 @@ class MT5Connection(BrokerConnection):
             if 'takeProfit' in kwargs:
                 request_dict['tp'] = kwargs['takeProfit']
 
-            result = self.mt5.order_send(request_dict)
+            # TIMEOUT WRAPPER: order_send can hang for 10+ seconds if MT5 is busy/disconnected
+            # Set a 5-second timeout to fail fast instead of freezing bot
+            import threading
+            result = None
+            result_holder = []
+            error_holder = []
+            
+            def mt5_order_with_timeout():
+                try:
+                    res = self.mt5.order_send(request_dict)
+                    result_holder.append(res)
+                except Exception as e:
+                    error_holder.append(e)
+            
+            thread = threading.Thread(target=mt5_order_with_timeout, daemon=True)
+            thread.start()
+            thread.join(timeout=5.0)  # Wait max 5 seconds
+            
+            if error_holder:
+                logger.error(f"MT5 order_send exception: {error_holder[0]}")
+                result = None
+            elif result_holder:
+                result = result_holder[0]
+            else:
+                logger.error(f"MT5 order_send TIMEOUT after 5 seconds - terminal likely disconnected")
+                result = None
 
             if result is None:
                 logger.error(f"MT5 order_send returned None for {symbol} {order_type} vol={volume}")
