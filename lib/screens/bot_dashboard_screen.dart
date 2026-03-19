@@ -978,8 +978,14 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         return;
       }
       
-      if (credential.broker?.toLowerCase() != 'binance') {
+      if (credential.broker.toLowerCase() != 'binance') {
         _showErrorSnackbar('⚠️ This quick create only works with Binance broker');
+        return;
+      }
+      
+      // Verify credentialId exists
+      if (credential.credentialId.isEmpty) {
+        _showErrorSnackbar('⚠️ Invalid Binance credential');
         return;
       }
       
