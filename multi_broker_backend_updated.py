@@ -619,6 +619,23 @@ def init_database():
         )
     ''')
 
+    # General withdrawals table - unified withdrawal tracking
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            withdrawal_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            amount REAL NOT NULL,
+            method TEXT,
+            account_details TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT,
+            processed_at TEXT,
+            fee REAL DEFAULT 0,
+            net_amount REAL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
     # Exness withdrawals table - tracks Exness MT5 profit withdrawals
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS exness_withdrawals (
