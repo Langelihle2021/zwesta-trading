@@ -9,6 +9,7 @@ import '../utils/environment_config.dart';
 import '../services/trading_service.dart';
 import '../services/broker_connection_service.dart';
 import '../services/connection_analytics_service.dart';
+import '../services/broker_credentials_service.dart';
 import '../widgets/logo_widget.dart';
 import '../models/broker_connection_model.dart';
 import 'broker_analytics_dashboard.dart';
@@ -166,6 +167,32 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     }
 
     if (mounted) {
+      // Save to backend via BrokerCredentialsService
+      final brokerService = Provider.of<BrokerCredentialsService>(context, listen: false);
+      final success = await brokerService.saveCredential(
+        broker: _selectedBroker,
+        accountNumber: _accountController.text,
+        password: _passwordController.text,
+        server: _serverController.text,
+        isLive: _isLiveMode,
+        apiKey: _apiKeyController.text.isNotEmpty ? _apiKeyController.text : null,
+        apiSecret: _passwordController.text.isNotEmpty ? _passwordController.text : null,
+        username: _usernameController.text.isNotEmpty ? _usernameController.text : null,
+      );
+
+      if (!success) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Failed to save credentials: ${brokerService.errorMessage}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Also sync with local trading service
       final tradingService = Provider.of<TradingService>(context, listen: false);
       await tradingService.syncBrokerAccount(
         brokerName: _selectedBroker,
