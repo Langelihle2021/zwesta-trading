@@ -12,7 +12,7 @@ import '../services/auth_service.dart';
 import '../services/trading_service.dart';
 import '../services/bot_service.dart';
 import '../services/pdf_service.dart';
-import '../services/ig_auto_connect_service.dart';
+
 import '../providers/fallback_status_provider.dart';
 import '../models/account.dart';
 import '../utils/constants.dart';
@@ -38,7 +38,7 @@ import 'multi_broker_management_screen.dart';
 import 'enhanced_dashboard_screen.dart';
 import 'commission_dashboard_screen.dart';
 import 'broker_analytics_dashboard.dart';
-import 'ig_withdrawal_screen.dart';
+
 import 'oanda_withdrawal_screen.dart';
 import 'fxcm_withdrawal_screen.dart';
 import 'binance_withdrawal_screen.dart';
@@ -166,7 +166,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             _buildPremiumWelcomeCard(),
             const SizedBox(height: 20),
-            _buildIGConnectionStatusCard(),
+            // IG Markets integration removed
             const SizedBox(height: 20),
             _buildQuickStatsRow(),
             const SizedBox(height: 20),
@@ -327,163 +327,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ── EXNESS MT5 ACCOUNT STATUS ──
-  Widget _buildIGConnectionStatusCard() {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: _fetchExnessAccountInfo(),
-      builder: (context, snapshot) {
-        Color statusColor;
-        IconData statusIcon;
-        String statusText;
-        String? accountId;
-        double? balance;
-        String? accountType;
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          statusColor = const Color(0xFFFFD600);
-          statusIcon = Icons.sync;
-          statusText = 'Loading MT5 Account...';
-        } else if (snapshot.hasData && snapshot.data != null) {
-          final data = snapshot.data!;
-          accountId = data['accountId'] ?? 'Unknown';
-          balance = (data['balance'] as num?)?.toDouble() ?? 0.0;
-          accountType = data['accountType'] ?? 'DEMO';
-          statusColor = const Color(0xFF69F0AE);
-          statusIcon = Icons.check_circle;
-          statusText = 'MT5 Connected';
-        } else {
-          statusColor = const Color(0xFFFF8A80);
-          statusIcon = Icons.error_outline;
-          // Show helpful error message
-          if (snapshot.error?.toString().contains('not connected') == true) {
-            statusText = 'Tap to connect Exness account';
-          } else if (snapshot.error?.toString().contains('Failed to connect') == true) {
-            statusText = 'Connection failed - verify credentials';
-          } else {
-            statusText = snapshot.hasError ? 'Connection Failed' : 'MT5 Not Available';
-          }
-        }
-
-        return _glassCard(
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(statusIcon, color: statusColor, size: 24),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Exness MT5',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: statusColor,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                statusText,
-                                style: GoogleFonts.poppins(color: statusColor, fontSize: 12),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (snapshot.hasData && accountType != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: accountType == 'LIVE'
-                            ? Colors.red.withOpacity(0.2)
-                            : Colors.orange.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        accountType == 'LIVE' ? 'LIVE' : 'DEMO',
-                        style: GoogleFonts.poppins(
-                          color: accountType == 'LIVE'
-                              ? Colors.redAccent
-                              : Colors.orangeAccent,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  if (snapshot.connectionState == ConnectionState.waiting)
-                    const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation(Color(0xFFFFD600)),
-                      ),
-                    ),
-                  // Add "Connect" button when not connected
-                  if (!snapshot.hasData || snapshot.hasError)
-                    SizedBox(
-                      height: 32,
-                      child: ElevatedButton.icon(
-                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
-                        icon: const Icon(Icons.add_link, size: 16),
-                        label: const Text('Connect'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              if (snapshot.hasData && accountId != null && balance != null) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _igInfoItem('Account', accountId),
-                      Container(width: 1, height: 30, color: Colors.white12),
-                      _igInfoItem('Balance', '\$${balance.toStringAsFixed(2)}'),
-                      Container(width: 1, height: 30, color: Colors.white12),
-                      _igInfoItem('Type', accountType ?? 'DEMO'),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
+  // IG Markets integration removed
 
   /// Fetch Exness account info from backend via MT5
   Future<Map<String, dynamic>> _fetchExnessAccountInfo() async {
@@ -532,15 +376,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Widget _igInfoItem(String label, String value) {
-    return Column(
-      children: [
-        Text(label, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10)),
-        const SizedBox(height: 4),
-        Text(value, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-      ],
-    );
-  }
+  // IG Markets integration removed
 
   // ── QUICK STATS ROW ──
   Widget _buildQuickStatsRow() {

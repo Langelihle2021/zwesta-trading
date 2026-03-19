@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/currency_provider.dart';
 import '../services/bot_service.dart';
-import '../services/ig_trading_service.dart';
+
+import '../services/broker_credentials_service.dart';
+import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
@@ -457,30 +462,22 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: brokerType.toString().contains('IG') 
-                              ? const Color(0xFFE91E63).withOpacity(0.2)
-                              : brokerType.toString().toUpperCase().contains('BINANCE')
+                            color: brokerType.toString().toUpperCase().contains('BINANCE')
                               ? const Color(0xFFF7931A).withOpacity(0.2)
                               : const Color(0xFF2196F3).withOpacity(0.2),
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: brokerType.toString().contains('IG')
-                                ? const Color(0xFFE91E63).withOpacity(0.5)
-                                : brokerType.toString().toUpperCase().contains('BINANCE')
+                              color: brokerType.toString().toUpperCase().contains('BINANCE')
                                 ? const Color(0xFFF7931A).withOpacity(0.5)
                                 : const Color(0xFF2196F3).withOpacity(0.5),
                             ),
                           ),
                           child: Text(
-                            brokerType.toString().contains('IG') 
-                              ? 'IG'
-                              : brokerType.toString().toUpperCase().contains('BINANCE')
+                            brokerType.toString().toUpperCase().contains('BINANCE')
                               ? 'BINANCE'
                               : 'MT5',
                             style: GoogleFonts.poppins(
-                              color: brokerType.toString().contains('IG')
-                                ? const Color(0xFFE91E63)
-                                : brokerType.toString().toUpperCase().contains('BINANCE')
+                              color: brokerType.toString().toUpperCase().contains('BINANCE')
                                 ? const Color(0xFFF7931A)
                                 : const Color(0xFF2196F3),
                               fontSize: 10,
@@ -734,56 +731,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               ),
             ],
           ),
-          // IG Quick Actions (only for IG bots)
-          if (brokerType.toString().toUpperCase().contains('IG')) ...[            const SizedBox(height: 10),
-            Row(
-              children: [
-                _igQuickBtn(Icons.account_balance_wallet, 'Balance', Colors.green, () async {
-                  final data = await IGTradingService.getBalance();
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(data['success'] == true
-                        ? 'IG Balance: ${_formatAmount(currencyProvider, ((data['balance'] ?? 0) as num).toDouble())}'
-                        : 'Error: ${data['error']}'),
-                    backgroundColor: Colors.grey[800],
-                  ));
-                }),
-                const SizedBox(width: 8),
-                _igQuickBtn(Icons.list_alt, 'Positions', Colors.orange, () async {
-                  final data = await IGTradingService.getPositions();
-                  if (!mounted) return;
-                  final count = (data['positions'] as List?)?.length ?? 0;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('$count open IG position(s)'),
-                    backgroundColor: Colors.grey[800],
-                  ));
-                }),
-                const SizedBox(width: 8),
-                _igQuickBtn(Icons.close_fullscreen, 'Close All', Colors.red, () async {
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Close All IG Positions?'),
-                      content: const Text('This will close all open positions on your IG account.'),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm', style: TextStyle(color: Colors.red))),
-                      ],
-                    ),
-                  );
-                  if (confirmed != true) return;
-                  final data = await IGTradingService.closeAllPositions();
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(data['success'] == true
-                        ? 'Closed ${data['closed']}/${data['total']} positions'
-                        : 'Error: ${data['error']}'),
-                    backgroundColor: Colors.grey[800],
-                  ));
-                }),
-              ],
-            ),
-          ],
+          // IG Markets integration removed
         ],
       ),
     );
@@ -812,29 +760,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     );
   }
 
-  Widget _igQuickBtn(IconData icon, String label, Color color, VoidCallback onTap) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withOpacity(0.3)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 18),
-              const SizedBox(height: 2),
-              Text(label, style: GoogleFonts.poppins(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  // IG Markets integration removed
 
   /// Quick broker button for dashboard quick actions
   Widget _quickBrokerButton({
@@ -888,12 +814,242 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     );
   }
 
-  /// Create bot for specific broker
-  void _createBotForBroker(BuildContext context, String brokerName) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const BotConfigurationScreen(),
+  /// Create bot for specific broker - with quick create option for Binance
+  void _createBotForBroker(BuildContext context, String brokerName) async {
+    if (brokerName == 'Binance') {
+      // Show quick create dialog for Binance
+      _showBinanceQuickCreateDialog(context);
+    } else {
+      // Standard bot creation flow
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const BotConfigurationScreen(),
+        ),
+      );
+    }
+  }
+
+  /// Show quick create dialog for Binance with preset options
+  void _showBinanceQuickCreateDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Row(
+          children: [
+            const Text('₿ ', style: TextStyle(fontSize: 24, color: Color(0xFFF3BA2F))),
+            Text('Quick Binance Bot', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Choose a trading preset to create your bot instantly:',
+              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+            _binancePresetOption(
+              dialogContext,
+              '🚀 Top Edge (6 pairs)',
+              'Best win rates: BTC, ETH, SOL, XRP, BNB, LTC',
+              'top_edge',
+            ),
+            const SizedBox(height: 10),
+            _binancePresetOption(
+              dialogContext,
+              '⚖️  Balanced (6 pairs)',
+              'Low-medium risk: BTC, ETH, LINK, ADA, DOGE, MATIC',
+              'balanced',
+            ),
+            const SizedBox(height: 10),
+            _binancePresetOption(
+              dialogContext,
+              '🔶 DeFi & L2 (6 pairs)',
+              'High volatility: UNI, AAVE, APT, INJ, SUI, FTM',
+              'defi',
+            ),
+            const SizedBox(height: 10),
+            _binancePresetOption(
+              dialogContext,
+              '📈 Large Cap (6 pairs)',
+              'Stable focus: BTC, ETH, BNB, SOL, ADA, XRP',
+              'large_cap_only',
+            ),
+            const SizedBox(height: 20),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                // Show standard configuration screen
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BotConfigurationScreen()),
+                );
+              },
+              child: Text(
+                'Custom Setup',
+                style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Individual Binance preset option button
+  Widget _binancePresetOption(BuildContext context, String title, String description, String preset) {
+    return InkWell(
+      onTap: () => _quickCreateBinanceBot(context, preset),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFF3BA2F).withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: GoogleFonts.poppins(color: const Color(0xFFF3BA2F), fontWeight: FontWeight.w600, fontSize: 12)),
+            const SizedBox(height: 4),
+            Text(description, style: GoogleFonts.poppins(color: Colors.white60, fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Quick create Binance bot with preset
+  void _quickCreateBinanceBot(BuildContext context, String preset) async {
+    Navigator.pop(context); // Close dialog
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      final brokerService = BrokerCredentialsService();
+      
+      await brokerService.fetchCredentials();
+      final credential = brokerService.activeCredential;
+      
+      if (credential == null) {
+        _showErrorSnackbar('⚠️ Please setup Binance broker integration first');
+        return;
+      }
+      
+      if (credential.broker?.toLowerCase() != 'binance') {
+        _showErrorSnackbar('⚠️ This quick create only works with Binance broker');
+        return;
+      }
+      
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.white60)),
+              ),
+              const SizedBox(width: 16),
+              Text('Creating quick bot...', style: GoogleFonts.poppins(color: Colors.white70)),
+            ],
+          ),
+        ),
+      );
+      
+      // Call quick create endpoint
+      final response = await http.post(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/quick-create'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+        body: jsonEncode({
+          'credentialId': credential.credentialId,
+          'preset': preset,
+        }),
+      ).timeout(const Duration(seconds: 15));
+      
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+      
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final botId = data['botId'] ?? 'Bot';
+        final pairs = (data['pairs'] as List?)?.join(', ') ?? 'N/A';
+        
+        // Show success dialog
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            title: Row(
+              children: [
+                const Text('✅', style: TextStyle(fontSize: 24)),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Bot Created', style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontWeight: FontWeight.w700))),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Your quick bot is ready!', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 12),
+                _infoRow('Bot ID', botId, Colors.white60),
+                const SizedBox(height: 8),
+                _infoRow('Pairs', pairs, Colors.white60),
+                const SizedBox(height: 8),
+                _infoRow('Status', '🟢 Running', const Color(0xFF69F0AE)),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  // Refresh bot list
+                  final botService = Provider.of<BotService>(context, listen: false);
+                  botService.fetchActiveBots();
+                  setState(() {});
+                },
+                child: Text('Done', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF))),
+              ),
+            ],
+          ),
+        );
+      } else {
+        final error = jsonDecode(response.body)['error'] ?? 'Failed to create bot';
+        _showErrorSnackbar('❌ $error');
+      }
+    } catch (e) {
+      _showErrorSnackbar('❌ Error: $e');
+    }
+  }
+
+  /// Helper widget to display info rows
+  Widget _infoRow(String label, String value, Color valueColor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+        Text(value, style: GoogleFonts.poppins(color: valueColor, fontSize: 12, fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+
+  /// Show error snackbar
+  void _showErrorSnackbar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: GoogleFonts.poppins(color: Colors.white)),
+        backgroundColor: Colors.red.shade700,
+        duration: const Duration(seconds: 3),
       ),
     );
   }

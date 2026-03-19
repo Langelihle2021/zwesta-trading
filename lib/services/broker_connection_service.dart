@@ -93,16 +93,8 @@ class BrokerConnectionService {
       final normalizedBroker = broker.trim().toLowerCase();
       final Map<String, dynamic> payload;
 
-      if (normalizedBroker == 'ig' || normalizedBroker == 'ig markets' || normalizedBroker == 'ig.com') {
-        payload = {
-          'broker': 'IG Markets',
-          'api_key': apiKey,
-          'username': username,
-          'password': password,
-          'account_id': accountId ?? accountNumber,
-          'is_live': isLive,
-        };
-      } else if (normalizedBroker == 'binance') {
+      // IG Markets integration removed
+      if (normalizedBroker == 'binance') {
         payload = {
           'broker': 'Binance',
           'api_key': apiKey,

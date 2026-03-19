@@ -675,14 +675,24 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         throw Exception('Session expired. Please login again.');
       }
 
-      print('🤖 Creating bot with broker credential: ${_brokerService.activeCredential?.credentialId}');
-      print('   Broker: ${_brokerService.activeCredential?.broker}');
-      print('   Account: ${_brokerService.activeCredential?.accountNumber}');
+      // 🔴 FIX: Null-safe credential verification
+      final credential = _brokerService.activeCredential;
+      if (credential == null) {
+        throw Exception('Broker credential lost. Please setup broker integration again.');
+      }
+      
+      if (credential.credentialId == null || credential.credentialId.isEmpty) {
+        throw Exception('Invalid broker credential. Please setup broker integration again.');
+      }
+
+      print('🤖 Creating bot with broker credential: ${credential.credentialId}');
+      print('   Broker: ${credential.broker}');
+      print('   Account: ${credential.accountNumber}');
 
       // STEP 2: Create bot with credential_id
       final botPayload = {
         'botId': _botIdController.text,
-        'credentialId': _brokerService.activeCredential!.credentialId, // ✅ Link to broker credential
+        'credentialId': credential.credentialId, // ✅ Safe null-checked credential reference
         'symbols': _selectedSymbols,
         'strategy': _selectedStrategy,
         'riskPerTrade': double.parse(_riskPerTradeController.text),
@@ -735,11 +745,16 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         print('✅ Bot started, trades placed: ${data['tradesPlaced']}');
         print('💰 Commission tracking enabled for this bot');
 
+        // 🔴 FIX: Null-safe credential display in success message
+        final credential = _brokerService.activeCredential;
+        final brokerName = credential?.broker ?? 'Unknown';
+        final accountNum = credential?.accountNumber ?? 'N/A';
+        
         setState(() {
           _successMessage =
               'Bot created and started! 🎉\n'
-              'Broker: ${_brokerService.activeCredential?.broker}\n'
-              'Account: ${_brokerService.activeCredential?.accountNumber}\n'
+              'Broker: $brokerName\n'
+              'Account: $accountNum\n'
               '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n'
               'Trades placed: ${data['tradesPlaced']}\n\n'
               '💰 Commissions will be tracked on every trade.\n'
@@ -1902,35 +1917,35 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Commission Withdrawal Automation Button (auto-select IG/XM Global)
+                // Commission Withdrawal Automation Button (auto-select XM Global)
                 ElevatedButton.icon(
                   onPressed: () async {
                     final amount = await _showAmountInputDialog(context, title: 'Commission Withdrawal Amount');
                     if (amount != null) {
-                      // Auto-select IG or XM Global account
-                      BrokerCredential? igXmAccount;
+                      // Auto-select XM Global account for withdrawal
+                      BrokerCredential? xmAccount;
                       try {
-                        igXmAccount = _brokerService.credentials.firstWhere(
-                          (cred) => cred.broker.toLowerCase().contains('ig') || cred.broker.toLowerCase().contains('xm'),
+                        xmAccount = _brokerService.credentials.firstWhere(
+                          (cred) => cred.broker.toLowerCase().contains('xm'),
                         );
                       } catch (_) {
-                        igXmAccount = null;
+                        xmAccount = null;
                       }
-                      if (igXmAccount == null) {
+                      if (xmAccount == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('No IG or XM Global account found for withdrawal.')),
+                          const SnackBar(content: Text('No XM Global account found for withdrawal.')),
                         );
                         return;
                       }
-                      // Optionally, trigger fund transfer to IG/XM account
+                      // Trigger fund transfer to XM account
                       final fromAccount = _brokerService.activeCredential?.accountNumber;
-                      final toAccount = igXmAccount.accountNumber;
+                      final toAccount = xmAccount.accountNumber;
                       final fundSuccess = await _fundService.transferFunds(fromAccount ?? '', toAccount, amount);
                       if (fundSuccess) {
                         final success = await _commissionService.requestWithdrawal(amount);
                         if (success) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Commission withdrawal sent to IG/XM Global account!')),
+                            SnackBar(content: Text('Commission withdrawal sent to XM Global account!')),
                           );
                         } else {
                           ScaffoldMessenger.of(context).showSnackBar(
