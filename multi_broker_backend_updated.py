@@ -4309,7 +4309,17 @@ def get_account_balances():
     
     Returns unified account summary with balances from all integrated brokers.
     This is what displays in the dashboard showing real broker balances.
+    
+    IMPORTANT: Uses a 5-second timeout per broker to prevent dashboard reload loops.
+    If a broker connection times out, returns partial data rather than failing.
     """
+    import signal
+    import threading
+    
+    def timeout_handler():
+        """Handler for connection timeout"""
+        pass
+    
     try:
         user_id = request.user_id
         conn = get_db_connection()
@@ -4333,7 +4343,7 @@ def get_account_balances():
             'brokers': {},  # Grouped by broker: {Exness: {...}, XM: {...}, Binance: {...}}
         }
         
-        # Fetch balance from each broker
+        # Fetch balance from each broker with timeout protection
         for cred in credentials:
             broker_name = canonicalize_broker_name(cred['broker_name'])
             account_num = cred['account_number']
@@ -4342,71 +4352,140 @@ def get_account_balances():
             
             account_info = None
             error_msg = None
+            timed_out = False
             
             try:
                 if broker_name == 'Exness':
-                    # Connect to Exness MT5
-                    mt5_conn = MT5Connection({
-                        'account': int(account_num) if account_num else 0,
-                        'password': cred['password'],
-                        'server': cred['server'] or ('Exness-Real' if is_live else 'Exness-MT5Trial9'),
-                    })
-                    if mt5_conn.connect():
-                        account_info = mt5_conn.get_account_info()
-                        mt5_conn.disconnect()
-                    else:
-                        error_msg = "Failed to connect to Exness MT5"
+                    # Connect to Exness MT5 with timeout
+                    try:
+                        mt5_conn = MT5Connection({
+                            'account': int(account_num) if account_num else 0,
+                            'password': cred['password'],
+                            'server': cred['server'] or ('Exness-Real' if is_live else 'Exness-MT5Trial9'),
+                        })
+                        # Use threading with timeout to prevent hanging
+                        result = [None]
+                        def connect_exness():
+                            if mt5_conn.connect():
+                                result[0] = mt5_conn.get_account_info()
+                            mt5_conn.disconnect()
+                        
+                        thread = threading.Thread(target=connect_exness, daemon=True)
+                        thread.start()
+                        thread.join(timeout=5)  # 5-second timeout
+                        
+                        if thread.is_alive():
+                            logger.warning(f"Exness balance fetch timed out for {account_num}")
+                            timed_out = True
+                            error_msg = "Connection timeout"
+                        else:
+                            account_info = result[0]
+                            if not account_info:
+                                error_msg = "Failed to connect to Exness MT5"
+                    except Exception as e:
+                        logger.warning(f"Exness balance error: {e}")
+                        error_msg = str(e)
                 
                 elif broker_name in ['XM', 'XM Global']:
-                    # Connect to XM Global MT5
-                    mt5_conn = MT5Connection({
-                        'account': int(account_num) if account_num else 0,
-                        'password': cred['password'],
-                        'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'),
-                    })
-                    if mt5_conn.connect():
-                        account_info = mt5_conn.get_account_info()
-                        mt5_conn.disconnect()
-                    else:
-                        error_msg = "Failed to connect to XM MT5"
+                    # Connect to XM Global MT5 with timeout
+                    try:
+                        mt5_conn = MT5Connection({
+                            'account': int(account_num) if account_num else 0,
+                            'password': cred['password'],
+                            'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'),
+                        })
+                        result = [None]
+                        def connect_xm():
+                            if mt5_conn.connect():
+                                result[0] = mt5_conn.get_account_info()
+                            mt5_conn.disconnect()
+                        
+                        thread = threading.Thread(target=connect_xm, daemon=True)
+                        thread.start()
+                        thread.join(timeout=5)  # 5-second timeout
+                        
+                        if thread.is_alive():
+                            logger.warning(f"XM balance fetch timed out for {account_num}")
+                            timed_out = True
+                            error_msg = "Connection timeout"
+                        else:
+                            account_info = result[0]
+                            if not account_info:
+                                error_msg = "Failed to connect to XM MT5"
+                    except Exception as e:
+                        logger.warning(f"XM balance error: {e}")
+                        error_msg = str(e)
                 
                 elif broker_name == 'Binance':
-                    # Connect to Binance API
-                    binance_conn = BinanceConnection({
-                        'api_key': cred['api_key'],
-                        'api_secret': cred['password'],
-                        'account_number': account_num,
-                        'is_live': is_live,
-                    })
-                    if binance_conn.connect():
-                        # Get Binance balance
-                        balance_info = binance_conn.get_balance()
-                        account_info = {
-                            'accountNumber': account_num,
-                            'balance': balance_info.get('balance', 0),
-                            'equity': balance_info.get('balance', 0),  # Binance only has balance, not equity
-                            'marginFree': balance_info.get('available', 0),
-                            'currency': balance_info.get('currency', 'USDT'),
-                            'displayCurrency': balance_info.get('currency', 'USDT'),
-                            'broker': 'Binance',
-                            'leverage': 1,
-                        }
-                        binance_conn.disconnect()
-                    else:
-                        error_msg = "Failed to connect to Binance API"
+                    # Connect to Binance API with timeout
+                    try:
+                        binance_conn = BinanceConnection({
+                            'api_key': cred['api_key'],
+                            'api_secret': cred['password'],
+                            'account_number': account_num,
+                            'is_live': is_live,
+                        })
+                        result = [None]
+                        def connect_binance():
+                            if binance_conn.connect():
+                                balance_info = binance_conn.get_balance()
+                                result[0] = {
+                                    'accountNumber': account_num,
+                                    'balance': balance_info.get('balance', 0),
+                                    'equity': balance_info.get('balance', 0),
+                                    'marginFree': balance_info.get('available', 0),
+                                    'currency': balance_info.get('currency', 'USDT'),
+                                    'displayCurrency': balance_info.get('currency', 'USDT'),
+                                    'broker': 'Binance',
+                                    'leverage': 1,
+                                }
+                            binance_conn.disconnect()
+                        
+                        thread = threading.Thread(target=connect_binance, daemon=True)
+                        thread.start()
+                        thread.join(timeout=5)  # 5-second timeout
+                        
+                        if thread.is_alive():
+                            logger.warning(f"Binance balance fetch timed out for {account_num}")
+                            timed_out = True
+                            error_msg = "Connection timeout"
+                        else:
+                            account_info = result[0]
+                            if not account_info:
+                                error_msg = "Failed to connect to Binance API"
+                    except Exception as e:
+                        logger.warning(f"Binance balance error: {e}")
+                        error_msg = str(e)
                 
                 else:
-                    # Generic MT5 fallback
-                    mt5_conn = MT5Connection({
-                        'account': int(account_num) if account_num else 0,
-                        'password': cred['password'],
-                        'server': cred['server'] or 'MetaQuotes-Demo',
-                    })
-                    if mt5_conn.connect():
-                        account_info = mt5_conn.get_account_info()
-                        mt5_conn.disconnect()
-                    else:
-                        error_msg = "Failed to connect to MT5"
+                    # Generic MT5 fallback with timeout
+                    try:
+                        mt5_conn = MT5Connection({
+                            'account': int(account_num) if account_num else 0,
+                            'password': cred['password'],
+                            'server': cred['server'] or 'MetaQuotes-Demo',
+                        })
+                        result = [None]
+                        def connect_mt5():
+                            if mt5_conn.connect():
+                                result[0] = mt5_conn.get_account_info()
+                            mt5_conn.disconnect()
+                        
+                        thread = threading.Thread(target=connect_mt5, daemon=True)
+                        thread.start()
+                        thread.join(timeout=5)  # 5-second timeout
+                        
+                        if thread.is_alive():
+                            logger.warning(f"MT5 balance fetch timed out for {account_num}")
+                            timed_out = True
+                            error_msg = "Connection timeout"
+                        else:
+                            account_info = result[0]
+                            if not account_info:
+                                error_msg = "Failed to connect to MT5"
+                    except Exception as e:
+                        logger.warning(f"MT5 balance error: {e}")
+                        error_msg = str(e)
                 
             except Exception as e:
                 logger.warning(f"Error fetching balance from {broker_name} account {account_num}: {e}")

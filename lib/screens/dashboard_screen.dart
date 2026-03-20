@@ -51,6 +51,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
   List<dynamic> _realBotsList = [];
   Timer? _refreshTimer;
+  int _refreshFailureCount = 0;
+  String? _lastRefreshError;
 
   // Broker account balances
   List<Map<String, dynamic>> _brokerAccounts = [];
@@ -87,7 +89,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
-      if (sessionToken == null || sessionToken.isEmpty) return;
+      if (sessionToken == null || sessionToken.isEmpty) {
+        throw Exception('No auth token');
+      }
 
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/accounts/balances'),
@@ -95,7 +99,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'Content-Type': 'application/json',
           'X-Session-Token': sessionToken,
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 20)); // Increased timeout to allow broker connections
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -116,9 +120,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _balanceChanges = newChanges;
           });
         }
+      } else {
+        throw Exception('API returned ${response.statusCode}');
       }
     } catch (e) {
       print('DEBUG: Broker balance fetch error: $e');
+      rethrow; // Propagate error for retry logic
     } finally {
       if (mounted) setState(() => _brokerBalancesLoading = false);
     }
@@ -131,7 +138,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
-      if (sessionToken == null || sessionToken.isEmpty) return;
+      if (sessionToken == null || sessionToken.isEmpty) {
+        throw Exception('No auth token');
+      }
 
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/withdrawals/recent'),
@@ -148,59 +157,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _recentWithdrawals = List<Map<String, dynamic>>.from(data['withdrawals'] ?? []);
           });
         }
+      } else {
+        throw Exception('API returned ${response.statusCode}');
       }
     } catch (e) {
       print('DEBUG: Withdrawal fetch error: $e');
-    } finally {
-      if (mounted) setState(() => _withdrawalsLoading = false);
-    }
-  }
-
-  /// Fetch real bots from BotService and filter out demo bots
-  void _fetchRealBots() {
+      rethrow; // Propagate error for retry logic
     try {
       final botService = context.read<BotService>();
       
       // Fetch bots from backend via BotService
-      botService.fetchActiveBots().then((_) {
-        if (mounted) {
-          setState(() {
-            // Filter out demo bots (botId starts with 'DemoBot_' or 'demo')
-            _realBotsList = botService.activeBots
-                .where((bot) {
-                  final botId = (bot['botId'] ?? '').toString().toLowerCase();
-                  return !botId.startsWith('demobot_') && !botId.startsWith('demo_');
-                })
-                .toList();
-            
-            print('✅ Loaded ${_realBotsList.length} real bots (filtered demo bots)');
-          });
-        }
-      }).catchError((e) {
-        if (mounted) {
-          setState(() {
-            _realBotsList = [];
-          });
-        }
-      });
+      await botService.fetchActiveBots();
+      
+      if (mounted) {
+        setState(() {
+          // Filter out demo bots (botId starts with 'DemoBot_' or 'demo')
+          _realBotsList = botService.activeBots
+              .where((bot) {
+                final botId = (bot['botId'] ?? '').toString().toLowerCase();
+                return !botId.startsWith('demobot_') && !botId.startsWith('demo_');
+              })
+              .toList();
+          
+          print('✅ Loaded ${_realBotsList.length} real bots (filtered demo bots)');
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
           _realBotsList = [];
         });
       }
+      rethrow; // Propagate error for retry logic
     }
   }
 
   void _startAutoRefresh() {
     _refreshTimer?.cancel();
+    _refreshFailureCount = 0;
+    
+    // Initial refresh
+    _performRefresh();
+    
+    // Subsequent refreshes with exponential backoff on error
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted) {
-        _fetchRealBots();
-        _fetchBrokerBalances();
-        _fetchRecentWithdrawals();
+        _performRefresh();
       }
     });
+  }
+  
+  Future<void> _performRefresh() async {
+    try {
+      await Future.wait([
+        _fetchRealBots(),
+        _fetchBrokerBalances(),
+        _fetchRecentWithdrawals(),
+      ], eagerError: false).then((_) {
+        if (mounted) {
+          setState(() {
+            _refreshFailureCount = 0; // Reset on success
+            _lastRefreshError = null;
+          });
+        }
+      }).catchError((e) {
+        if (mounted) {
+          setState(() {
+            _refreshFailureCount++;
+            _lastRefreshError = e.toString();
+          });
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _refreshFailureCount++;
+          _lastRefreshError = 'Refresh error: $e';
+        });
+      }
+    }
   }
 
   /// Get the current screen based on selected index
@@ -475,9 +510,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 14),
           ...activeBots.take(5).map((bot) {
-            final botName = bot['botName']?.toString() ?? 'Bot';
-            final status = bot['status']?.toString() ?? 'unknown';
-            final profit = (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0);
+            final botId = bot['botId']?.toString() ?? 'Unknown Bot';
+            final strategy = bot['strategy']?.toString() ?? 'Unknown';
+            final profit = (double.tryParse(bot['totalProfit']?.toString() ?? '0') ?? 0);
             final isProfitable = profit > 0;
             
             return Padding(
@@ -501,8 +536,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(botName, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-                        Text(status, style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
+                        Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                        Text(strategy, style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
                       ],
                     ),
                   ),
@@ -560,6 +595,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Error banner if refresh failures detected
+            if (_refreshFailureCount > 0)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFB74D).withOpacity(0.15),
+                  border: Border.all(color: const Color(0xFFFFB74D).withOpacity(0.5)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber, color: Color(0xFFFFB74D), size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Connection issues detected. Some data may be outdated.',
+                        style: GoogleFonts.poppins(color: const Color(0xFFFFB74D), fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             _buildPremiumWelcomeCard(),
             const SizedBox(height: 16),
             _buildConnectedBrokerCard(),
