@@ -163,6 +163,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (e) {
       print('DEBUG: Withdrawal fetch error: $e');
       rethrow; // Propagate error for retry logic
+    } finally {
+      if (mounted) setState(() => _withdrawalsLoading = false);
+    }
+  }
+
+  /// Fetch real bots from BotService and filter out demo bots
+  Future<void> _fetchRealBots() async {
     try {
       final botService = context.read<BotService>();
       
@@ -209,30 +216,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   
   Future<void> _performRefresh() async {
     try {
-      await Future.wait([
+      await Future.wait<void>([
         _fetchRealBots(),
         _fetchBrokerBalances(),
         _fetchRecentWithdrawals(),
-      ], eagerError: false).then((_) {
-        if (mounted) {
-          setState(() {
-            _refreshFailureCount = 0; // Reset on success
-            _lastRefreshError = null;
-          });
-        }
-      }).catchError((e) {
-        if (mounted) {
-          setState(() {
-            _refreshFailureCount++;
-            _lastRefreshError = e.toString();
-          });
-        }
-      });
+      ], eagerError: false);
+      
+      if (mounted) {
+        setState(() {
+          _refreshFailureCount = 0; // Reset on success
+          _lastRefreshError = null;
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
           _refreshFailureCount++;
-          _lastRefreshError = 'Refresh error: $e';
+          _lastRefreshError = e.toString();
         });
       }
     }
