@@ -1821,7 +1821,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'icon': Icons.attach_money,
         'color': const Color(0xFFFF6E40),
         'route': '/financials',
-        'screen': const FinancialsScreen(),
+        'screen': null,
       },
     ];
 
@@ -1848,13 +1848,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final label = action['label'] as String;
             final icon = action['icon'] as IconData;
             final color = action['color'] as Color;
-            final screen = action['screen'] as Widget;
+            final screen = action['screen'] as Widget?;
+            final route = action['route'] as String;
 
             return InkWell(
               onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => screen),
-                );
+                if (screen != null) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => screen),
+                  );
+                } else if (route == '/financials') {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Go to Accounts tab to manage financial reports', 
+                        style: GoogleFonts.poppins(color: Colors.white)),
+                      backgroundColor: const Color(0xFFFF6E40),
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
               },
               child: Container(
                 decoration: BoxDecoration(
