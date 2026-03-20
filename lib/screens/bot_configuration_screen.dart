@@ -12,6 +12,7 @@ import '../services/fund_service.dart';
 import '../widgets/logo_widget.dart';
 import 'bot_dashboard_screen.dart';
 import 'broker_integration_screen.dart';
+import 'dashboard_screen.dart';
 
 class BotConfigurationScreen extends StatefulWidget {
   const BotConfigurationScreen({Key? key}) : super(key: key);
@@ -782,13 +783,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
         // Navigate to dashboard immediately after refresh
         if (mounted) {
-          Navigator.of(context).pushReplacementNamed(
-            '/dashboard',
-            arguments: {
-              'botCreated': true,
-              'botId': _botIdController.text,
-              'message': '✅ Bot "${_botIdController.text}" created and running!',
-            },
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (context) => const DashboardScreen()),
           );
         }
       } else {

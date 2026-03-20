@@ -514,42 +514,199 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final strategy = bot['strategy']?.toString() ?? 'Unknown';
             final profit = (double.tryParse(bot['totalProfit']?.toString() ?? '0') ?? 0);
             final isProfitable = profit > 0;
+            final status = bot['status']?.toString() ?? 'running';
             
             return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.15) : const Color(0xFFFF8A80).withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.smart_toy,
-                      color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.06),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Bot info header
+                    Row(
                       children: [
-                        Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-                        Text(strategy, style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.15) : const Color(0xFFFF8A80).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.smart_toy,
+                            color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                              Text(strategy, style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '\$${profit.toStringAsFixed(2)}',
+                          style: GoogleFonts.poppins(
+                            color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                  Text(
-                    '\$${profit.toStringAsFixed(2)}',
-                    style: GoogleFonts.poppins(
-                      color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(height: 12),
+                    // Action buttons row
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        // Start button
+                        Expanded(
+                          child: Consumer<BotService>(
+                            builder: (context, botService, _) {
+                              return InkWell(
+                                onTap: () async {
+                                  try {
+                                    await botService.startBotTrading(botId);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Bot $botId started'), duration: const Duration(seconds: 2)),
+                                    );
+                                    _performRefresh();
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Error: $e'), duration: const Duration(seconds: 3)),
+                                    );
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF69F0AE).withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF69F0AE).withOpacity(0.5)),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.play_arrow, color: Color(0xFF69F0AE), size: 16),
+                                      const SizedBox(width: 4),
+                                      Text('Start', style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 12, fontWeight: FontWeight.w500)),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Analytics button
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              // Navigate to Bots tab for full analytics
+                              Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00E5FF).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.bar_chart, color: Color(0xFF00E5FF), size: 16),
+                                  const SizedBox(width: 4),
+                                  Text('Analytics', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.w500)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Delete button
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: Text('Delete Bot?', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  backgroundColor: const Color(0xFF1A1F3A),
+                                  content: Text('Are you sure you want to delete bot $botId?', style: GoogleFonts.poppins(color: Colors.white70)),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white54)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () async {
+                                        Navigator.pop(ctx);
+                                        try {
+                                          // Call backend API to delete bot
+                                          final prefs = await SharedPreferences.getInstance();
+                                          final token = prefs.getString('authToken') ?? '';
+                                          
+                                          final response = await http.post(
+                                            Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/delete'),
+                                            headers: {
+                                              'Content-Type': 'application/json',
+                                              'Authorization': 'Bearer $token',
+                                            },
+                                            body: jsonEncode({'botId': botId}),
+                                          );
+                                          
+                                          if (response.statusCode == 200) {
+                                            _performRefresh();
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Bot $botId deleted'), duration: const Duration(seconds: 2)),
+                                            );
+                                          } else {
+                                            throw 'Failed to delete bot';
+                                          }
+                                        } catch (e) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('Error: $e'), duration: const Duration(seconds: 3)),
+                                          );
+                                        }
+                                      },
+                                      child: Text('Delete', style: GoogleFonts.poppins(color: const Color(0xFFFF8A80), fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF8A80).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFFF8A80).withOpacity(0.5)),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.delete, color: Color(0xFFFF8A80), size: 16),
+                                  const SizedBox(width: 4),
+                                  Text('Delete', style: GoogleFonts.poppins(color: const Color(0xFFFF8A80), fontSize: 12, fontWeight: FontWeight.w500)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           }).toList(),
@@ -639,6 +796,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _buildTopPairsCard(),
             const SizedBox(height: 20),
             _buildRecentTradesCard(),
+            const SizedBox(height: 24),
+            _buildQuickActionsGrid(),
             const SizedBox(height: 20),
             _buildRecentBotsCard(),
             const SizedBox(height: 16),
@@ -1616,6 +1775,139 @@ class _DashboardScreenState extends State<DashboardScreen> {
             }),
         ],
       ),
+    );
+  }
+
+  // ── QUICK ACTIONS GRID ──
+  Widget _buildQuickActionsGrid() {
+    final actions = [
+      {
+        'label': 'Create\nBot',
+        'icon': Icons.add_circle,
+        'color': const Color(0xFF00C853),
+        'route': '/bot-configuration',
+        'screen': const BotConfigurationScreen(),
+      },
+      {
+        'label': 'Bot\nMonitor',
+        'icon': Icons.trending_up,
+        'color': const Color(0xFFFFB74D),
+        'route': '/bot-dashboard',
+        'screen': const BotDashboardScreen(),
+      },
+      {
+        'label': 'Trade\nAnalysis',
+        'icon': Icons.bar_chart,
+        'color': const Color(0xFF00E5FF),
+        'route': '/trade-analysis',
+        'screen': const TradeAnalysisScreen(),
+      },
+      {
+        'label': 'Broker\nSetup',
+        'icon': Icons.settings,
+        'color': const Color(0xFF7C4DFF),
+        'route': '/broker-integration',
+        'screen': const BrokerIntegrationScreen(),
+      },
+      {
+        'label': 'Bot\nManager',
+        'icon': Icons.cloud,
+        'color': const Color(0xFFB388FF),
+        'route': '/multi-broker-management',
+        'screen': const MultiBrokerManagementScreen(),
+      },
+      {
+        'label': 'Financials',
+        'icon': Icons.attach_money,
+        'color': const Color(0xFFFF6E40),
+        'route': '/financials',
+        'screen': const FinancialsScreen(),
+      },
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Quick Actions',
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 14),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1.0,
+          ),
+          itemCount: actions.length,
+          itemBuilder: (context, index) {
+            final action = actions[index];
+            final label = action['label'] as String;
+            final icon = action['icon'] as IconData;
+            final color = action['color'] as Color;
+            final screen = action['screen'] as Widget;
+
+            return InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => screen),
+                );
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      color.withOpacity(0.25),
+                      color.withOpacity(0.08),
+                    ],
+                  ),
+                  border: Border.all(color: color.withOpacity(0.3)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withOpacity(0.15),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color.withOpacity(0.2),
+                      ),
+                      child: Icon(
+                        icon,
+                        color: color,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 

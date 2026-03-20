@@ -13,6 +13,9 @@ import '../services/broker_credentials_service.dart';
 import '../widgets/logo_widget.dart';
 import '../models/broker_connection_model.dart';
 import 'broker_analytics_dashboard.dart';
+import 'bot_configuration_screen.dart';
+import 'bot_dashboard_screen.dart';
+import 'dashboard_screen.dart';
 
 class BrokerIntegrationScreen extends StatefulWidget {
   final VoidCallback? onBackPressed;
@@ -460,7 +463,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          if (_showSuccess)
+          if (_showSuccess) ...[
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -480,7 +483,104 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                 ],
               ),
             ),
-          const SizedBox(height: 20),
+            const SizedBox(height: 24),
+            // ✅ Quick Action Buttons After Successful Connection
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF1A237E).withOpacity(0.5),
+                    const Color(0xFF0D47A1).withOpacity(0.5),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'What\'s Next?',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Create Bot Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const BotConfigurationScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.smart_toy),
+                      label: const Text('Create Trading Bot'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF7C4DFF),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // View Active Bots Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const BotDashboardScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.dashboard),
+                      label: const Text('View Active Bots'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+                        foregroundColor: const Color(0xFF00E5FF),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        side: const BorderSide(color: Color(0xFF00E5FF)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Go to Dashboard Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const DashboardScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.home),
+                      label: const Text('Go to Dashboard'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF69F0AE).withOpacity(0.15),
+                        foregroundColor: const Color(0xFF69F0AE),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        side: const BorderSide(color: Color(0xFF69F0AE)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
+          ] else
+            const SizedBox(height: 20),
           Text(
             _isBinanceBroker
                 ? 'Binance API Connection'

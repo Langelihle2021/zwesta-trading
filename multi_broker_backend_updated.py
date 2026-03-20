@@ -1355,15 +1355,19 @@ class MT5Connection(BrokerConnection):
         """
         Connect to MT5 with retry logic and better error handling
         CRITICAL: Uses global lock to prevent simultaneous MT5 connections
+        OPTIMIZED: Reduced lock timeout and added exponential backoff for racing bots
         """
         global mt5_connection_lock
         
-        # Acquire lock with timeout to prevent indefinite hangs when multiple bots compete
-        logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max 30 seconds, sequential mode)...")
-        lock_acquired = mt5_connection_lock.acquire(timeout=30.0)  # Timeout after 30 seconds
+        # Acquire lock with timeout - REDUCED from 30s to 10s for balance checks
+        # Bot trading loop has its own retry logic, so short timeout is safer
+        lock_timeout = self.credentials.get('lock_timeout', 10)  # 10 seconds default
+        
+        logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max {lock_timeout} seconds, sequential mode)...")
+        lock_acquired = mt5_connection_lock.acquire(timeout=float(lock_timeout))
         
         if not lock_acquired:
-            logger.warning(f"⚠️ TIMEOUT: Could not acquire MT5 lock after 30 seconds - another bot may be stuck")
+            logger.warning(f"⚠️ TIMEOUT: Could not acquire MT5 lock after {lock_timeout} seconds - system is busy")
             logger.warning(f"   Skipping this trade cycle - will retry in {self.credentials.get('tradingInterval', 300)} seconds")
             return False  # Return False to signal connection failed, bot will retry next cycle
         
@@ -4311,7 +4315,7 @@ def get_account_balances():
     This is what displays in the dashboard showing real broker balances.
     
     IMPORTANT: Uses a 5-second timeout per broker to prevent dashboard reload loops.
-    If a broker connection times out, returns partial data rather than failing.
+    If a broker connection times out, returns cached balance from last successful fetch.
     """
     import signal
     import threading
@@ -4333,6 +4337,15 @@ def get_account_balances():
         ''', (user_id,))
         
         credentials = [dict(row) for row in cursor.fetchall()]
+        
+        # CRITICAL FIX: Fetch cached balances for fallback on timeout
+        cursor.execute('''
+            SELECT credential_id, cached_balance, cached_equity, cached_margin_free, last_update
+            FROM broker_credentials 
+            WHERE user_id = ? AND is_active = 1
+        ''', (user_id,))
+        
+        cached_data = {row['credential_id']: row for row in cursor.fetchall()}
         conn.close()
         
         accounts_summary = {
@@ -4501,12 +4514,14 @@ def get_account_balances():
             }
             
             if account_info:
+                # Fresh data from broker connection
                 account_entry.update({
                     'balance': account_info.get('balance', 0),
                     'equity': account_info.get('equity', account_info.get('balance', 0)),
                     'marginFree': account_info.get('marginFree', 0),
                     'currency': account_info.get('currency', 'USD'),
                     'connected': True,
+                    'dataSource': 'live',
                 })
                 # Add to broker group
                 if broker_name not in accounts_summary['brokers']:
@@ -4516,8 +4531,38 @@ def get_account_balances():
                 # Accumulate totals
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
+            elif timed_out and cred['credential_id'] in cached_data:
+                # CRITICAL FIX: Use cached balance on timeout instead of showing $0
+                cache = cached_data[cred['credential_id']]
+                cached_balance = cache.get('cached_balance', 0) or 0
+                cached_equity = cache.get('cached_equity', cached_balance) or 0
+                cached_margin = cache.get('cached_margin_free', 0) or 0
+                
+                account_entry.update({
+                    'balance': float(cached_balance),
+                    'equity': float(cached_equity),
+                    'marginFree': float(cached_margin),
+                    'currency': 'USD',
+                    'connected': False,
+                    'dataSource': 'cached',  # Indicates this is stale cache data
+                    'warning': 'Using last known balance (connection timeout)',
+                })
+                
+                # Add to broker group
+                if broker_name not in accounts_summary['brokers']:
+                    accounts_summary['brokers'][broker_name] = []
+                accounts_summary['brokers'][broker_name].append(account_entry)
+                
+                # Accumulate totals from cache (better than $0)
+                accounts_summary['totalBalance'] += account_entry['balance']
+                accounts_summary['totalEquity'] += account_entry['equity']
+                logger.info(f"✅ Using cached balance for {broker_name} account {account_num}: ${cached_balance:.2f}")
             else:
+                # No fresh data and no cached fallback
                 account_entry['connected'] = False
+                account_entry['balance'] = 0
+                account_entry['equity'] = 0
+                account_entry['dataSource'] = 'error'
                 if broker_name not in accounts_summary['brokers']:
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
