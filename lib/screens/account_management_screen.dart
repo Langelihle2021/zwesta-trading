@@ -83,10 +83,11 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         return SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Profile Header with Gradient Background
               Container(
+                width: double.infinity,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Colors.blue.withOpacity(0.15), Colors.purple.withOpacity(0.1)],
@@ -106,6 +107,8 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Center(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
                         width: 120,
@@ -134,6 +137,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                       const SizedBox(height: AppSpacing.md),
                       Text(
                         authService.currentUser?.fullName ?? 'User',
+                        textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.displaySmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.5,
@@ -142,6 +146,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                       const SizedBox(height: AppSpacing.sm),
                       Text(
                         authService.currentUser?.email ?? '',
+                        textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.white70,
                           fontSize: 13,
@@ -187,6 +192,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
 
               // Profile Form with Gradient Card
               Container(
+                width: double.infinity,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Colors.grey.shade900.withOpacity(0.9), Colors.grey.shade800.withOpacity(0.8)],
@@ -204,7 +210,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                   ],
                 ),
                 padding: const EdgeInsets.all(AppSpacing.lg),
-                child: _buildEditProfileForm(context, authService),
+                child: Center(
+                  child: _buildEditProfileForm(context, authService),
+                ),
               ),
             ],
           ),
@@ -222,35 +230,46 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         TextEditingController(text: authService.currentUser?.email);
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(
           'Edit Profile',
+          textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: firstNameController,
-          decoration: const InputDecoration(
-            labelText: 'First Name',
-            prefixIcon: Icon(Icons.person),
+        SizedBox(
+          width: double.infinity,
+          child: TextField(
+            controller: firstNameController,
+            decoration: const InputDecoration(
+              labelText: 'First Name',
+              prefixIcon: Icon(Icons.person),
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: lastNameController,
-          decoration: const InputDecoration(
-            labelText: 'Last Name',
-            prefixIcon: Icon(Icons.person),
+        SizedBox(
+          width: double.infinity,
+          child: TextField(
+            controller: lastNameController,
+            decoration: const InputDecoration(
+              labelText: 'Last Name',
+              prefixIcon: Icon(Icons.person),
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: emailController,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            prefixIcon: Icon(Icons.email),
+        SizedBox(
+          width: double.infinity,
+          child: TextField(
+            controller: emailController,
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              prefixIcon: Icon(Icons.email),
+            ),
+            keyboardType: TextInputType.emailAddress,
           ),
-          keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: AppSpacing.lg),
         Consumer<AuthService>(
@@ -531,7 +550,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Security Section Header
           Row(

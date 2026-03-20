@@ -1,0 +1,69 @@
+# Environment variables (credentials)
+.env
+.env.local
+.env.*.local
+
+# Flutter pubspec.lock
+pubspec.lock
+
+# Flutter build artifacts
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.jks
+
+# iOS
+ios/Pods/
+ios/Podfile.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.venv
+
+# Database backups
+*.db.gz
+backup_*.db.gz
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# APK builds
+*.apk
+*.aab
+
+# Generated files
+*.pb.dart
+*.g.dart
+
+# Temporary files
+*.tmp
+*.bak
+*.swp

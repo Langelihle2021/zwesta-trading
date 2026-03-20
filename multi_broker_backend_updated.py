@@ -97,6 +97,12 @@ BOT_STARTUP_RESTART_LIMIT = max(0, int(os.getenv('BOT_STARTUP_RESTART_LIMIT', '0
 # API Security Configuration
 API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production')
 
+# ==================== ENVIRONMENT MODE ====================
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'DEMO').upper()
+print(f"\n{'='*70}")
+print(f"[ENVIRONMENT] Current Mode: {ENVIRONMENT}")
+print(f"{'='*70}\n")
+
 # MT5 Credentials - DEMO (default)
 # Exness MT5 Configuration Only (NO standalone MT5 fallback)
 MT5_CONFIG = {
@@ -127,9 +133,9 @@ if MT5_CONFIG['path'] is None:
 # XM Global MT5 Configuration - Support DEMO and LIVE modes
 XM_CONFIG = {
     'broker': 'XM Global',
-    'account': int(os.getenv('XM_ACCOUNT', '12345678')),  # Demo account placeholder
+    'account': os.getenv('XM_ACCOUNT', ''),  # Will be set based on ENVIRONMENT
     'password': os.getenv('XM_PASSWORD', ''),
-    'server': os.getenv('XM_SERVER', 'XMGlobal-MT5Demo'),  # Demo server
+    'server': os.getenv('XM_SERVER', 'XMGlobal-MT5Demo'),  # Demo as default
     'path': None
 }
 
@@ -150,22 +156,95 @@ for path in xm_paths:
 if XM_CONFIG['path'] is None:
     logger.warning("⚠️  XM Global MT5 not found in common paths - ensure MetaTrader 5 is installed with XM credentials")
 
-# Exness Credentials - Support DEMO and LIVE modes
+# Binance Configuration - Support DEMO and LIVE modes
+BINANCE_CONFIG = {
+    'api_key': os.getenv('BINANCE_API_KEY', ''),
+    'api_secret': os.getenv('BINANCE_API_SECRET', ''),
+    'market': os.getenv('BINANCE_MARKET', 'spot'),
+    'is_live': False,  # Will be set based on ENVIRONMENT
+}
+
+# ==================== LIVE VS DEMO MODE CONFIGURATION ====================
 if ENVIRONMENT == 'LIVE':
-    MT5_CONFIG = {
-        'broker': 'Exness',
-        'account': int(os.getenv('EXNESS_ACCOUNT', '295619855')),  # Live account: 295619855
-        'password': os.getenv('EXNESS_PASSWORD', ''),  # Set via environment variable
-        'server': os.getenv('EXNESS_SERVER', 'Exness-Real'),  # Live server
-        'path': os.getenv('EXNESS_PATH', MT5_CONFIG.get('path'))
-    }
-    if not MT5_CONFIG['password']:
-        logger.error("[ALERT] LIVE MODE: EXNESS_PASSWORD environment variable not set!")
+    # LIVE MODE - Load from .env file
+    live_account = os.getenv('EXNESS_ACCOUNT', '').strip()
+    live_password = os.getenv('EXNESS_PASSWORD', '').strip()
+    live_server = os.getenv('EXNESS_SERVER', 'Exness-Real').strip()
+    
+    xm_account = os.getenv('XM_ACCOUNT', '').strip()
+    xm_password = os.getenv('XM_PASSWORD', '').strip()
+    xm_server = os.getenv('XM_SERVER', 'XMGlobal-Real').strip()
+    
+    binance_key = os.getenv('BINANCE_API_KEY', '').strip()
+    binance_secret = os.getenv('BINANCE_API_SECRET', '').strip()
+    
+    # EXNESS LIVE VALIDATION
+    if not live_account or not live_password:
+        print("\n" + "="*70)
+        print("❌ LIVE MODE: EXNESS CREDENTIALS MISSING!")
+        print("="*70)
+        print("Set in .env file:")
+        print("  EXNESS_ACCOUNT=your_account_number")
+        print("  EXNESS_PASSWORD=your_password")
+        print("="*70 + "\n")
+    else:
+        MT5_CONFIG = {
+            'broker': 'Exness',
+            'account': int(live_account),
+            'password': live_password,
+            'server': live_server,
+            'path': os.getenv('EXNESS_PATH') or None
+        }
+        logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}")
+    
+    # XM GLOBAL LIVE VALIDATION
+    if not xm_account or not xm_password:
+        logger.warning("[LIVE] ⚠️  XM Global credentials missing (optional)")
+    else:
+        XM_CONFIG = {
+            'broker': 'XM Global',
+            'account': int(xm_account),
+            'password': xm_password,
+            'server': xm_server,
+            'path': XM_CONFIG.get('path') or None
+        }
+        logger.info(f"[LIVE] ✅ XM GLOBAL - Account: {XM_CONFIG['account']}, Server: {xm_server}")
+    
+    # BINANCE LIVE VALIDATION
+    if not binance_key or not binance_secret:
+        logger.warning("[LIVE] ⚠️  Binance credentials missing (optional)")
+    else:
+        BINANCE_CONFIG['api_key'] = binance_key
+        BINANCE_CONFIG['api_secret'] = binance_secret
+        BINANCE_CONFIG['is_live'] = True
+        logger.info(f"[LIVE] ✅ BINANCE - Live mode enabled")
+    
+    print(f"\n{'='*70}")
+    print(f"[LIVE MODE ACTIVATED] 🔴 REAL MONEY TRADING")
+    print(f"{'='*70}")
+    print(f"EXNESS:    Account {live_account} | Server: {live_server}")
+    print(f"XM GLOBAL: Account {xm_account or 'NOT SET'} | Server: {xm_server}")
+    print(f"BINANCE:   {('Enabled' if binance_key else 'NOT SET')}")
+    print(f"{'='*70}\n")
+    logger.warning(f"[LIVE] 🔴 REAL MONEY TRADING ACTIVE - Verify all credentials before starting bots!")
+
 else:
-    # DEMO mode - uses default credentials above
+    # DEMO MODE (default)
+    print(f"{'='*70}")
+    print(f"[DEMO MODE] 🟢 USING DEMO ACCOUNTS (Safe for Testing)")
+    print(f"{'='*70}")
+    print(f"EXNESS:    Account 298997455 | Server: Exness-MT5Trial9")
+    print(f"XM GLOBAL: Demo account (check .env for XM_ACCOUNT if not using defaults)")
+    print(f"BINANCE:   Testnet mode (check .env for BINANCE_DEMO_API_KEY)")
+    print(f"{'='*70}")
+    print(f"\n📌 TO SWITCH TO LIVE MODE:")
+    print(f"   1. Edit .env file and set: ENVIRONMENT=LIVE")
+    print(f"   2. Update EXNESS_ACCOUNT, XM_ACCOUNT, BINANCE_API_KEY with YOUR credentials")
+    print(f"   3. Restart backend: python multi_broker_backend_updated.py")
+    print(f"   4. Check logs for: [LIVE] mode indicators\n")
+    
     logger.info(f"[DEMO] Using Exness demo credentials - Account: {MT5_CONFIG['account']}")
-    logger.info(f"[DEMO] Server: {MT5_CONFIG['server']}")
-    logger.info(f"[DEMO] Live account available at: 295619855 (set ENVIRONMENT=LIVE to use)")
+    logger.info(f"[DEMO] To trade live, set ENVIRONMENT=LIVE in .env and restart")
 
 # Removed: IG.com Broker Configuration (IG Markets integration removed)
 
@@ -3049,6 +3128,53 @@ def health():
         'status': 'ok',
         'service': 'Zwesta Multi-Broker Backend',
         'version': '2.0.0',
+        'timestamp': datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/environment', methods=['GET'])
+def get_environment_status():
+    """Get current trading environment mode and MT5 configuration
+    
+    Returns:
+    - environment: 'DEMO' or 'LIVE'
+    - account: MT5 account number
+    - server: MT5 server name
+    - broker: Broker name ('Exness')
+    - warning: Alert if in LIVE mode
+    - how_to_trade: Instructions for DEMO/LIVE verification
+    """
+    return jsonify({
+        'success': True,
+        'environment': ENVIRONMENT,
+        'account': MT5_CONFIG['account'],
+        'server': MT5_CONFIG['server'],
+        'broker': MT5_CONFIG['broker'],
+        'isLive': ENVIRONMENT == 'LIVE',
+        'warning': '🔴 LIVE MODE - REAL MONEY TRADING' if ENVIRONMENT == 'LIVE' else '🟢 DEMO MODE - Safe for Testing',
+        'how_to_verify': {
+            'demo_mode': {
+                'step1': 'Open Exness MT5 Demo Terminal',
+                'step2': 'Click Terminal → Trade History tab',
+                'step3': 'Look for bot trades matching execution times',
+                'step4': 'Trades should appear within 1-2 seconds of bot cycle'
+            },
+            'live_mode': {
+                'step1': 'Open Exness Portal (my.exness.com/account)',
+                'step2': 'Check Account → Trade History',
+                'step3': 'Or open Exness MT5 Live Terminal → Terminal → Trade History',
+                'step4': 'Trades should appear within 1-2 seconds of bot cycle'
+            }
+        },
+        'how_to_switch_to_live': {
+            'step1': 'Edit .env file in project root',
+            'step2': 'Set: ENVIRONMENT=LIVE',
+            'step3': 'Update: EXNESS_ACCOUNT=your_account_number',
+            'step4': 'Update: EXNESS_PASSWORD=your_password',
+            'step5': 'Restart backend: python multi_broker_backend_updated.py',
+            'step6': 'Check logs for: [LIVE] USING LIVE EXNESS CREDENTIALS',
+            'step7': 'Verify account in Exness terminal dropdown matches EXNESS_ACCOUNT'
+        },
         'timestamp': datetime.now().isoformat(),
     })
 

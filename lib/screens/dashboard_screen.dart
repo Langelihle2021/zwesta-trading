@@ -11,21 +11,14 @@ import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
 import '../services/trading_service.dart';
 import '../services/bot_service.dart';
-import '../services/pdf_service.dart';
 
 import '../providers/fallback_status_provider.dart';
-import '../models/account.dart';
-import '../utils/constants.dart';
 import '../utils/environment_config.dart';
-import '../widgets/custom_widgets.dart';
-import '../widgets/logo_widget.dart';
-import '../widgets/bot_status_indicator.dart';
 import 'trades_screen.dart';
 import 'trade_analysis_screen.dart';
 import 'account_management_screen.dart';
 import 'bot_dashboard_screen.dart';
 import 'bot_configuration_screen.dart';
-import 'bot_analytics_screen.dart';
 import 'broker_integration_screen.dart';
 import 'financials_screen.dart';
 import 'rentals_and_features_screen.dart';
@@ -38,7 +31,6 @@ import 'multi_broker_management_screen.dart';
 import 'enhanced_dashboard_screen.dart';
 import 'commission_dashboard_screen.dart';
 import 'broker_analytics_dashboard.dart';
-
 import 'oanda_withdrawal_screen.dart';
 import 'fxcm_withdrawal_screen.dart';
 import 'binance_withdrawal_screen.dart';
@@ -46,7 +38,7 @@ import 'admin_withdrawal_verification_screen.dart';
 import 'user_wallet_screen.dart';
 import 'unified_broker_dashboard_screen.dart';
 import 'crypto_strategies_screen.dart';
-import 'trade_history_screen.dart';
+import '../widgets/logo_widget.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -58,8 +50,6 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
   List<dynamic> _realBotsList = [];
-  bool _botsLoading = true;
-  String? _botsError;
   Timer? _refreshTimer;
 
   // Broker account balances
@@ -168,11 +158,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Fetch real bots from BotService and filter out demo bots
   void _fetchRealBots() {
-    setState(() {
-      _botsLoading = true;
-      _botsError = null;
-    });
-
     try {
       final botService = context.read<BotService>();
       
@@ -188,27 +173,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 })
                 .toList();
             
-            _botsError = botService.errorMessage;
-            _botsLoading = false;
-            
             print('✅ Loaded ${_realBotsList.length} real bots (filtered demo bots)');
           });
         }
       }).catchError((e) {
         if (mounted) {
           setState(() {
-            _botsError = 'Error fetching bots: $e';
             _realBotsList = [];
-            _botsLoading = false;
           });
         }
       });
     } catch (e) {
       if (mounted) {
         setState(() {
-          _botsError = 'Error loading bots: $e';
           _realBotsList = [];
-          _botsLoading = false;
         });
       }
     }
@@ -239,6 +217,331 @@ class _DashboardScreenState extends State<DashboardScreen> {
       default:
         return _buildDashboardTab();
     }
+  }
+
+  // ────── HELPER METHODS ──────
+
+  /// Build the connected broker account card showing balance and withdrawals
+  Widget _buildConnectedBrokerCard() {
+    // Find the first connected broker account (e.g., Exness)
+    final connected = _brokerAccounts.firstWhere(
+      (a) => a['connected'] == true,
+      orElse: () => <String, dynamic>{},
+    );
+    
+    if (connected.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    
+    final broker = connected['broker'] ?? 'Broker';
+    final accountId = connected['accountId']?.toString() ?? '';
+    final accountNum = connected['accountNumber']?.toString() ?? accountId;
+    final balance = (connected['balance'] as num?)?.toDouble() ?? 0.0;
+    final equity = (connected['equity'] as num?)?.toDouble() ?? 0.0;
+    final currency = connected['currency'] ?? 'USD';
+    final key = '${broker}_${accountNum}';
+    final balanceChange = _balanceChanges[key] ?? 0.0;
+    final isIncreasing = balanceChange >= 0;
+    
+    // Get recent withdrawals for this account
+    final accountWithdrawals = _recentWithdrawals
+        .where((w) => w['broker']?.toString() == broker && w['accountNumber']?.toString() == accountNum)
+        .toList();
+    final totalWithdrawn = accountWithdrawals.fold<double>(0, (sum, w) => sum + ((w['amount'] as num?)?.toDouble() ?? 0));
+    
+    return _glassCard(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          isIncreasing ? const Color(0xFF1B5E20).withOpacity(0.3) : const Color(0xFF4A235A).withOpacity(0.3),
+          Colors.transparent,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with broker icon
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00E5FF).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF), size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Connected to $broker',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      'Account #$accountNum',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white60,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          
+          // Balance and Equity
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                  Text(
+                    '$currency ${balance.toStringAsFixed(2)}',
+                    style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Equity', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                  Text(
+                    '$currency ${equity.toStringAsFixed(2)}',
+                    style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // Balance Change Indicator
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: isIncreasing ? const Color(0xFF1B5E20).withOpacity(0.2) : const Color(0xFF4A235A).withOpacity(0.2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isIncreasing ? Icons.trending_up : Icons.trending_down,
+                  color: isIncreasing ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isIncreasing ? 'Balance Increase' : 'Balance Decrease',
+                      style: GoogleFonts.poppins(color: Colors.white60, fontSize: 11),
+                    ),
+                    Text(
+                      '$currency ${balanceChange.abs().toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(
+                        color: isIncreasing ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          // Withdrawals Section
+          if (accountWithdrawals.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Recent Withdrawals', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
+                Text(
+                  'Total: $currency ${totalWithdrawn.toStringAsFixed(2)}',
+                  style: GoogleFonts.poppins(color: const Color(0xFFFFB74D), fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...accountWithdrawals.take(2).map((withdrawal) {
+              final amount = (withdrawal['amount'] as num?)?.toDouble() ?? 0;
+              final status = withdrawal['status']?.toString() ?? 'pending';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$currency ${amount.toStringAsFixed(2)}',
+                            style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                          Text(
+                            'Status: $status',
+                            style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _getWithdrawalStatusColor(status).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        status.toUpperCase(),
+                        style: GoogleFonts.poppins(
+                          color: _getWithdrawalStatusColor(status),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Get withdrawal status color based on status string
+  Color _getWithdrawalStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+      case 'approved':
+        return const Color(0xFF69F0AE);
+      case 'pending':
+        return const Color(0xFFFFB74D);
+      case 'failed':
+      case 'rejected':
+        return const Color(0xFFFF8A80);
+      default:
+        return Colors.white60;
+    }
+  }
+
+  /// Build recent bots card showing active trading bots
+  Widget _buildRecentBotsCard() {
+    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true).toList();
+    if (activeBots.isEmpty) {
+      return _glassCard(
+        child: Column(
+          children: [
+            Text('Active Bots',
+                style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 20),
+            const Icon(Icons.smart_toy, color: Colors.white24, size: 48),
+            const SizedBox(height: 8),
+            Text('No active bots', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Active Bots',
+                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+              Text('${activeBots.length} active',
+                  style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 13, fontWeight: FontWeight.w500)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...activeBots.take(5).map((bot) {
+            final botName = bot['botName']?.toString() ?? 'Bot';
+            final status = bot['status']?.toString() ?? 'unknown';
+            final profit = (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0);
+            final isProfitable = profit > 0;
+            
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.15) : const Color(0xFFFF8A80).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.smart_toy,
+                      color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(botName, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                        Text(status, style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '\$${profit.toStringAsFixed(2)}',
+                    style: GoogleFonts.poppins(
+                      color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  // ── GLASS CARD HELPER ──
+  Widget _glassCard({required Widget child, LinearGradient? gradient}) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: gradient,
+        color: gradient == null ? Colors.white.withOpacity(0.06) : null,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
   }
 
   /// Build the dashboard tab - Modern premium layout
@@ -284,246 +587,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
       ),
-    );
-    // ── CONNECTED BROKER CARD ──
-    Widget _buildConnectedBrokerCard() {
-      // Find the first connected broker account (e.g., Exness)
-      final connected = _brokerAccounts.firstWhere(
-        (a) => a['connected'] == true,
-        orElse: () => null,
-      );
-      if (connected == null) {
-        return SizedBox.shrink();
-      }
-      final broker = connected['broker'] ?? 'Broker';
-      final accountId = connected['accountId']?.toString() ?? '';
-      final accountNum = connected['accountNumber']?.toString() ?? accountId;
-      final balance = (connected['balance'] as num?)?.toDouble() ?? 0.0;
-      final equity = (connected['equity'] as num?)?.toDouble() ?? 0.0;
-      final currency = connected['currency'] ?? 'USD';
-      final key = '${broker}_${accountNum}';
-      final balanceChange = _balanceChanges[key] ?? 0.0;
-      final isIncreasing = balanceChange >= 0;
-      
-      // Get recent withdrawals for this account
-      final accountWithdrawals = _recentWithdrawals
-          .where((w) => w['broker']?.toString() == broker && w['accountNumber']?.toString() == accountNum)
-          .toList();
-      final totalWithdrawn = accountWithdrawals.fold<double>(0, (sum, w) => sum + ((w['amount'] as num?)?.toDouble() ?? 0));
-      
-      return _glassCard(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            isIncreasing ? Color(0xFF1B5E20).withOpacity(0.3) : Color(0xFF4A235A).withOpacity(0.3),
-            Colors.transparent,
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header with broker icon
-            Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Color(0xFF00E5FF).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF), size: 28),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Connected to $broker',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        'Account #$accountNum',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white60,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            
-            // Balance and Equity
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-                    Text(
-                      '$currency ${balance.toStringAsFixed(2)}',
-                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Equity', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-                    Text(
-                      '$currency ${equity.toStringAsFixed(2)}',
-                      style: GoogleFonts.poppins(color: Color(0xFF69F0AE), fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // Balance Change Indicator
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: isIncreasing ? Color(0xFF1B5E20).withOpacity(0.2) : Color(0xFF4A235A).withOpacity(0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isIncreasing ? Icons.trending_up : Icons.trending_down,
-                    color: isIncreasing ? Color(0xFF69F0AE) : Color(0xFFFF8A80),
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        isIncreasing ? 'Balance Increase' : 'Balance Decrease',
-                        style: GoogleFonts.poppins(color: Colors.white60, fontSize: 11),
-                      ),
-                      Text(
-                        '$currency ${balanceChange.abs().toStringAsFixed(2)}',
-                        style: GoogleFonts.poppins(
-                          color: isIncreasing ? Color(0xFF69F0AE) : Color(0xFFFF8A80),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            
-            // Withdrawals Section
-            if (accountWithdrawals.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Recent Withdrawals', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
-                  Text(
-                    'Total: $currency ${totalWithdrawn.toStringAsFixed(2)}',
-                    style: GoogleFonts.poppins(color: Color(0xFFFFB74D), fontSize: 12, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              ...accountWithdrawals.take(2).map((withdrawal) {
-                final amount = (withdrawal['amount'] as num?)?.toDouble() ?? 0;
-                final status = withdrawal['status']?.toString() ?? 'pending';
-                final date = withdrawal['date']?.toString() ?? '';
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '$currency ${amount.toStringAsFixed(2)}',
-                              style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
-                            ),
-                            Text(
-                              'Status: $status',
-                              style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _getWithdrawalStatusColor(status).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          status.toUpperCase(),
-                          style: GoogleFonts.poppins(
-                            color: _getWithdrawalStatusColor(status),
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ],
-          ],
-        ),
-      );
-    }
-    
-    // Helper method to get withdrawal status color
-    Color _getWithdrawalStatusColor(String status) {
-      switch (status.toLowerCase()) {
-        case 'completed':
-        case 'approved':
-          return Color(0xFF69F0AE);
-        case 'pending':
-          return Color(0xFFFFB74D);
-        case 'failed':
-        case 'rejected':
-          return Color(0xFFFF8A80);
-        default:
-          return Colors.white60;
-      }
-    }
-  }
-
-  // ── GLASS CARD HELPER ──
-  Widget _glassCard({required Widget child, LinearGradient? gradient}) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: gradient,
-        color: gradient == null ? Colors.white.withOpacity(0.06) : null,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: child,
     );
   }
 
@@ -662,59 +725,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       },
     );
   }
-
-  // ── EXNESS MT5 ACCOUNT STATUS ──
-  // IG Markets integration removed
-
-  /// Fetch Exness account info from backend via MT5
-  Future<Map<String, dynamic>> _fetchExnessAccountInfo() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        throw Exception('No authentication token available');
-      }
-
-      final response = await http.get(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/account'),
-        headers: {
-          'X-Session-Token': token,
-          'Content-Type': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true) {
-          return {
-            'accountId': data['accountId']?.toString() ?? 'Unknown',
-            'balance': (data['balance'] as num?)?.toDouble() ?? 0.0,
-            'equity': (data['equity'] as num?)?.toDouble() ?? 0.0,
-            'margin': (data['margin'] as num?)?.toDouble() ?? 0.0,
-            'marginFree': (data['marginFree'] as num?)?.toDouble() ?? 0.0,
-            'marginLevel': (data['marginLevel'] as num?)?.toDouble() ?? 0.0,
-            'currency': data['currency']?.toString() ?? 'USD',
-            'leverage': data['leverage']?.toString() ?? '1:1',
-            'accountType': data['accountType']?.toString() ?? 'DEMO',
-            'profitLoss': (data['profitLoss'] as num?)?.toDouble() ?? 0.0,
-          };
-        } else {
-          throw Exception(data['error'] ?? 'Backend returned error');
-        }
-      } else if (response.statusCode == 400) {
-        // No credentials saved yet
-        final data = jsonDecode(response.body);
-        throw Exception(data['error'] ?? 'Exness account not connected');
-      } else {
-        throw Exception('Server error: HTTP ${response.statusCode}');
-      }
-    } catch (e) {
-      print('DEBUG: Exness account fetch error: $e');
-      throw Exception('Cannot fetch Exness account: $e');
-    }
-  }
-
-  // IG Markets integration removed
 
   // ── BROKER ACCOUNTS CARD ──
   Widget _buildBrokerAccountsCard() {
@@ -1551,83 +1561,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ── QUICK ACTIONS ──
-  Widget _buildQuickActionsGrid() {
-    final actions = [
-      _QuickAction('Create Bot', Icons.add_circle_outline, const Color(0xFF69F0AE), () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const BotConfigurationScreen()));
-      }),
-      _QuickAction('Bot Monitor', Icons.insights, const Color(0xFFFFD600), () {
-        setState(() => _selectedIndex = 3);
-      }),
-      _QuickAction('Trade History', Icons.history, const Color(0xFF00E5FF), () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeHistoryScreen()));
-      }),
-      _QuickAction('Trade Analysis', Icons.analytics_outlined, const Color(0xFF00E5FF), () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeAnalysisScreen()));
-      }),
-      _QuickAction('Broker Setup', Icons.account_tree, const Color(0xFF7C4DFF), () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen()));
-      }),
-      _QuickAction('Bot Manager', Icons.smart_toy, const Color(0xFF7C4DFF), () {
-        setState(() => _selectedIndex = 3);
-      }),
-      _QuickAction('Financials', Icons.bar_chart, const Color(0xFFFF8A80), () {
-        final tradingService = context.read<TradingService>();
-        if (tradingService.primaryAccount != null) {
-          Navigator.push(context, MaterialPageRoute(
-            builder: (_) => FinancialsScreen(account: tradingService.primaryAccount!),
-          ));
-        }
-      }),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Text('Quick Actions',
-              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600)),
-        ),
-        GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.1,
-          children: actions.map((a) {
-            return GestureDetector(
-              onTap: a.onTap,
-              child: _glassCard(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: a.color.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(a.icon, color: a.color, size: 24),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      a.label,
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
@@ -2074,13 +2007,3 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 }
-
-class _QuickAction {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-  _QuickAction(this.label, this.icon, this.color, this.onTap);
-}
-
-
