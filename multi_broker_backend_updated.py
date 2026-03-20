@@ -955,6 +955,22 @@ def init_database():
         )
     ''')
 
+    # Migration: Add trade_data and timestamp columns to trades table if missing
+    cursor.execute("PRAGMA table_info(trades)")
+    trades_columns = [col[1] for col in cursor.fetchall()]
+    if 'trade_data' not in trades_columns:
+        try:
+            cursor.execute('ALTER TABLE trades ADD COLUMN trade_data TEXT')
+            logger.info("✅ Migration: Added trade_data column to trades")
+        except Exception as e:
+            logger.debug(f"trade_data column might already exist: {e}")
+    if 'timestamp' not in trades_columns:
+        try:
+            cursor.execute('ALTER TABLE trades ADD COLUMN timestamp INTEGER')
+            logger.info("✅ Migration: Added timestamp column to trades")
+        except Exception as e:
+            logger.debug(f"timestamp column might already exist: {e}")
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -6153,6 +6169,7 @@ PERSISTED_BOT_STATE_FIELDS = {
     'totalLosses',
     'totalProfit',
     'totalTrades',
+    'tradeHistory',
     'user_id',
     'volatilityLevel',
     'winningTrades',
@@ -6234,6 +6251,27 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     restored_symbols = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
     bot_state['symbols'] = validate_and_correct_symbols(restored_symbols, broker_name)
     bot_state['tradeHistory'] = bot_state.get('tradeHistory') or []
+    # If tradeHistory is empty after runtime restore, load from trades DB table
+    if not bot_state['tradeHistory']:
+        try:
+            tconn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
+            tconn.row_factory = sqlite3.Row
+            tcursor = tconn.cursor()
+            tcursor.execute(
+                'SELECT trade_data FROM trades WHERE bot_id = ? AND trade_data IS NOT NULL ORDER BY timestamp ASC',
+                (row['bot_id'],)
+            )
+            for trow in tcursor.fetchall():
+                try:
+                    trade = json.loads(trow['trade_data'])
+                    bot_state['tradeHistory'].append(trade)
+                except Exception:
+                    pass
+            tconn.close()
+            if bot_state['tradeHistory']:
+                logger.info(f"📊 Restored {len(bot_state['tradeHistory'])} trades from DB for bot {row['bot_id']}")
+        except Exception as e:
+            logger.warning(f"Could not load trades from DB for bot {row['bot_id']}: {e}")
     bot_state['profitHistory'] = bot_state.get('profitHistory') or []
     bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
     bot_state['strategyHistory'] = bot_state.get('strategyHistory') or []
