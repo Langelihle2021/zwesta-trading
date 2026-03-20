@@ -7623,10 +7623,29 @@ def test_broker_connection():
                     server = expected_server
                     logger.info(f"   Corrected server to: {server}")
             
-            # Skip balance fetch during connection test - will retry when bot starts
-            # This optimization reduces connection test time from 45s to 15s
-            actual_balance = 10000.00  # Default fallback until bot startup
-            logger.info(f"⏩ Skipping MT5 balance fetch during connection test - will retry when bot starts trading")
+            # Try to get real balance from cached broker_manager connection (fast, no new MT5 session)
+            actual_balance = 10000.00  # Default fallback
+            try:
+                cached_connection_id = None
+                normalized_broker = canonicalize_broker_name(broker)
+                if normalized_broker == 'Exness':
+                    cached_connection_id = 'Exness MT5'
+                elif normalized_broker in ['XM', 'XM Global']:
+                    cached_connection_id = 'XM Global MT5'
+                
+                if cached_connection_id:
+                    cached_conn = broker_manager.connections.get(cached_connection_id)
+                    if cached_conn and cached_conn.connected:
+                        acct_info = cached_conn.account_info or cached_conn.get_account_info()
+                        if acct_info and str(acct_info.get('accountNumber', '')) == str(account):
+                            actual_balance = acct_info.get('balance', actual_balance)
+                            logger.info(f"💰 Got real balance from cached {cached_connection_id}: ${actual_balance}")
+                        else:
+                            logger.info(f"⚠️ Cached {cached_connection_id} is for different account - balance will update when bot starts")
+                    else:
+                        logger.info(f"⚠️ No cached connection for {cached_connection_id} - balance will update when bot starts")
+            except Exception as e:
+                logger.warning(f"Could not fetch cached balance: {e} - using default")
             
             # Save MT5 credentials
             conn = get_db_connection()
@@ -7667,7 +7686,7 @@ def test_broker_connection():
                 'credential_id': credential_id,
                 'broker': broker,
                 'account_number': account,
-                'balance': 10000.0,  # Will be updated when bot starts trading
+                'balance': round(actual_balance, 2),
                 'is_live': is_live,
                 'status': 'CONNECTED',
                 'timestamp': datetime.now().isoformat()
