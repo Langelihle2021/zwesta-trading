@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'bot_configuration_screen.dart';
 import 'bot_dashboard_screen.dart';
 import '../services/ig_trading_service.dart';
+import '../utils/environment_config.dart';
 
 class BotAnalyticsScreen extends StatefulWidget {
   final Map<String, dynamic> bot;
@@ -22,6 +24,7 @@ class BotAnalyticsScreen extends StatefulWidget {
 class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   late Future<void> _analyticsLoad;
   Timer? _refreshTimer;
+  late Map<String, dynamic> _botData;
 
   // IG state
   bool _isIG = false;
@@ -34,7 +37,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   @override
   void initState() {
     super.initState();
-    final brokerType = widget.bot['broker_type'] ?? widget.bot['broker'] ?? 'MT5';
+    _botData = Map<String, dynamic>.from(widget.bot);
+    final brokerType = _botData['broker_type'] ?? _botData['broker'] ?? 'MT5';
     _isIG = brokerType.toString().toUpperCase().contains('IG');
 
     _analyticsLoad = _refreshAnalytics();
@@ -91,11 +95,42 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Future<void> _refreshAnalytics() async {
-    // Refresh bot data
+    // Fetch fresh bot data from backend API
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) {
-        setState(() {});
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id');
+      final sessionToken = prefs.getString('auth_token');
+
+      String url = '${EnvironmentConfig.apiUrl}/api/bot/status';
+      if (userId != null && userId.isNotEmpty) {
+        url += '?user_id=$userId';
+      }
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          if (sessionToken != null && sessionToken.isNotEmpty)
+            'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          final bots = List<Map<String, dynamic>>.from(data['bots'] ?? []);
+          final botId = _botData['botId'];
+          for (final bot in bots) {
+            if (bot['botId'] == botId) {
+              if (mounted) {
+                setState(() {
+                  _botData = bot;
+                });
+              }
+              break;
+            }
+          }
+        }
       }
     } catch (e) {
       print('Error refreshing analytics: $e');
@@ -109,7 +144,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   List<Map<String, dynamic>> _getProfitChartData() {
-    final dailyProfits = widget.bot['dailyProfits'] as Map?;
+    final dailyProfits = _botData['dailyProfits'] as Map?;
     if (dailyProfits == null || dailyProfits.isEmpty) {
       return [];
     }
@@ -120,7 +155,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   List<Map<String, dynamic>> _getTradesChartData() {
-    final tradeHistory = widget.bot['tradeHistory'] as List?;
+    final tradeHistory = _botData['tradeHistory'] as List?;
     if (tradeHistory == null || tradeHistory.isEmpty) {
       return [];
     }
@@ -146,20 +181,20 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         fontSize: 14,
       );
 
-      final totalProfit = (widget.bot['totalProfit'] ?? 0).toDouble();
-      final totalTrades = widget.bot['totalTrades']?.toInt() ?? 0;
-      final winRate = (widget.bot['winRate'] ?? 0).toDouble();
-      final roi = (widget.bot['roi'] ?? 0).toDouble();
-      final profitability = (widget.bot['profitability'] ?? 0).toDouble();
-      final runtimeFormatted = widget.bot['runtimeFormatted'] ?? '0h 0m';
-      final dailyProfit = (widget.bot['dailyProfit'] ?? 0).toDouble();
-      final avgProfitPerTrade = (widget.bot['avgProfitPerTrade'] ?? 0).toDouble();
-      final maxDrawdown = (widget.bot['maxDrawdown'] ?? 0).toDouble();
-      final botStatus = widget.bot['status'] ?? 'Unknown';
+      final totalProfit = (_botData['totalProfit'] ?? 0).toDouble();
+      final totalTrades = _botData['totalTrades']?.toInt() ?? 0;
+      final winRate = (_botData['winRate'] ?? 0).toDouble();
+      final roi = (_botData['roi'] ?? 0).toDouble();
+      final profitability = (_botData['profitability'] ?? 0).toDouble();
+      final runtimeFormatted = _botData['runtimeFormatted'] ?? '0h 0m';
+      final dailyProfit = (_botData['dailyProfit'] ?? 0).toDouble();
+      final avgProfitPerTrade = (_botData['avgProfitPerTrade'] ?? 0).toDouble();
+      final maxDrawdown = (_botData['maxDrawdown'] ?? 0).toDouble();
+      final botStatus = _botData['status'] ?? 'Unknown';
 
       return Scaffold(
         appBar: AppBar(
-          title: Text(widget.bot['botId'] ?? 'Bot Analytics'),
+          title: Text(_botData['botId'] ?? 'Bot Analytics'),
           backgroundColor: Colors.grey[900],
           elevation: 0,
           leading: IconButton(
@@ -215,7 +250,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
               const SizedBox(height: 24),
 
               // Daily Profit Distribution
-              if (widget.bot['dailyProfits'] != null && (widget.bot['dailyProfits'] as Map).isNotEmpty)
+              if (_botData['dailyProfits'] != null && (_botData['dailyProfits'] as Map).isNotEmpty)
                 _buildDailyProfitsSection(),
 
               // IG Controls & Data (only for IG bots)
@@ -813,7 +848,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Widget _buildDailyProfitsSection() {
-    final dailyProfits = widget.bot['dailyProfits'] as Map?;
+    final dailyProfits = _botData['dailyProfits'] as Map?;
     if (dailyProfits == null || dailyProfits.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -1489,7 +1524,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Widget _buildTradeHistorySection() {
-    final tradeHistory = widget.bot['tradeHistory'] as List?;
+    final tradeHistory = _botData['tradeHistory'] as List?;
     if (tradeHistory == null || tradeHistory.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(16),

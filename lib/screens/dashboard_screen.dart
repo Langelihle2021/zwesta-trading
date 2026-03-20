@@ -62,10 +62,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _botsError;
   Timer? _refreshTimer;
 
+  // Broker account balances
+  List<Map<String, dynamic>> _brokerAccounts = [];
+  bool _brokerBalancesLoading = false;
+  double _totalBrokerBalance = 0;
+
+  // Balance tracking for increases/decreases
+  Map<String, double> _previousBalances = {};
+  Map<String, double> _balanceChanges = {};
+
+  // Withdrawal data
+  List<Map<String, dynamic>> _recentWithdrawals = [];
+  bool _withdrawalsLoading = false;
+
   @override
   void initState() {
     super.initState();
     _fetchRealBots();
+    _fetchBrokerBalances();
+    _fetchRecentWithdrawals();
     _startAutoRefresh();
   }
 
@@ -73,6 +88,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  /// Fetch broker account balances from /api/accounts/balances
+  Future<void> _fetchBrokerBalances() async {
+    if (_brokerBalancesLoading) return;
+    setState(() => _brokerBalancesLoading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      if (sessionToken == null || sessionToken.isEmpty) return;
+
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/accounts/balances'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && mounted) {
+          // Calculate balance changes
+          Map<String, double> newChanges = {};
+          for (var account in (data['accounts'] ?? [])) {
+            final key = '${account['broker']}_${account['accountNumber']}';
+            final currentBalance = (account['balance'] as num?)?.toDouble() ?? 0;
+            final previousBalance = _previousBalances[key] ?? currentBalance;
+            newChanges[key] = currentBalance - previousBalance;
+            _previousBalances[key] = currentBalance;
+          }
+          
+          setState(() {
+            _brokerAccounts = List<Map<String, dynamic>>.from(data['accounts'] ?? []);
+            _totalBrokerBalance = (data['totalBalance'] as num?)?.toDouble() ?? 0;
+            _balanceChanges = newChanges;
+          });
+        }
+      }
+    } catch (e) {
+      print('DEBUG: Broker balance fetch error: $e');
+    } finally {
+      if (mounted) setState(() => _brokerBalancesLoading = false);
+    }
+  }
+
+  /// Fetch recent withdrawals
+  Future<void> _fetchRecentWithdrawals() async {
+    if (_withdrawalsLoading) return;
+    setState(() => _withdrawalsLoading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      if (sessionToken == null || sessionToken.isEmpty) return;
+
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/withdrawals/recent'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && mounted) {
+          setState(() {
+            _recentWithdrawals = List<Map<String, dynamic>>.from(data['withdrawals'] ?? []);
+          });
+        }
+      }
+    } catch (e) {
+      print('DEBUG: Withdrawal fetch error: $e');
+    } finally {
+      if (mounted) setState(() => _withdrawalsLoading = false);
+    }
   }
 
   /// Fetch real bots from BotService and filter out demo bots
@@ -128,6 +219,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted) {
         _fetchRealBots();
+        _fetchBrokerBalances();
+        _fetchRecentWithdrawals();
       }
     });
   }
@@ -165,8 +258,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildPremiumWelcomeCard(),
-            const SizedBox(height: 20),
-            // IG Markets integration removed
+            const SizedBox(height: 16),
+            _buildConnectedBrokerCard(),
+            const SizedBox(height: 16),
+            _buildBrokerAccountsCard(),
             const SizedBox(height: 20),
             _buildQuickStatsRow(),
             const SizedBox(height: 20),
@@ -184,12 +279,231 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 20),
             _buildRecentTradesCard(),
             const SizedBox(height: 20),
-            _buildQuickActionsGrid(),
+            _buildRecentBotsCard(),
             const SizedBox(height: 16),
           ],
         ),
       ),
     );
+    // ── CONNECTED BROKER CARD ──
+    Widget _buildConnectedBrokerCard() {
+      // Find the first connected broker account (e.g., Exness)
+      final connected = _brokerAccounts.firstWhere(
+        (a) => a['connected'] == true,
+        orElse: () => null,
+      );
+      if (connected == null) {
+        return SizedBox.shrink();
+      }
+      final broker = connected['broker'] ?? 'Broker';
+      final accountId = connected['accountId']?.toString() ?? '';
+      final accountNum = connected['accountNumber']?.toString() ?? accountId;
+      final balance = (connected['balance'] as num?)?.toDouble() ?? 0.0;
+      final equity = (connected['equity'] as num?)?.toDouble() ?? 0.0;
+      final currency = connected['currency'] ?? 'USD';
+      final key = '${broker}_${accountNum}';
+      final balanceChange = _balanceChanges[key] ?? 0.0;
+      final isIncreasing = balanceChange >= 0;
+      
+      // Get recent withdrawals for this account
+      final accountWithdrawals = _recentWithdrawals
+          .where((w) => w['broker']?.toString() == broker && w['accountNumber']?.toString() == accountNum)
+          .toList();
+      final totalWithdrawn = accountWithdrawals.fold<double>(0, (sum, w) => sum + ((w['amount'] as num?)?.toDouble() ?? 0));
+      
+      return _glassCard(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            isIncreasing ? Color(0xFF1B5E20).withOpacity(0.3) : Color(0xFF4A235A).withOpacity(0.3),
+            Colors.transparent,
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with broker icon
+            Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Color(0xFF00E5FF).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF), size: 28),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Connected to $broker',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'Account #$accountNum',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            
+            // Balance and Equity
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                    Text(
+                      '$currency ${balance.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('Equity', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                    Text(
+                      '$currency ${equity.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(color: Color(0xFF69F0AE), fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Balance Change Indicator
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isIncreasing ? Color(0xFF1B5E20).withOpacity(0.2) : Color(0xFF4A235A).withOpacity(0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isIncreasing ? Icons.trending_up : Icons.trending_down,
+                    color: isIncreasing ? Color(0xFF69F0AE) : Color(0xFFFF8A80),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isIncreasing ? 'Balance Increase' : 'Balance Decrease',
+                        style: GoogleFonts.poppins(color: Colors.white60, fontSize: 11),
+                      ),
+                      Text(
+                        '$currency ${balanceChange.abs().toStringAsFixed(2)}',
+                        style: GoogleFonts.poppins(
+                          color: isIncreasing ? Color(0xFF69F0AE) : Color(0xFFFF8A80),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            
+            // Withdrawals Section
+            if (accountWithdrawals.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Recent Withdrawals', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
+                  Text(
+                    'Total: $currency ${totalWithdrawn.toStringAsFixed(2)}',
+                    style: GoogleFonts.poppins(color: Color(0xFFFFB74D), fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ...accountWithdrawals.take(2).map((withdrawal) {
+                final amount = (withdrawal['amount'] as num?)?.toDouble() ?? 0;
+                final status = withdrawal['status']?.toString() ?? 'pending';
+                final date = withdrawal['date']?.toString() ?? '';
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$currency ${amount.toStringAsFixed(2)}',
+                              style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                            ),
+                            Text(
+                              'Status: $status',
+                              style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getWithdrawalStatusColor(status).withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: GoogleFonts.poppins(
+                            color: _getWithdrawalStatusColor(status),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ],
+          ],
+        ),
+      );
+    }
+    
+    // Helper method to get withdrawal status color
+    Color _getWithdrawalStatusColor(String status) {
+      switch (status.toLowerCase()) {
+        case 'completed':
+        case 'approved':
+          return Color(0xFF69F0AE);
+        case 'pending':
+          return Color(0xFFFFB74D);
+        case 'failed':
+        case 'rejected':
+          return Color(0xFFFF8A80);
+        default:
+          return Colors.white60;
+      }
+    }
   }
 
   // ── GLASS CARD HELPER ──
@@ -300,22 +614,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+              // ── Total Portfolio Balance ──
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.auto_graph, color: Color(0xFF00E5FF), size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Multi-Broker Automated Trading System',
-                        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
-                      ),
+                    Text(
+                      'TOTAL PORTFOLIO BALANCE',
+                      style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 1.2),
                     ),
+                    const SizedBox(height: 4),
+                    _brokerBalancesLoading && _totalBrokerBalance == 0
+                        ? Row(
+                            children: [
+                              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF00E5FF))),
+                              const SizedBox(width: 10),
+                              Text('Loading...', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 14)),
+                            ],
+                          )
+                        : Text(
+                            '\$${_totalBrokerBalance.toStringAsFixed(2)}',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                    if (_brokerAccounts.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '${_brokerAccounts.where((a) => a['connected'] == true).length} connected account${_brokerAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
+                          style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -332,7 +669,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Fetch Exness account info from backend via MT5
   Future<Map<String, dynamic>> _fetchExnessAccountInfo() async {
     try {
-      final token = Provider.of<AuthService>(context, listen: false).token;
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
       if (token == null || token.isEmpty) {
         throw Exception('No authentication token available');
       }
@@ -340,7 +678,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/account'),
         headers: {
-          'Authorization': 'Bearer $token',
+          'X-Session-Token': token,
           'Content-Type': 'application/json',
         },
       ).timeout(const Duration(seconds: 15));
@@ -377,6 +715,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // IG Markets integration removed
+
+  // ── BROKER ACCOUNTS CARD ──
+  Widget _buildBrokerAccountsCard() {
+    if (_brokerBalancesLoading && _brokerAccounts.isEmpty) {
+      return _glassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF))),
+          ],
+        ),
+      );
+    }
+
+    if (_brokerAccounts.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+              Text('\$${_totalBrokerBalance.toStringAsFixed(2)}',
+                style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ..._brokerAccounts.map((account) {
+            final broker = account['broker']?.toString() ?? 'Unknown';
+            final accountNum = account['accountNumber']?.toString() ?? '';
+            final balance = (account['balance'] as num?)?.toDouble() ?? 0;
+            final equity = (account['equity'] as num?)?.toDouble() ?? 0;
+            final mode = account['mode']?.toString() ?? '';
+            final connected = account['connected'] == true;
+            final error = account['error']?.toString();
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: connected
+                          ? const Color(0xFF69F0AE).withOpacity(0.15)
+                          : const Color(0xFFFF8A80).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      connected ? Icons.account_balance_wallet : Icons.error_outline,
+                      color: connected ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('$broker  ($mode)',
+                          style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                        Text('Account: $accountNum',
+                          style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10)),
+                        if (!connected && error != null)
+                          Text(error, style: GoogleFonts.poppins(color: const Color(0xFFFF8A80), fontSize: 10)),
+                      ],
+                    ),
+                  ),
+                  if (connected)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text('\$${balance.toStringAsFixed(2)}',
+                          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
+                        Text('Equity: \$${equity.toStringAsFixed(2)}',
+                          style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10)),
+                      ],
+                    ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
 
   // ── QUICK STATS ROW ──
   Widget _buildQuickStatsRow() {

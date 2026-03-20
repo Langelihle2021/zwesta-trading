@@ -11719,6 +11719,95 @@ def get_withdrawal_history(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/withdrawals/recent', methods=['GET'])
+@require_session
+def get_recent_withdrawals():
+    """Get recent withdrawals for the current user (last 10)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        user_id = request.user_id
+        
+        # Get recent withdrawals from all withdrawal sources (exness_withdrawals, commission_withdrawals, withdrawals)
+        # Combine Exness withdrawals
+        cursor.execute('''
+            SELECT 
+                withdrawal_id, 
+                user_id, 
+                'Exness' as broker,
+                broker_account_id as accountNumber,
+                total_amount as amount,
+                status,
+                created_at as date,
+                'exness' as type
+            FROM exness_withdrawals
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+        ''', (user_id,))
+        
+        exness_withdrawals = [dict(row) for row in cursor.fetchall()]
+        
+        # Get recent commission withdrawals
+        cursor.execute('''
+            SELECT 
+                cw.withdrawal_id,
+                cw.user_id,
+                'Commission' as broker,
+                NULL as accountNumber,
+                cw.amount,
+                cw.status,
+                cw.created_at as date,
+                'commission' as type
+            FROM commission_withdrawals cw
+            WHERE cw.user_id = ?
+            ORDER BY cw.created_at DESC
+            LIMIT 20
+        ''', (user_id,))
+        
+        commission_withdrawals = [dict(row) for row in cursor.fetchall()]
+        
+        # Get recent general withdrawals
+        cursor.execute('''
+            SELECT 
+                withdrawal_id,
+                user_id,
+                method as broker,
+                account_details as accountNumber,
+                amount,
+                status,
+                created_at as date,
+                'general' as type
+            FROM withdrawals
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+        ''', (user_id,))
+        
+        general_withdrawals = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        # Combine and sort by date
+        all_withdrawals = exness_withdrawals + commission_withdrawals + general_withdrawals
+        all_withdrawals.sort(key=lambda x: x.get('date', ''), reverse=True)
+        
+        # Return only recent ones
+        recent = all_withdrawals[:10]
+        
+        logger.info(f"✅ Retrieved {len(recent)} recent withdrawals for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'withdrawals': recent,
+            'total_count': len(all_withdrawals)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting recent withdrawals: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/withdrawals', methods=['GET'])
 @require_api_key
 def admin_withdrawals():
