@@ -7623,8 +7623,9 @@ def test_broker_connection():
                     server = expected_server
                     logger.info(f"   Corrected server to: {server}")
             
-            # Try to get real balance from cached broker_manager connection (fast, no new MT5 session)
+            # Try to get real balance - first from cache, then via quick MT5 login
             actual_balance = 10000.00  # Default fallback
+            got_real_balance = False
             try:
                 cached_connection_id = None
                 normalized_broker = canonicalize_broker_name(broker)
@@ -7639,13 +7640,35 @@ def test_broker_connection():
                         acct_info = cached_conn.account_info or cached_conn.get_account_info()
                         if acct_info and str(acct_info.get('accountNumber', '')) == str(account):
                             actual_balance = acct_info.get('balance', actual_balance)
+                            got_real_balance = True
                             logger.info(f"💰 Got real balance from cached {cached_connection_id}: ${actual_balance}")
-                        else:
-                            logger.info(f"⚠️ Cached {cached_connection_id} is for different account - balance will update when bot starts")
-                    else:
-                        logger.info(f"⚠️ No cached connection for {cached_connection_id} - balance will update when bot starts")
             except Exception as e:
-                logger.warning(f"Could not fetch cached balance: {e} - using default")
+                logger.warning(f"Could not fetch cached balance: {e}")
+            
+            # If cached connection is for a different account, do a quick MT5 login to get real balance
+            if not got_real_balance:
+                try:
+                    import MetaTrader5 as mt5_mod
+                    lock_acquired = mt5_connection_lock.acquire(timeout=10.0)
+                    if lock_acquired:
+                        try:
+                            # Terminal is already running - just switch account (fast, no 60s wait)
+                            login_ok = mt5_mod.login(int(account), password=password, server=server)
+                            if login_ok:
+                                info = mt5_mod.account_info()
+                                if info:
+                                    actual_balance = info.balance
+                                    got_real_balance = True
+                                    logger.info(f"💰 Got real balance via quick MT5 login: ${actual_balance}")
+                            else:
+                                err = mt5_mod.last_error()
+                                logger.warning(f"⚠️ Quick MT5 login failed: {err} - using default balance")
+                        finally:
+                            mt5_connection_lock.release()
+                    else:
+                        logger.warning(f"⚠️ Could not acquire MT5 lock for balance check - using default")
+                except Exception as e:
+                    logger.warning(f"Could not fetch balance via quick login: {e} - using default")
             
             # Save MT5 credentials
             conn = get_db_connection()
@@ -8564,6 +8587,7 @@ def create_bot():
                             account_balance = acct_info['balance']
                         binance_conn_balance.disconnect()
                 elif is_mt5_broker_name(broker_name):
+                    got_balance = False
                     cached_connection_id = None
                     normalized_broker_name = canonicalize_broker_name(broker_name)
 
@@ -8577,16 +8601,28 @@ def create_bot():
                         acct_info = cached_connection.account_info or cached_connection.get_account_info()
                         if acct_info and str(acct_info.get('accountNumber', '')) == str(account_number):
                             account_balance = acct_info.get('balance', account_balance)
-                        else:
-                            logger.info(
-                                f"Using default balance during bot creation for {broker_name} account {account_number} "
-                                f"because the cached MT5 session is for a different account"
-                            )
-                    else:
-                        logger.info(
-                            f"Skipping synchronous MT5 balance fetch during bot creation for {broker_name} "
-                            f"account {account_number}; balance will refresh after the bot connects"
-                        )
+                            got_balance = True
+                    
+                    # If cached account doesn't match, try quick MT5 login for real balance
+                    if not got_balance:
+                        try:
+                            import MetaTrader5 as mt5_mod
+                            lock_acquired = mt5_connection_lock.acquire(timeout=10.0)
+                            if lock_acquired:
+                                try:
+                                    cred_password = credential_data.get('password', '')
+                                    cred_server = credential_data.get('server', '')
+                                    login_ok = mt5_mod.login(int(account_number), password=cred_password, server=cred_server)
+                                    if login_ok:
+                                        info = mt5_mod.account_info()
+                                        if info:
+                                            account_balance = info.balance
+                                            got_balance = True
+                                            logger.info(f"💰 Got real balance via quick MT5 login: ${account_balance}")
+                                finally:
+                                    mt5_connection_lock.release()
+                        except Exception as bal_err:
+                            logger.info(f"⚠️ Quick MT5 balance fetch failed: {bal_err} - balance will refresh after bot connects")
             except Exception as e:
                 logger.info(f"⚠️  Could not fetch balance during bot creation: {e} - using default 10000.0")
 
