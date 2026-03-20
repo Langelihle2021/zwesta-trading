@@ -8587,7 +8587,6 @@ def create_bot():
                             account_balance = acct_info['balance']
                         binance_conn_balance.disconnect()
                 elif is_mt5_broker_name(broker_name):
-                    got_balance = False
                     cached_connection_id = None
                     normalized_broker_name = canonicalize_broker_name(broker_name)
 
@@ -8601,28 +8600,11 @@ def create_bot():
                         acct_info = cached_connection.account_info or cached_connection.get_account_info()
                         if acct_info and str(acct_info.get('accountNumber', '')) == str(account_number):
                             account_balance = acct_info.get('balance', account_balance)
-                            got_balance = True
-                    
-                    # If cached account doesn't match, try quick MT5 login for real balance
-                    if not got_balance:
-                        try:
-                            import MetaTrader5 as mt5_mod
-                            lock_acquired = mt5_connection_lock.acquire(timeout=10.0)
-                            if lock_acquired:
-                                try:
-                                    cred_password = credential_data.get('password', '')
-                                    cred_server = credential_data.get('server', '')
-                                    login_ok = mt5_mod.login(int(account_number), password=cred_password, server=cred_server)
-                                    if login_ok:
-                                        info = mt5_mod.account_info()
-                                        if info:
-                                            account_balance = info.balance
-                                            got_balance = True
-                                            logger.info(f"💰 Got real balance via quick MT5 login: ${account_balance}")
-                                finally:
-                                    mt5_connection_lock.release()
-                        except Exception as bal_err:
-                            logger.info(f"⚠️ Quick MT5 balance fetch failed: {bal_err} - balance will refresh after bot connects")
+                            logger.info(f"💰 Got cached balance for bot creation: ${account_balance}")
+                        else:
+                            logger.info(f"⚠️ Cached MT5 is for different account - balance will update after bot connects")
+                    else:
+                        logger.info(f"⚠️ No cached MT5 connection - balance will update after bot connects")
             except Exception as e:
                 logger.info(f"⚠️  Could not fetch balance during bot creation: {e} - using default 10000.0")
 

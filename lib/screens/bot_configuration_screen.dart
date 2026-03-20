@@ -721,7 +721,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           'X-Session-Token': sessionToken,
         },
         body: jsonEncode(botPayload),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       if (createResponse.statusCode != 200 && createResponse.statusCode != 201) {
         final errorData = jsonDecode(createResponse.body);
@@ -738,7 +738,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           'X-Session-Token': sessionToken,
         },
         body: jsonEncode({'botId': _botIdController.text}),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       if (startResponse.statusCode == 200) {
         final data = jsonDecode(startResponse.body);
