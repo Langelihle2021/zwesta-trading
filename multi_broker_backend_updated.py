@@ -1470,6 +1470,8 @@ class MT5Connection(BrokerConnection):
     
     def _connect_with_lock(self) -> bool:
         """Internal connection method - always called within mt5_connection_lock"""
+        global balance_cache, balance_cache_lock  # Declare globals at function start (required by Python)
+        
         try:
             if not self.mt5:
                 logger.error("MetaTrader5 SDK not available")
@@ -1570,7 +1572,6 @@ class MT5Connection(BrokerConnection):
                             
                             # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
                             # This allows balance API to return real data even while bots are trading
-                            global balance_cache, balance_cache_lock
                             try:
                                 if self.account_info:
                                     with balance_cache_lock:
@@ -1609,7 +1610,6 @@ class MT5Connection(BrokerConnection):
                             
                             # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
                             # This allows balance API to return real data even while bots are trading
-                            global balance_cache, balance_cache_lock
                             try:
                                 if self.account_info:
                                     with balance_cache_lock:
