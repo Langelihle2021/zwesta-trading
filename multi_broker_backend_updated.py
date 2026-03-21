@@ -1791,7 +1791,8 @@ class MT5Connection(BrokerConnection):
                     global balance_cache, balance_cache_lock
                     try:
                         with balance_cache_lock:
-                            cache_key = f"Exness:{account_info.login}"
+                            # Use consistent cache key format (also used by balance endpoint)
+                            cache_key = get_balance_cache_key('Exness', account_info.login)
                             balance_cache[cache_key] = {
                                 'balance': float(account_info.balance),
                                 'equity': float(account_info.equity),
@@ -3193,6 +3194,35 @@ def canonicalize_broker_name(broker_name: str) -> str:
 
 def is_mt5_broker_name(broker_name: str) -> bool:
     return canonicalize_broker_name(broker_name) in ['Exness', 'MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']
+
+
+def get_balance_cache_key(broker_name: str, account_id) -> str:
+    """Generate consistent cache key for balance cache
+    
+    Used by BOTH bot connection AND balance endpoint to ensure key format matches.
+    This prevents cache misses due to key format discrepancies.
+    
+    Args:
+        broker_name: Raw broker name from database (e.g., 'Exness', 'exness', 'XM Global', 'Binance')
+        account_id: Account number (int, or string convertible to int)
+    
+    Returns:
+        Consistent cache key: "Exness:298997455" or "Binance:z9e8s9v7..."
+    """
+    # 1. Normalize broker name to standard format
+    normalized_broker = canonicalize_broker_name(broker_name)
+    
+    # 2. Ensure account is string representation of the value
+    try:
+        # Try to convert to int first to handle '298997455' or 298997455 uniformly
+        account_str = str(int(account_id))
+    except (ValueError, TypeError):
+        # If account_id can't convert to int (e.g., Binance API key), use as-is
+        account_str = str(account_id)
+    
+    # 3. Return consistent format
+    cache_key = f"{normalized_broker}:{account_str}"
+    return cache_key
 
 # ==================== IN-MEMORY STORAGE ====================
 # Store demo trades placed via API (temporary storage for this session)
@@ -4642,7 +4672,8 @@ def get_account_balances():
             elif timed_out:
                 # CRITICAL FIX: First check NEW global balance_cache (populated by bots), then fall back to SQLite
                 global balance_cache, balance_cache_lock
-                cache_key = f"{broker_name}:{account_num}"
+                # Use SAME cache key format that bot uses (ensures consistent lookup)
+                cache_key = get_balance_cache_key(broker_name, account_num)
                 cached_balance = 0
                 cached_equity = 0
                 cached_margin = 0
