@@ -1050,6 +1050,33 @@ def init_database():
         except Exception as e:
             logger.debug(f"timestamp column might already exist: {e}")
 
+    # Market Pause Events table - tracks when markets are paused/halted
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pause_events (
+            pause_id TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            pause_type TEXT NOT NULL,
+            retcode INTEGER,
+            error_message TEXT,
+            reason TEXT,
+            market_session TEXT,
+            duration_minutes INTEGER,
+            pause_start TEXT,
+            pause_end TEXT,
+            detected_at TEXT,
+            created_at TEXT,
+            FOREIGN KEY (bot_id) REFERENCES user_bots(bot_id),
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
+    # Migration: Add pause_events table if it doesn't exist
+    cursor.execute("PRAGMA table_info(pause_events)")
+    if cursor.fetchall() == []:
+        logger.info("✅ Migration: Created pause_events table")
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -1316,6 +1343,24 @@ class BrokerConnection:
 
 class MT5Connection(BrokerConnection):
     """MetaTrader 5 Broker Connection"""
+    
+    # MT5 PAUSE/HALT RETCODES - Market status codes indicating trading halts
+    RETCODE_PAUSED = 10009        # Trading paused/halted for symbol
+    RETCODE_REQUOTE = 10019       # Requote - market paused or no liquidity
+    RETCODE_MARKET_CLOSED = 10026 # Market closed (weekend/outside hours)
+    RETCODE_NO_LIQUIDITY = 10018  # No liquidity - market paused
+    RETCODE_INVALID_REQUEST = 10016  # Invalid request - often during news events
+    RETCODE_TRADE_MODE_DISABLED = 10015  # Trading disabled for symbol
+    
+    # Map of retcodes to pause reasons
+    PAUSE_RETCODES = {
+        10009: ('SYMBOL_HALTED', 'Trading halted/suspended for this symbol'),
+        10019: ('REQUOTE', 'Market paused, no liquidity, or price changed significantly'),
+        10026: ('MARKET_CLOSED', 'Market is closed (weekend or outside trading hours)'),
+        10018: ('NO_LIQUIDITY', 'No liquidity available - market may be paused'),
+        10016: ('INVALID_REQUEST', 'Invalid request - often during news events or market halt'),
+        10015: ('TRADE_MODE_DISABLED', 'Trading disabled for this symbol'),
+    }
     
     def __init__(self, credentials: Dict = None):
         # Use MT5_CONFIG if no credentials provided
@@ -1897,6 +1942,22 @@ class MT5Connection(BrokerConnection):
             
             if result.retcode != self.mt5.TRADE_RETCODE_DONE:
                 logger.warning(f"MT5 order failed: symbol={symbol}, type={order_type}, retcode={result.retcode}, comment={result.comment}")
+                
+                # CHECK FOR MARKET PAUSE/HALT CONDITIONS
+                if result.retcode in self.PAUSE_RETCODES:
+                    pause_type, pause_reason = self.PAUSE_RETCODES[result.retcode]
+                    logger.warning(f"🔒 MARKET PAUSE DETECTED: {pause_type} - {pause_reason}")
+                    return {
+                        'success': False,
+                        'error': f'Market paused: {pause_reason}',
+                        'retcode': result.retcode,
+                        'pause_type': pause_type,
+                        'pause_reason': pause_reason,
+                        'is_paused': True,
+                        'original_comment': result.comment,
+                        'action_required': f'Market is currently paused ({pause_type}). Trading will resume when market reopens.'
+                    }
+                
                 # Retcode 10027 = AutoTrading disabled in MT5 terminal
                 if result.retcode == 10027:
                     return {
@@ -1905,7 +1966,7 @@ class MT5Connection(BrokerConnection):
                         'retcode': 10027,
                         'action_required': 'Enable AutoTrading in MT5 terminal'
                     }
-                return {'success': False, 'error': f'MT5 error: {result.comment}'}
+                return {'success': False, 'error': f'MT5 error: {result.comment}', 'retcode': result.retcode}
 
             # Insert trade record into trades table
             try:
@@ -6582,6 +6643,35 @@ def persist_bot_runtime_state(bot_id: str):
         logger.warning(f"Could not persist runtime state for bot {bot_id}: {e}")
 
 
+def log_pause_event(bot_id: str, user_id: str, symbol: str, pause_type: str, retcode: int, 
+                    error_message: str, pause_reason: str):
+    """Log a market pause/halt event to the database for monitoring and debugging"""
+    try:
+        pause_id = str(uuid.uuid4())
+        detected_at = datetime.now().isoformat()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO pause_events 
+            (pause_id, bot_id, user_id, symbol, pause_type, retcode, error_message, reason, detected_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            pause_id, bot_id, user_id, symbol, pause_type, retcode, 
+            error_message, pause_reason, detected_at, detected_at
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"📊 Pause event logged: bot={bot_id}, symbol={symbol}, type={pause_type}, retcode={retcode}")
+        return pause_id
+    except Exception as e:
+        logger.error(f"Error logging pause event: {e}")
+        return None
+
+
 def _get_bot_thread_credentials(bot_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     credential_id = bot_config.get('credentialId')
     if not credential_id:
@@ -9316,6 +9406,38 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 logger.error(f"Bot {bot_id}: {broker_type} place_order exception: {e}")
                                 order_result = {'success': False, 'error': str(e)}
                         
+                        # CHECK FOR MARKET PAUSE CONDITIONS - Log pause events
+                        if order_result and order_result.get('is_paused', False):
+                            pause_type = order_result.get('pause_type', 'UNKNOWN')
+                            pause_reason = order_result.get('pause_reason', 'Market paused')
+                            retcode = order_result.get('retcode', 0)
+                            error_msg = order_result.get('original_comment', order_result.get('error', 'Unknown error'))
+                            
+                            # Log pause event to database
+                            pause_id = log_pause_event(
+                                bot_id=bot_id,
+                                user_id=user_id,
+                                symbol=symbol,
+                                pause_type=pause_type,
+                                retcode=retcode,
+                                error_message=error_msg,
+                                pause_reason=pause_reason
+                            )
+                            
+                            logger.warning(f"🔒 Bot {bot_id}: Market pause event recorded (pause_id={pause_id})")
+                            
+                            # Update bot status to indicate pause
+                            bot_config['lastPauseEvent'] = {
+                                'symbol': symbol,
+                                'pause_type': pause_type,
+                                'pause_reason': pause_reason,
+                                'detected_at': datetime.now().isoformat(),
+                                'pause_id': pause_id
+                            }
+                            
+                            # Skip this trade but continue to next symbol (don't stop bot)
+                            continue
+                        
                         if order_result and order_result.get('success', False):
                             # Get the order ticket/deal_id for precise matching
                             order_ticket = str(order_result.get('orderId') or order_result.get('deal_id') or '')
@@ -10287,7 +10409,8 @@ def bot_status():
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
-                'pauseReason': bot.get('pauseReason'),  # ✅ Include pause reason if bot is paused
+                'pauseReason': bot.get('pauseReason'),
+                'lastPauseEvent': bot.get('lastPauseEvent'),  # Include last market pause event
                 'displayCurrency': bot.get('displayCurrency', 'USD'),
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
@@ -10682,6 +10805,8 @@ def bot_status_public():
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'status': status,
                 'enabled': is_enabled,
+                'pauseReason': bot.get('pauseReason'),  # Include bot-level pause reason
+                'lastPauseEvent': bot.get('lastPauseEvent'),  # Include last market pause event
                 'broker_type': bot.get('broker_type', 'MT5'),
                 'createdAt': created.isoformat(),
                 'lastTradeTime': bot.get('tradeHistory', [{}])[-1].get('time') if bot.get('tradeHistory') else bot.get('createdAt', datetime.now().isoformat()),
@@ -10702,6 +10827,177 @@ def bot_status_public():
     
     except Exception as e:
         logger.error(f"Error getting public bot status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== MARKET PAUSE EVENT ENDPOINTS ====================
+
+@app.route('/api/bot/<bot_id>/pause-events', methods=['GET'])
+@require_session
+def get_bot_pause_events(bot_id: str):
+    """Get market pause events for a specific bot"""
+    try:
+        user_id = request.user_id
+        limit = request.args.get('limit', 50, type=int)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify bot belongs to user
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        result = cursor.fetchone()
+        if not result or result['user_id'] != user_id:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Bot not found'}), 404
+        
+        # Get pause events
+        cursor.execute('''
+            SELECT pause_id, symbol, pause_type, retcode, reason, detected_at 
+            FROM pause_events 
+            WHERE bot_id = ? 
+            ORDER BY detected_at DESC 
+            LIMIT ?
+        ''', (bot_id, limit))
+        
+        events = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'bot_id': bot_id,
+            'pause_events': events,
+            'total_events': len(events)
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting pause events: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/pause-events', methods=['GET'])
+@require_session
+def get_user_pause_events():
+    """Get all market pause events for authenticated user's bots"""
+    try:
+        user_id = request.user_id
+        limit = request.args.get('limit', 100, type=int)
+        symbol_filter = request.args.get('symbol', None)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get pause events for user's bots
+        if symbol_filter:
+            cursor.execute('''
+                SELECT pause_id, bot_id, symbol, pause_type, retcode, reason, detected_at 
+                FROM pause_events 
+                WHERE user_id = ? AND symbol = ? 
+                ORDER BY detected_at DESC 
+                LIMIT ?
+            ''', (user_id, symbol_filter, limit))
+        else:
+            cursor.execute('''
+                SELECT pause_id, bot_id, symbol, pause_type, retcode, reason, detected_at 
+                FROM pause_events 
+                WHERE user_id = ? 
+                ORDER BY detected_at DESC 
+                LIMIT ?
+            ''', (user_id, limit))
+        
+        events = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        # Get statistics
+        pause_types = {}
+        for event in events:
+            ptype = event['pause_type']
+            pause_types[ptype] = pause_types.get(ptype, 0) + 1
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'pause_events': events,
+            'total_events': len(events),
+            'pause_types_summary': pause_types
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting user pause events: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/<bot_id>/last-pause', methods=['GET'])
+@require_session
+def get_bot_last_pause(bot_id: str):
+    """Get the most recent pause event for a bot"""
+    try:
+        user_id = request.user_id
+        
+        # Verify bot belongs to user
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        result = cursor.fetchone()
+        if not result or result['user_id'] != user_id:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Bot not found'}), 404
+        
+        # Get last pause event
+        cursor.execute('''
+            SELECT pause_id, symbol, pause_type, retcode, reason, detected_at 
+            FROM pause_events 
+            WHERE bot_id = ? 
+            ORDER BY detected_at DESC 
+            LIMIT 1
+        ''', (bot_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'last_pause': dict(result)
+            }), 200
+        else:
+            return jsonify({
+                'success': True,
+                'last_pause': None
+            }), 200
+    except Exception as e:
+        logger.error(f"Error getting last pause: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/pause-summary', methods=['GET'])
+@require_session
+def get_pause_summary():
+    """Get pause event summary and statistics for user"""
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all pause events
+        cursor.execute('SELECT pause_type, retcode, symbol, detected_at FROM pause_events WHERE user_id = ? ORDER BY detected_at DESC', (user_id,))
+        all_events = [dict(row) for row in cursor.fetchall()]
+        
+        # Statistics
+        pause_types = {}
+        symbols = {}
+        for event in all_events:
+            pause_types[event['pause_type']] = pause_types.get(event['pause_type'], 0) + 1
+            symbols[event['symbol']] = symbols.get(event['symbol'], 0) + 1
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'total_events': len(all_events),
+            'pause_distribution': pause_types,
+            'affected_symbols': symbols,
+            'top_events': all_events[:20]
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting pause summary: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
