@@ -1789,14 +1789,18 @@ class MT5Connection(BrokerConnection):
                     
                     # CRITICAL FIX: Update global balance cache so balance API calls return real data
                     global balance_cache, balance_cache_lock
-                    with balance_cache_lock:
-                        cache_key = f"Exness:{account_info.login}"
-                        balance_cache[cache_key] = {
-                            'balance': float(account_info.balance),
-                            'equity': float(account_info.equity),
-                            'timestamp': time.time()
-                        }
-                    logger.debug(f"  💾 Cached balance for {cache_key}: ${account_info.balance}")
+                    try:
+                        with balance_cache_lock:
+                            cache_key = f"Exness:{account_info.login}"
+                            balance_cache[cache_key] = {
+                                'balance': float(account_info.balance),
+                                'equity': float(account_info.equity),
+                                'marginFree': float(account_info.margin_free) if hasattr(account_info, 'margin_free') else 0,
+                                'timestamp': time.time()
+                            }
+                        logger.info(f"  💾 Cached balance for {cache_key}: ${account_info.balance} (cache size: {len(balance_cache)} entries)")
+                    except Exception as e:
+                        logger.error(f"  ❌ Failed to update balance cache: {e}")
                     return True
                 else:
                     logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_send() returned object without retcode")
@@ -4645,12 +4649,15 @@ def get_account_balances():
                 
                 # Try to get from NEW in-memory cache (populated when bots successfully connect)
                 with balance_cache_lock:
+                    logger.info(f"  🔍 Looking for cache_key '{cache_key}' | Available keys in cache: {list(balance_cache.keys())}")
                     if cache_key in balance_cache:
                         cached_info = balance_cache[cache_key]
                         cached_balance = cached_info.get('balance', 0)
                         cached_equity = cached_info.get('equity', cached_balance)
                         cached_margin = cached_info.get('marginFree', 0)
                         logger.info(f"✅ Using FRESH cached balance for {cache_key} from bot connection: ${cached_balance:.2f}")
+                    else:
+                        logger.info(f"  ℹ️ Cache key '{cache_key}' not found in balance_cache. Cache is {'empty' if not balance_cache else 'populated with other keys'}")
                 
                 # If not in fresh cache, try SQLite cache
                 if cached_balance == 0 and cred['credential_id'] in cached_data:
