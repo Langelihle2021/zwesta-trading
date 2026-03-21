@@ -4438,7 +4438,7 @@ def get_account_balances():
             WHERE user_id = ? AND is_active = 1
         ''', (user_id,))
         
-        cached_data = {row['credential_id']: row for row in cursor.fetchall()}
+        cached_data = {row['credential_id']: dict(row) for row in cursor.fetchall()}
         conn.close()
         
         accounts_summary = {
@@ -4626,7 +4626,7 @@ def get_account_balances():
                 accounts_summary['totalEquity'] += account_entry['equity']
             elif timed_out and cred['credential_id'] in cached_data:
                 # CRITICAL FIX: Use cached balance on timeout instead of showing $0
-                cache = cached_data[cred['credential_id']]
+                cache = dict(cached_data[cred['credential_id']])  # Convert Row to dict
                 cached_balance = cache.get('cached_balance', 0) or 0
                 cached_equity = cache.get('cached_equity', cached_balance) or 0
                 cached_margin = cache.get('cached_margin_free', 0) or 0
