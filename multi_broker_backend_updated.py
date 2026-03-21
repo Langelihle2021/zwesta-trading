@@ -1567,6 +1567,24 @@ class MT5Connection(BrokerConnection):
                             self.connected = True
                             self.get_account_info()
                             logger.info(f"✅ Connected to MT5 account {account} with password")
+                            
+                            # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
+                            # This allows balance API to return real data even while bots are trading
+                            global balance_cache, balance_cache_lock
+                            try:
+                                if self.account_info:
+                                    with balance_cache_lock:
+                                        cache_key = get_balance_cache_key('Exness', account)
+                                        balance_cache[cache_key] = {
+                                            'balance': float(self.account_info.get('balance', 0)),
+                                            'equity': float(self.account_info.get('equity', 0)),
+                                            'marginFree': float(self.account_info.get('marginFree', 0)),
+                                            'timestamp': time.time()
+                                        }
+                                        logger.info(f"  💾 Cached balance IMMEDIATELY after login: {cache_key} = ${self.account_info.get('balance', 0):.2f} (cache now has {len(balance_cache)} entries)")
+                            except Exception as e:
+                                logger.warning(f"  ⚠️  Failed to cache balance after login: {e}")
+                            
                             # Subscribe to all symbols for trading
                             self._subscribe_symbols()
                             return True
@@ -1588,6 +1606,24 @@ class MT5Connection(BrokerConnection):
                             self.connected = True
                             self.get_account_info()
                             logger.info(f"✅ Connected to MT5 account {account} (guest mode)")
+                            
+                            # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
+                            # This allows balance API to return real data even while bots are trading
+                            global balance_cache, balance_cache_lock
+                            try:
+                                if self.account_info:
+                                    with balance_cache_lock:
+                                        cache_key = get_balance_cache_key('Exness', account)
+                                        balance_cache[cache_key] = {
+                                            'balance': float(self.account_info.get('balance', 0)),
+                                            'equity': float(self.account_info.get('equity', 0)),
+                                            'marginFree': float(self.account_info.get('marginFree', 0)),
+                                            'timestamp': time.time()
+                                        }
+                                        logger.info(f"  💾 Cached balance IMMEDIATELY after guest login: {cache_key} = ${self.account_info.get('balance', 0):.2f} (cache now has {len(balance_cache)} entries)")
+                            except Exception as e:
+                                logger.warning(f"  ⚠️  Failed to cache balance after guest login: {e}")
+                            
                             # Subscribe to all symbols for trading
                             self._subscribe_symbols()
                             return True
