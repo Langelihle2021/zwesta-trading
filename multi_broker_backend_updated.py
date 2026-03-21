@@ -73,6 +73,13 @@ logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connec
 bot_creation_lock = threading.Lock()
 logger.info("✅ Bot creation lock initialized - prevents concurrent bot creation")
 
+# ==================== BALANCE CACHE ====================
+# CRITICAL FIX: Cache balances updated from successful MT5 connections
+# When balance API calls get MT5 lock timeout, return cached balance instead of default $10,000
+balance_cache = {}  # { f"{broker}:{account}": {'balance': X, 'equity': Y, 'timestamp': Z} }
+balance_cache_lock = threading.Lock()
+logger.info("✅ Balance cache initialized - stores real balances from successful MT5 connections")
+
 app = Flask(__name__)
 CORS(app)
 
@@ -1437,9 +1444,16 @@ class MT5Connection(BrokerConnection):
         
         # Acquire lock with timeout - REDUCED from 30s to 10s for balance checks
         # Bot trading loop has its own retry logic, so short timeout is safer
+        # FIX: Balance fetches use 0.1s timeout (non-blocking) to avoid stalling on busy MT5
         lock_timeout = self.credentials.get('lock_timeout', 10)  # 10 seconds default
         
-        logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max {lock_timeout} seconds, sequential mode)...")
+        # CRITICAL FIX: If this is a balance fetch (marked by 'is_balance_check'), use fast timeout
+        if self.credentials.get('is_balance_check'):
+            lock_timeout = 0.1  # 100ms - fail fast for balance reads when MT5 is busy
+            logger.info(f"⏳ Balance check: Waiting for MT5 lock (max {lock_timeout}s, non-blocking)...")
+        else:
+            logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max {lock_timeout} seconds, sequential mode)...")
+        
         lock_acquired = mt5_connection_lock.acquire(timeout=float(lock_timeout))
         
         if not lock_acquired:
@@ -1772,6 +1786,17 @@ class MT5Connection(BrokerConnection):
                     logger.info(f"✅ MT5 is READY - order execution path is functional")
                     logger.info(f"   Account: {account_info.login}, Balance: ${account_info.balance}")
                     logger.info(f"   Symbol {test_symbol}: bid={tick.bid:.5f}, ask={tick.ask:.5f}")
+                    
+                    # CRITICAL FIX: Update global balance cache so balance API calls return real data
+                    global balance_cache, balance_cache_lock
+                    with balance_cache_lock:
+                        cache_key = f"Exness:{account_info.login}"
+                        balance_cache[cache_key] = {
+                            'balance': float(account_info.balance),
+                            'equity': float(account_info.equity),
+                            'timestamp': time.time()
+                        }
+                    logger.debug(f"  💾 Cached balance for {cache_key}: ${account_info.balance}")
                     return True
                 else:
                     logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_send() returned object without retcode")
@@ -4446,10 +4471,12 @@ def get_account_balances():
                 if broker_name == 'Exness':
                     # Connect to Exness MT5 with timeout
                     try:
+                        # CRITICAL FIX: Mark this as a balance check so MT5Connection uses 0.1s timeout (non-blocking)
                         mt5_conn = MT5Connection({
                             'account': int(account_num) if account_num else 0,
                             'password': cred['password'],
                             'server': cred['server'] or ('Exness-Real' if is_live else 'Exness-MT5Trial9'),
+                            'is_balance_check': True,  # Signal MT5Connection to use fast non-blocking timeout
                         })
                         # Use threading with timeout to prevent hanging
                         result = [None]
@@ -4460,7 +4487,7 @@ def get_account_balances():
                         
                         thread = threading.Thread(target=connect_exness, daemon=True)
                         thread.start()
-                        thread.join(timeout=5)  # 5-second timeout
+                        thread.join(timeout=2)  # 2-second thread timeout (will fail fast at MT5 lock level)
                         
                         if thread.is_alive():
                             logger.warning(f"Exness balance fetch timed out for {account_num}")
@@ -4477,10 +4504,12 @@ def get_account_balances():
                 elif broker_name in ['XM', 'XM Global']:
                     # Connect to XM Global MT5 with timeout
                     try:
+                        # CRITICAL FIX: Mark this as a balance check so MT5Connection uses 0.1s timeout (non-blocking)
                         mt5_conn = MT5Connection({
                             'account': int(account_num) if account_num else 0,
                             'password': cred['password'],
                             'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'),
+                            'is_balance_check': True,  # Signal MT5Connection to use fast non-blocking timeout
                         })
                         result = [None]
                         def connect_xm():
@@ -4490,7 +4519,7 @@ def get_account_balances():
                         
                         thread = threading.Thread(target=connect_xm, daemon=True)
                         thread.start()
-                        thread.join(timeout=5)  # 5-second timeout
+                        thread.join(timeout=2)  # 2-second thread timeout (will fail fast at MT5 lock level)
                         
                         if thread.is_alive():
                             logger.warning(f"XM balance fetch timed out for {account_num}")
@@ -4606,18 +4635,37 @@ def get_account_balances():
                 # Accumulate totals
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
-            elif timed_out and cred['credential_id'] in cached_data:
-                # CRITICAL FIX: Use cached balance on timeout instead of showing $0
-                cache = dict(cached_data[cred['credential_id']])  # Convert Row to dict
-                cached_balance = cache.get('cached_balance', 0) or 0
-                cached_equity = cache.get('cached_equity', cached_balance) or 0
-                cached_margin = cache.get('cached_margin_free', 0) or 0
+            elif timed_out:
+                # CRITICAL FIX: First check NEW global balance_cache (populated by bots), then fall back to SQLite
+                global balance_cache, balance_cache_lock
+                cache_key = f"{broker_name}:{account_num}"
+                cached_balance = 0
+                cached_equity = 0
+                cached_margin = 0
                 
-                # In DEMO mode, if cache is empty/zero, use demo default
+                # Try to get from NEW in-memory cache (populated when bots successfully connect)
+                with balance_cache_lock:
+                    if cache_key in balance_cache:
+                        cached_info = balance_cache[cache_key]
+                        cached_balance = cached_info.get('balance', 0)
+                        cached_equity = cached_info.get('equity', cached_balance)
+                        cached_margin = cached_info.get('marginFree', 0)
+                        logger.info(f"✅ Using FRESH cached balance for {cache_key} from bot connection: ${cached_balance:.2f}")
+                
+                # If not in fresh cache, try SQLite cache
+                if cached_balance == 0 and cred['credential_id'] in cached_data:
+                    cache = dict(cached_data[cred['credential_id']])
+                    cached_balance = cache.get('cached_balance', 0) or 0
+                    cached_equity = cache.get('cached_equity', cached_balance) or 0
+                    cached_margin = cache.get('cached_margin_free', 0) or 0
+                    logger.info(f"✅ Using SQLite cached balance for {cache_key}: ${cached_balance:.2f}")
+                
+                # In DEMO mode, if still no cached value, use demo default
                 if ENVIRONMENT == 'DEMO' and cached_balance == 0:
                     cached_balance = 10000
                     cached_equity = 10000
                     cached_margin = 10000
+                    logger.info(f"ℹ️  Demo mode - using default balance for {cache_key}: ${cached_balance:.2f}")
                 
                 account_entry.update({
                     'balance': float(cached_balance),
@@ -4625,8 +4673,8 @@ def get_account_balances():
                     'marginFree': float(cached_margin),
                     'currency': 'USD',
                     'connected': False,
-                    'dataSource': 'cached' if cached_balance > 0 else 'demo',  # Indicates demo if using default
-                    'warning': 'Using last known balance (connection timeout)' if cached_balance > 0 else 'Demo mode - showing default balance',
+                    'dataSource': 'cache_fresh' if cached_balance > 10001 else ('cache_old' if cached_balance > 0 else 'demo'),
+                    'warning': 'Using last known balance (connection timeout)' if (cached_balance > 0 and cached_balance != 10000) else ('Demo mode - showing default balance' if cached_balance == 10000 else None),
                 })
                 
                 # Add to broker group
@@ -4637,7 +4685,6 @@ def get_account_balances():
                 # Accumulate totals from cache (better than $0)
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
-                logger.info(f"✅ Using cached balance for {broker_name} account {account_num}: ${cached_balance:.2f}")
             else:
                 # No fresh data and no cached fallback
                 # In DEMO mode, use demo default balance instead of $0

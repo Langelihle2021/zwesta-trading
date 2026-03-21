@@ -1,0 +1,100 @@
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "terminal64.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            logger.info("Cleaned up existing MT5 processes")
+            time.sleep(2)
+            
+            # Launch Exness MT5 with auto-login parameters
+            # Exness MT5 terminal supports: /account:LOGIN /password:PASS /server:SERVER
+            terminal_args = [
+                mt5_path,
+                f'/account:{account}',
+                f'/password:{password}',
+                f'/server:{server}'
+            ]
+            
+            logger.info(f"Launching: {' '.join(terminal_args[:1])} with login parameters...")
+            
+            subprocess.Popen(
+                terminal_args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            logger.info("✓ Terminal launched with auto-login credentials")
+            
+            # Wait for terminal to fully initialize and login
+            logger.info("⏳ Waiting 20 seconds for MT5 terminal to fully initialize and authenticate...")
+            for countdown in range(20, 0, -1):
+                if countdown % 5 == 0:
+                    logger.info(f"   {countdown}s remaining...")
+                time.sleep(1)
+            
+            logger.info("✅ MT5 terminal initialization complete - ready for SDK connections")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not launch MT5: {e}")
+    else:
+        logger.warning(f"⚠️  MT5 path not found: {mt5_path}")
+    
+    # AUTO-CONNECT to MT5 (so dashboard shows real account balance)
+    # This will retry up to 3 times with increasing waits
+    auto_connect_mt5()
+    
+    # Initialize demo bots on startup (DISABLED for production cleanup)
+    # logger.info("Initializing demo trading bots...")
+    # initialize_demo_bots()
+    # logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
+    
+    # Repopulate active bots from database
+    repopulate_active_bots()
+    
+    # Load user-created bots from database
+    logger.info("Loading user-created bots from database...")
+    user_bots_count = load_user_bots_from_database()
+    logger.info(f"[OK] Loaded {user_bots_count} user bots from database")
+    logger.info(f"[OK] Total bots ready: {len(active_bots)}")
+
+    restarted_bots = start_enabled_bots_on_startup()
+    logger.info(f"[OK] Auto-restarted {restarted_bots} enabled bots after backend startup")
+    
+    # Start live market data updater thread (fetches real prices from MT5)
+    market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
+    market_updater_thread.start()
+    logger.info("🔄 Live market data updater thread started")
+    
+    # Start auto-withdrawal monitoring thread
+    monitoring_thread = threading.Thread(target=auto_withdrawal_monitor, daemon=True)
+    monitoring_thread.start()
+    logger.info("Auto-withdrawal monitoring thread started")
+    
+    try:
+        # Try ports in order: 9000, 5000, 3000
+        ports = [9000, 5000, 3000]
+        started = False
+        for port in ports:
+            try:
+                logger.info(f"Attempting to start on http://0.0.0.0:{port}")
+                app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+                started = True
+                break
+            except OSError as e:
+                logger.warning(f"Cannot bind to port {port}: {e}")
+                continue
+        
+        if not started:
+            logger.error("Failed to start server on any port")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+    finally:
+        # Stop monitoring thread on shutdown
+        monitoring_running = False
+        if monitoring_thread:
+            monitoring_thread.join(timeout=5)
+        logger.info("Backend shutdown complete")
+
+

@@ -1,0 +1,13 @@
+{
+  "botName": "Persistent Demo Bot",
+  "strategy": "trend_following",
+  "brokerName": "Exness",
+  "symbol": "EURUSDm",
+  "accountNumber": "298997455",
+  "password": "Zwesta@1985",
+  "server": "Exness-MT5Trial9",
+  "entryPoint": 65,
+  "exitPoint": 70,
+  "totalInvestment": 100,
+  "enabled": true
+}
