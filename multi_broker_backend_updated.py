@@ -1050,6 +1050,38 @@ def init_database():
         except Exception as e:
             logger.debug(f"timestamp column might already exist: {e}")
 
+    # Migration: Add cached balance columns to broker_credentials if missing
+    cursor.execute("PRAGMA table_info(broker_credentials)")
+    broker_cred_columns = [col[1] for col in cursor.fetchall()]
+    
+    if 'cached_balance' not in broker_cred_columns:
+        try:
+            cursor.execute('ALTER TABLE broker_credentials ADD COLUMN cached_balance REAL DEFAULT 0')
+            logger.info("✅ Migration: Added cached_balance column to broker_credentials")
+        except Exception as e:
+            logger.debug(f"cached_balance column might already exist: {e}")
+    
+    if 'cached_equity' not in broker_cred_columns:
+        try:
+            cursor.execute('ALTER TABLE broker_credentials ADD COLUMN cached_equity REAL DEFAULT 0')
+            logger.info("✅ Migration: Added cached_equity column to broker_credentials")
+        except Exception as e:
+            logger.debug(f"cached_equity column might already exist: {e}")
+    
+    if 'cached_margin_free' not in broker_cred_columns:
+        try:
+            cursor.execute('ALTER TABLE broker_credentials ADD COLUMN cached_margin_free REAL DEFAULT 0')
+            logger.info("✅ Migration: Added cached_margin_free column to broker_credentials")
+        except Exception as e:
+            logger.debug(f"cached_margin_free column might already exist: {e}")
+    
+    if 'last_update' not in broker_cred_columns:
+        try:
+            cursor.execute('ALTER TABLE broker_credentials ADD COLUMN last_update TEXT')
+            logger.info("✅ Migration: Added last_update column to broker_credentials")
+        except Exception as e:
+            logger.debug(f"last_update column might already exist: {e}")
+
     # Market Pause Events table - tracks when markets are paused/halted
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS pause_events (
