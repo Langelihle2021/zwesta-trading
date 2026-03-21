@@ -91,7 +91,7 @@ def repopulate_active_bots():
 # Environment Configuration (DEMO or LIVE)
 ENVIRONMENT = os.getenv('TRADING_ENV', 'DEMO')  # Set TRADING_ENV=LIVE in production
 AUTO_RESTART_BOTS_ON_STARTUP = os.getenv('AUTO_RESTART_BOTS_ON_STARTUP', 'false').lower() == 'true'
-BOT_STARTUP_RESTART_DELAY_SECONDS = max(0.0, float(os.getenv('BOT_STARTUP_RESTART_DELAY_SECONDS', '2')))
+BOT_STARTUP_RESTART_DELAY_SECONDS = max(0.5, float(os.getenv('BOT_STARTUP_RESTART_DELAY_SECONDS', '5')))  # Increased from 2s to 5s to avoid MT5 lock contention
 BOT_STARTUP_RESTART_LIMIT = max(0, int(os.getenv('BOT_STARTUP_RESTART_LIMIT', '0')))
 
 # API Security Configuration
@@ -139,13 +139,12 @@ XM_CONFIG = {
     'path': None
 }
 
-# Try to find XM Global terminal specifically
+# Try to find XM Global terminal specifically (NO generic MT5 fallback)
 xm_paths = [
     r'C:\Program Files\MetaTrader 5 XM\terminal64.exe',
     r'C:\Program Files\XM Global MT5\terminal64.exe',
     r'C:\Program Files (x86)\XM MT5\terminal64.exe',
     r'C:\MT5\XM\terminal64.exe',
-    r'C:\Program Files\MetaTrader 5\terminal64.exe',  # Generic MT5 can work with XM creds
 ]
 for path in xm_paths:
     if os.path.exists(path):
@@ -193,7 +192,7 @@ if ENVIRONMENT == 'LIVE':
             'account': int(live_account),
             'password': live_password,
             'server': live_server,
-            'path': os.getenv('EXNESS_PATH') or None
+            'path': os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
         }
         logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}")
     
@@ -1465,6 +1464,13 @@ class MT5Connection(BrokerConnection):
             account = self.credentials.get('account') or MT5_CONFIG['account']
             password = self.credentials.get('password') or MT5_CONFIG['password']
             server = self.credentials.get('server') or MT5_CONFIG['server']
+            
+            # Override server based on ENVIRONMENT setting (DEMO/LIVE)
+            # This ensures bots respect the global ENVIRONMENT variable
+            if ENVIRONMENT == 'DEMO':
+                server = 'Exness-MT5Trial9'
+            elif ENVIRONMENT == 'LIVE':
+                server = 'Exness-Real'
             
             # Retry logic: attempt connection up to 3 times with increasing delays
             max_retries = 3
@@ -8008,15 +8014,15 @@ def test_broker_connection():
             broker_l = broker.lower()
             if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness']:
                 if broker_l in ['xm', 'xm global']:
-                    expected_server = 'XMGlobal-Demo' if not is_live else 'XMGlobal-Live'
+                    expected_server = 'XMGlobal-Demo' if not ENVIRONMENT == 'LIVE' else 'XMGlobal-Real'
                 elif broker_l == 'exness':
-                    expected_server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+                    expected_server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
                 else:
-                    expected_server = 'MetaQuotes-Demo' if not is_live else 'MetaQuotes-Live'
+                    expected_server = 'MetaQuotes-Demo' if not ENVIRONMENT == 'LIVE' else 'MetaQuotes-Live'
 
                 if not server or server != expected_server:
                     server = expected_server
-                    logger.info(f"   Corrected server to: {server}")
+                    logger.info(f"   Corrected server to: {server} (ENVIRONMENT={ENVIRONMENT})")
             
             # Try to get real balance - first from cache, then via quick MT5 login
             actual_balance = 10000.00  # Default fallback
