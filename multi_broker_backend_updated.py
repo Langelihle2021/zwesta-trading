@@ -3163,36 +3163,12 @@ def is_mt5_broker_name(broker_name: str) -> bool:
 # Store demo trades placed via API (temporary storage for this session)
 demo_trades_storage = {}
 
-# Auto-add default Exness MT5 account
-logger.info("Initializing with Exness MT5 account")
-broker_manager.add_connection('Exness MT5', BrokerType.METATRADER5, MT5_CONFIG)
-
-# Removed: IG Markets auto-connection (IG Markets integration removed)
-
-# Auto-add XM Global MT5 account
-logger.info("Initializing with XM Global MT5 account")
-broker_manager.add_connection('XM Global MT5', BrokerType.METATRADER5, XM_CONFIG)
+# Connections are created when users provide their credentials via API
+# Previously auto-initialized connections have been removed to prevent forced MT5 terminal launches
 
 # AUTO-CONNECT to Exness MT5 on startup (so dashboard shows real balance)
-def auto_connect_mt5():
-    """Auto-connect to Exness MT5 on startup"""
-    try:
-        connection = broker_manager.connections.get('Exness MT5')
-        if connection:
-            logger.info("🔗 Attempting auto-connect to Exness MT5...")
-            if connection.connect():
-                logger.info("✅ Auto-connected to Exness MT5 successfully - balance will display on dashboard")
-                return True
-            else:
-                logger.warning("⚠️  Failed to auto-connect to Exness MT5 - will use simulated trading, dashboard will show $0 balance")
-                return False
-    except Exception as e:
-        logger.warning(f"⚠️  Error auto-connecting to MT5: {e} - will use simulated trading")
-        return False
-
+# Removed: auto_connect_mt5() function - connections are now created only when users provide credentials
 # Removed: auto_connect_ig() function (IG Markets integration removed)
-
-# Note: Connection happens after Flask initialization in __main__
 
 
 # ==================== API ENDPOINTS ====================
@@ -4631,14 +4607,20 @@ def get_account_balances():
                 cached_equity = cache.get('cached_equity', cached_balance) or 0
                 cached_margin = cache.get('cached_margin_free', 0) or 0
                 
+                # In DEMO mode, if cache is empty/zero, use demo default
+                if ENVIRONMENT == 'DEMO' and cached_balance == 0:
+                    cached_balance = 10000
+                    cached_equity = 10000
+                    cached_margin = 10000
+                
                 account_entry.update({
                     'balance': float(cached_balance),
                     'equity': float(cached_equity),
                     'marginFree': float(cached_margin),
                     'currency': 'USD',
                     'connected': False,
-                    'dataSource': 'cached',  # Indicates this is stale cache data
-                    'warning': 'Using last known balance (connection timeout)',
+                    'dataSource': 'cached' if cached_balance > 0 else 'demo',  # Indicates demo if using default
+                    'warning': 'Using last known balance (connection timeout)' if cached_balance > 0 else 'Demo mode - showing default balance',
                 })
                 
                 # Add to broker group
@@ -4652,10 +4634,13 @@ def get_account_balances():
                 logger.info(f"✅ Using cached balance for {broker_name} account {account_num}: ${cached_balance:.2f}")
             else:
                 # No fresh data and no cached fallback
+                # In DEMO mode, use demo default balance instead of $0
+                demo_balance = 10000 if ENVIRONMENT == 'DEMO' else 0
                 account_entry['connected'] = False
-                account_entry['balance'] = 0
-                account_entry['equity'] = 0
-                account_entry['dataSource'] = 'error'
+                account_entry['balance'] = demo_balance
+                account_entry['equity'] = demo_balance
+                account_entry['dataSource'] = 'demo' if ENVIRONMENT == 'DEMO' else 'error'
+                account_entry['warning'] = 'Demo mode - showing default balance' if ENVIRONMENT == 'DEMO' else 'Connection failed'
                 if broker_name not in accounts_summary['brokers']:
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
@@ -14809,76 +14794,8 @@ atexit.register(shutdown_backup)
 
 if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
-    logger.info(f"MT5 Account: {MT5_CONFIG['account']}")
-    logger.info(f"MT5 Server: {MT5_CONFIG['server']}")
-    
-    # AUTO-LAUNCH & LOGIN Exness MT5 Terminal with credentials
-    logger.info("="*60)
-    logger.info("🚀 LAUNCHING EXNESS MT5 TERMINAL WITH AUTO-LOGIN...")
-    logger.info("="*60)
-    
-    mt5_path = MT5_CONFIG.get('path')
-    account = MT5_CONFIG.get('account', '298997455')
-    password = MT5_CONFIG.get('password', 'Zwesta@1985')
-    server = MT5_CONFIG.get('server', 'Exness-MT5Trial9')
-    
-    logger.info(f"Terminal: {mt5_path}")
-    logger.info(f"Account: {account}")
-    logger.info(f"Server: {server}")
     logger.info(f"Mode: {ENVIRONMENT.upper()}")
-    
-    if mt5_path and os.path.exists(mt5_path):
-        try:
-            # Kill any existing MT5 processes first
-            import subprocess
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "terminal.exe"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "terminal64.exe"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            logger.info("Cleaned up existing MT5 processes")
-            time.sleep(2)
-            
-            # Launch Exness MT5 with auto-login parameters
-            # Exness MT5 terminal supports: /account:LOGIN /password:PASS /server:SERVER
-            terminal_args = [
-                mt5_path,
-                f'/account:{account}',
-                f'/password:{password}',
-                f'/server:{server}'
-            ]
-            
-            logger.info(f"Launching: {' '.join(terminal_args[:1])} with login parameters...")
-            
-            subprocess.Popen(
-                terminal_args,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            logger.info("✓ Terminal launched with auto-login credentials")
-            
-            # Wait for terminal to fully initialize and login
-            logger.info("⏳ Waiting 20 seconds for MT5 terminal to fully initialize and authenticate...")
-            for countdown in range(20, 0, -1):
-                if countdown % 5 == 0:
-                    logger.info(f"   {countdown}s remaining...")
-                time.sleep(1)
-            
-            logger.info("✅ MT5 terminal initialization complete - ready for SDK connections")
-        except Exception as e:
-            logger.warning(f"⚠️  Could not launch MT5: {e}")
-    else:
-        logger.warning(f"⚠️  MT5 path not found: {mt5_path}")
-    
-    # AUTO-CONNECT to MT5 (so dashboard shows real account balance)
-    # This will retry up to 3 times with increasing waits
-    auto_connect_mt5()
+    logger.info("Connections will be established when users provide broker credentials")
     
     # Initialize demo bots on startup (DISABLED for production cleanup)
     # logger.info("Initializing demo trading bots...")
