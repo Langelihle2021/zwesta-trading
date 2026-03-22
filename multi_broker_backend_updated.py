@@ -1765,7 +1765,7 @@ class MT5Connection(BrokerConnection):
         # Acquire lock with timeout - INCREASED from 10s to 25s for trading loops
         # Balance checks use 0.1s timeout (non-blocking) to avoid stalling
         # Trading loops use 25s to give MT5 enough time to complete a full trade cycle
-        lock_timeout = self.credentials.get('lock_timeout', 25)  # 25 seconds default for trades
+        lock_timeout = self.credentials.get('lock_timeout', 60)  # 60 seconds default for trades (increased from 25s to handle 10+ concurrent bots)
         
         # CRITICAL FIX: If this is a balance fetch (marked by 'is_balance_check'), use fast timeout
         if self.credentials.get('is_balance_check'):
@@ -9728,7 +9728,12 @@ def create_bot():
             # Bot configuration
             import time
             bot_id = data.get('botId') or f"bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-            raw_symbols = data.get('symbols', ['EURUSDm'])
+            # Support both 'symbol' (singular) and 'symbols' (plural) in request
+            raw_symbols = data.get('symbols') or data.get('symbol')
+            if isinstance(raw_symbols, str):
+                raw_symbols = [raw_symbols]  # Convert single symbol to list
+            if not raw_symbols:
+                raw_symbols = ['EURUSDm']  # Default fallback
             symbols = validate_and_correct_symbols(raw_symbols, broker_name)
             strategy = data.get('strategy', 'Trend Following')
             sanitized_risk_config = sanitize_bot_risk_config(data)
@@ -10075,6 +10080,14 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         def is_market_open_for_symbol(symbol, mt5_conn=None):
             """Check if market is open for the given symbol"""
             try:
+                # ==================== CRYPTO 24/7 OVERRIDE ====================
+                # Crypto symbols (BTC, ETH, etc) trade 24/7 - bypass day-of-week check
+                symbol_upper = symbol.upper()
+                logger.info(f"[MARKET] Checking symbol: {symbol} -> {symbol_upper}")
+                if any(crypto in symbol_upper for crypto in ['BTC', 'ETH', 'XRP', 'USDT']):
+                    logger.info(f"✅ CRYPTO 24/7: {symbol} allowed to trade on weekends/weekdays")
+                    return True, f"Market OPEN for {symbol} (crypto trades 24/7)"
+                
                 symbol_cat = get_symbol_category(symbol)
                 category_hours = market_hours.get(symbol_cat, market_hours['FOREX'])
                 
@@ -10108,7 +10121,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 logger.info(f"🔄 Bot {bot_id}: Trade cycle #{trade_cycle} starting at {datetime.now().isoformat()}")
                 
                 # ==================== CHECK MARKET HOURS ====================
-                symbol_to_trade = bot_config.get('symbol', 'EURUSD')
+                # Get first symbol from symbols list (symbols is stored as list in bot_config)
+                symbols_list = bot_config.get('symbols', ['EURUSDm'])
+                logger.info(f"[BOT {bot_id}] symbols_list from config: {symbols_list}")
+                symbol_to_trade = symbols_list[0] if symbols_list else 'EURUSDm'
+                logger.info(f"[BOT {bot_id}] symbol_to_trade: {symbol_to_trade}")
                 is_open, market_status = is_market_open_for_symbol(symbol_to_trade)
                 
                 if not is_open:
