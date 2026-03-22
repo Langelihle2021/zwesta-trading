@@ -64,8 +64,10 @@ logger = logging.getLogger(__name__)
 # ==================== GLOBAL MT5 CONNECTION LOCK ====================
 # Prevents multiple simultaneous MT5 connections which cause IPC conflicts
 # Only ONE thread should connect to MT5 at a time
-mt5_connection_lock = threading.Lock()
-logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connections")
+# Use RLock (reentrant lock) instead of Lock to allow same thread to reacquire
+# This prevents deadlocks when nested MT5 operations occur
+mt5_connection_lock = threading.RLock()
+logger.info("✅ MT5 connection lock initialized (RLock) - allows multiple bots to queue efficiently")
 
 # ==================== BOT CREATION LOCK ====================
 # Prevents multiple simultaneous bot creations which compete for MT5 resources
@@ -1762,17 +1764,17 @@ class MT5Connection(BrokerConnection):
         """
         global mt5_connection_lock
         
-        # Acquire lock with timeout - REDUCED from 30s to 10s for balance checks
-        # Bot trading loop has its own retry logic, so short timeout is safer
-        # FIX: Balance fetches use 0.1s timeout (non-blocking) to avoid stalling on busy MT5
-        lock_timeout = self.credentials.get('lock_timeout', 10)  # 10 seconds default
+        # Acquire lock with timeout - INCREASED from 10s to 20s to better handle multiple concurrent bots
+        # Bot trading loop has its own retry logic, so longer timeout helps queue better
+        lock_timeout = self.credentials.get('lock_timeout', 20)  # 20 seconds default - better for bot trading queues
         
-        # CRITICAL FIX: If this is a balance fetch (marked by 'is_balance_check'), use fast timeout
+        # CRITICAL FIX: Increase balance check timeout from 0.1s (too short - caused constant failures)
+        # to 3.0s (reasonable queue wait time for balance reads)
         if self.credentials.get('is_balance_check'):
-            lock_timeout = 0.1  # 100ms - fail fast for balance reads when MT5 is busy
-            logger.info(f"⏳ Balance check: Waiting for MT5 lock (max {lock_timeout}s, non-blocking)...")
+            lock_timeout = 3.0  # 3 seconds - gives balance reads time to execute instead of failing immediately
+            logger.info(f"⏳ Balance check: Waiting for MT5 lock (max {lock_timeout}s)...")
         else:
-            logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max {lock_timeout} seconds, sequential mode)...")
+            logger.info(f"⏳ Waiting for MT5 connection lock (max {lock_timeout}s)...")
         
         lock_acquired = mt5_connection_lock.acquire(timeout=float(lock_timeout))
         
