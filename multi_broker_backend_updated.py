@@ -64,10 +64,8 @@ logger = logging.getLogger(__name__)
 # ==================== GLOBAL MT5 CONNECTION LOCK ====================
 # Prevents multiple simultaneous MT5 connections which cause IPC conflicts
 # Only ONE thread should connect to MT5 at a time
-# Use RLock (reentrant lock) instead of Lock to allow same thread to reacquire
-# This prevents deadlocks when nested MT5 operations occur
-mt5_connection_lock = threading.RLock()
-logger.info("✅ MT5 connection lock initialized (RLock) - allows multiple bots to queue efficiently")
+mt5_connection_lock = threading.Lock()
+logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connections")
 
 # ==================== BOT CREATION LOCK ====================
 # Prevents multiple simultaneous bot creations which compete for MT5 resources
@@ -1764,23 +1762,24 @@ class MT5Connection(BrokerConnection):
         """
         global mt5_connection_lock
         
-        # Acquire lock with timeout - INCREASED from 10s to 20s to better handle multiple concurrent bots
-        # Bot trading loop has its own retry logic, so longer timeout helps queue better
-        lock_timeout = self.credentials.get('lock_timeout', 20)  # 20 seconds default - better for bot trading queues
+        # Acquire lock with timeout - INCREASED from 10s to 25s for trading loops
+        # Balance checks use 0.1s timeout (non-blocking) to avoid stalling
+        # Trading loops use 25s to give MT5 enough time to complete a full trade cycle
+        lock_timeout = self.credentials.get('lock_timeout', 25)  # 25 seconds default for trades
         
-        # CRITICAL FIX: Increase balance check timeout from 0.1s (too short - caused constant failures)
-        # to 3.0s (reasonable queue wait time for balance reads)
+        # CRITICAL FIX: If this is a balance fetch (marked by 'is_balance_check'), use fast timeout
         if self.credentials.get('is_balance_check'):
-            lock_timeout = 3.0  # 3 seconds - gives balance reads time to execute instead of failing immediately
-            logger.info(f"⏳ Balance check: Waiting for MT5 lock (max {lock_timeout}s)...")
+            lock_timeout = 0.1  # 100ms - fail fast for balance reads when MT5 is busy
+            logger.info(f"⏳ Balance check: Waiting for MT5 lock (max {lock_timeout}s, non-blocking)...")
         else:
-            logger.info(f"⏳ Waiting for MT5 connection lock (max {lock_timeout}s)...")
+            logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max {lock_timeout} seconds, sequential mode)...")
         
         lock_acquired = mt5_connection_lock.acquire(timeout=float(lock_timeout))
         
         if not lock_acquired:
             logger.warning(f"⚠️ TIMEOUT: Could not acquire MT5 lock after {lock_timeout} seconds - system is busy")
-            logger.warning(f"   Skipping this trade cycle - will retry in {self.credentials.get('tradingInterval', 300)} seconds")
+            retry_delay = self.credentials.get('tradingInterval', 300) + random.uniform(1, 10)  # Add 1-10s random delay
+            logger.warning(f"   Will retry in {retry_delay:.0f}s with staggered delay to reduce lock contention")
             return False  # Return False to signal connection failed, bot will retry next cycle
         
         try:
@@ -8955,7 +8954,7 @@ def test_broker_connection():
             if not got_real_balance:
                 try:
                     import MetaTrader5 as mt5_mod
-                    lock_acquired = mt5_connection_lock.acquire(timeout=10.0)
+                    lock_acquired = mt5_connection_lock.acquire(timeout=2.0)  # Short timeout for balance check
                     if lock_acquired:
                         try:
                             # Terminal is already running - just switch account (fast, no 60s wait)
@@ -10173,7 +10172,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         
                         if not mt5_conn.connect():
                             logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
-                            time.sleep(trading_interval)
+                            # STAGGER: Add random delay (1-15s) so bots don't all retry simultaneously
+                            stagger_delay = random.uniform(1, 15)
+                            actual_wait = trading_interval + stagger_delay
+                            logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                            time.sleep(actual_wait)
                             continue
                         
                         if trade_cycle == 1:
@@ -10194,13 +10197,21 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 continue
                             else:
                                 logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
-                                time.sleep(trading_interval)
+                                # STAGGER: Add random delay to prevent thundering herd
+                                stagger_delay = random.uniform(2, 12)
+                                actual_wait = trading_interval + stagger_delay
+                                logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                time.sleep(actual_wait)
                                 continue
                         active_conn = mt5_conn
                         
                     except Exception as e:
                         logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
-                        time.sleep(trading_interval)
+                        # STAGGER: Add random delay to prevent thundering herd
+                        stagger_delay = random.uniform(2, 12)
+                        actual_wait = trading_interval + stagger_delay
+                        logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                        time.sleep(actual_wait)
                         continue
                 else:
                     try:
@@ -10216,11 +10227,19 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     broker_type = broker_type_new
                                 else:
                                     logger.error(f"Bot {bot_id}: Broker reconnection failed: {new_conn}")
-                                    time.sleep(trading_interval)
+                                    # STAGGER: Add random delay to prevent thundering herd
+                                    stagger_delay = random.uniform(2, 12)
+                                    actual_wait = trading_interval + stagger_delay
+                                    logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                    time.sleep(actual_wait)
                                     continue
                             else:
                                 logger.error(f"Bot {bot_id}: No credentialId for broker reconnection")
-                                time.sleep(trading_interval)
+                                # STAGGER: Add random delay to prevent thundering herd
+                                stagger_delay = random.uniform(2, 12)
+                                actual_wait = trading_interval + stagger_delay
+                                logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                time.sleep(actual_wait)
                                 continue
                         logger.info(f"Bot {bot_id}: Connected to {broker_type} for trading")
                     except Exception as e:
