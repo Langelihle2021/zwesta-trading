@@ -190,11 +190,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _realBotsList = [];
-        });
-      }
+      // Don't wipe existing bot data on refresh errors - preserve previous data
+      print('⚠️ Bot refresh error (keeping previous data): $e');
       rethrow; // Propagate error for retry logic
     }
   }
@@ -479,7 +476,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Build recent bots card showing active trading bots
   Widget _buildRecentBotsCard() {
-    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true).toList();
+    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true || bot['status'] == 'Active').toList();
     if (activeBots.isEmpty) {
       return _glassCard(
         child: Column(
@@ -1044,7 +1041,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── QUICK STATS ROW ──
   Widget _buildQuickStatsRow() {
-    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true).length;
+    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true || bot['status'] == 'Active').length;
     final totalTrades = _realBotsList.fold<int>(
       0, (sum, bot) => sum + (int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0),
     );

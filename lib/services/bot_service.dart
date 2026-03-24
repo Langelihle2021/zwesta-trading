@@ -129,11 +129,11 @@ class BotService extends ChangeNotifier {
         }
       } else {
         _errorMessage = 'Backend returned status ${response.statusCode}';
-        _activeBots = [];
+        // Don't wipe _activeBots - preserve previous data on error
       }
     } catch (e) {
       _errorMessage = 'Error fetching bots: $e';
-      _activeBots = [];
+      // Don't wipe _activeBots - preserve previous data on error
       print('Bot fetch error: $e');
     }
 

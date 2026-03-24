@@ -80,29 +80,54 @@ balance_cache = {}  # { f"{broker}:{account}": {'balance': X, 'equity': Y, 'time
 balance_cache_lock = threading.Lock()
 logger.info("✅ Balance cache initialized - stores real balances from successful MT5 connections")
 
+# ==================== FAILED AUTH COOLDOWN ====================
+# Track accounts that fail auth so we don't repeatedly block the MT5 lock trying bad credentials
+# Format: { account_number: {'timestamp': time.time(), 'error': str} }
+_failed_auth_accounts = {}
+_failed_auth_lock = threading.Lock()
+_FAILED_AUTH_COOLDOWN = 300  # 5 minutes before retrying a failed account
+logger.info("✅ Failed auth cooldown initialized - prevents repeated bad credential retries")
+
 # EMERGENCY FIX: Load demo balances directly into cache
 # Hardcode the demo balances to ensure they're always available
 try:
     with balance_cache_lock:
-        # Load both Exness demo and live accounts with real balance
+        # Load Exness demo account with placeholder balance (will be updated on first MT5 connect)
         balance_cache['Exness:298997455'] = {
-            'balance': 197663.49,
-            'equity': 197663.49,
-            'marginFree': 197663.49,
+            'balance': 190000.00,
+            'equity': 190000.00,
+            'marginFree': 190000.00,
             'timestamp': time.time()
         }
-        balance_cache['Exness:295619855'] = {
-            'balance': 197663.49,
-            'equity': 197663.49,
-            'marginFree': 197663.49,
-            'timestamp': time.time()
-        }
-        logger.info(f"✅ EMERGENCY: Loaded hardcoded demo balances from startup")
+        # NOTE: Account 295619855 removed - dead account with auth failure
+        logger.info(f"✅ EMERGENCY: Loaded startup balance cache")
         logger.info(f"   Cache keys: {list(balance_cache.keys())}")
         logger.info(f"   Exness:298997455 → ${balance_cache['Exness:298997455']['balance']:,.2f}")
-        logger.info(f"   Exness:295619855 → ${balance_cache['Exness:295619855']['balance']:,.2f}")
 except Exception as e:
     logger.error(f"❌ Failed to load emergency demo balances: {e}")
+
+# ==================== GLOBAL MT5 SINGLETON CONNECTION ====================
+# CRITICAL FIX: Reuse single MT5 instance across ALL bots
+# Previously: Each bot created MT5Connection → 14 terminal windows + 14 login dialogs
+# Now: One global connection → ONE terminal window + ONE login (non-interactive)
+global_mt5_instance = None
+global_mt5_lock = threading.Lock()
+
+def get_global_mt5():
+    """Get or create the global MT5 connection singleton"""
+    global global_mt5_instance
+    # Return existing instance if already connected
+    if global_mt5_instance and hasattr(global_mt5_instance, 'connected') and global_mt5_instance.connected:
+        return global_mt5_instance
+    return None
+
+def set_global_mt5(connection):
+    """Set the global MT5 connection instance"""
+    global global_mt5_instance
+    with global_mt5_lock:
+        global_mt5_instance = connection
+
+logger.info("✅ Global MT5 singleton initialized - will reuse single terminal across all bots")
 
 app = Flask(__name__)
 CORS(app)
@@ -130,8 +155,10 @@ API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production
 
 # ==================== ENVIRONMENT MODE ====================
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'DEMO').upper()
+DEPLOYMENT_MODE = os.getenv('DEPLOYMENT_MODE', 'LOCAL').upper()  # LOCAL or VPS
 print(f"\n{'='*70}")
 print(f"[ENVIRONMENT] Current Mode: {ENVIRONMENT}")
+print(f"[DEPLOYMENT] Mode: {DEPLOYMENT_MODE}")
 print(f"{'='*70}\n")
 
 # MT5 Credentials - DEMO (default)
@@ -144,22 +171,27 @@ MT5_CONFIG = {
     'path': None
 }
 
-# Try to find Exness terminal specifically (PRIORITY: broker-specific only)
-exness_paths = [
-    r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
-    r'C:\Program Files\Exness MT5\terminal64.exe',
-    r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
-    r'C:\MT5\Exness\terminal64.exe',
-]
-for path in exness_paths:
-    if os.path.exists(path):
-        MT5_CONFIG['path'] = path
-        logger.info(f"Found Exness MT5 at: {path}")
-        break
+# DEPLOYMENT-AWARE: Only auto-detect local MT5 paths if LOCAL deployment
+# On VPS, MT5 terminal is remote, so don't specify a path (connect to running instance)
+if DEPLOYMENT_MODE == 'LOCAL':
+    # Try to find Exness terminal specifically (PRIORITY: broker-specific only)
+    exness_paths = [
+        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+        r'C:\Program Files\Exness MT5\terminal64.exe',
+        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+        r'C:\MT5\Exness\terminal64.exe',
+    ]
+    for path in exness_paths:
+        if os.path.exists(path):
+            MT5_CONFIG['path'] = path
+            logger.info(f"Found Exness MT5 at: {path}")
+            break
 
-if MT5_CONFIG['path'] is None:
-    logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
-    # Do NOT fallback to generic MT5 - require Exness-specific installation
+    if MT5_CONFIG['path'] is None:
+        logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
+else:
+    logger.info(f"[VPS MODE] Not searching for local MT5 - will connect to remote MT5 terminal")
+    logger.info(f"[VPS MODE] Ensure MT5 terminal is running on VPS and accessible")
 
 # XM Global MT5 Configuration - Support DEMO and LIVE modes
 XM_CONFIG = {
@@ -170,21 +202,25 @@ XM_CONFIG = {
     'path': None
 }
 
-# Try to find XM Global terminal specifically (NO generic MT5 fallback)
-xm_paths = [
-    r'C:\Program Files\MetaTrader 5 XM\terminal64.exe',
-    r'C:\Program Files\XM Global MT5\terminal64.exe',
-    r'C:\Program Files (x86)\XM MT5\terminal64.exe',
-    r'C:\MT5\XM\terminal64.exe',
-]
-for path in xm_paths:
-    if os.path.exists(path):
-        XM_CONFIG['path'] = path
-        logger.info(f"Found XM Global MT5 at: {path}")
-        break
+# DEPLOYMENT-AWARE: Only auto-detect local XM paths if LOCAL deployment
+if DEPLOYMENT_MODE == 'LOCAL':
+    # Try to find XM Global terminal specifically (NO generic MT5 fallback)
+    xm_paths = [
+        r'C:\Program Files\MetaTrader 5 XM\terminal64.exe',
+        r'C:\Program Files\XM Global MT5\terminal64.exe',
+        r'C:\Program Files (x86)\XM MT5\terminal64.exe',
+        r'C:\MT5\XM\terminal64.exe',
+    ]
+    for path in xm_paths:
+        if os.path.exists(path):
+            XM_CONFIG['path'] = path
+            logger.info(f"Found XM Global MT5 at: {path}")
+            break
 
-if XM_CONFIG['path'] is None:
-    logger.warning("⚠️  XM Global MT5 not found in common paths - ensure MetaTrader 5 is installed with XM credentials")
+    if XM_CONFIG['path'] is None:
+        logger.warning("⚠️  XM Global MT5 not found in common paths - ensure MetaTrader 5 is installed with XM credentials")
+else:
+    logger.info(f"[VPS MODE] Not searching for local XM MT5 - will connect to remote terminal")
 
 # Binance Configuration - Support DEMO and LIVE modes
 BINANCE_CONFIG = {
@@ -1718,6 +1754,7 @@ class MT5Connection(BrokerConnection):
         10018: ('NO_LIQUIDITY', 'No liquidity available - market may be paused'),
         10016: ('INVALID_REQUEST', 'Invalid request - often during news events or market halt'),
         10015: ('TRADE_MODE_DISABLED', 'Trading disabled for this symbol'),
+        10040: ('POSITION_LIMIT', 'Broker position limit reached for this symbol - close existing positions first'),
     }
     
     def __init__(self, credentials: Dict = None):
@@ -1809,34 +1846,57 @@ class MT5Connection(BrokerConnection):
             elif ENVIRONMENT == 'LIVE':
                 server = 'Exness-Real'
             
-            # Retry logic: attempt connection up to 3 times with increasing delays
-            max_retries = 3
+            # Ensure account is integer for proper comparison with MT5 login field
+            account = int(account)
+            
+            # CRITICAL FIX: Check if already logged into this account on this terminal
+            # If so, return True immediately without attempting re-init
+            # This prevents loss of session on reconnection attempts
+            try:
+                existing_info = self.mt5.account_info()
+                if existing_info and existing_info.login == account:
+                    logger.info(f"✅ MT5 already logged in to account {account} - reusing existing connection")
+                    self.connected = True
+                    self.account_info = existing_info
+                    return True
+            except Exception as e:
+                logger.debug(f"  (Checking existing session: {e})")
+            
+            # Not logged in to correct account yet - proceed with login
+            
+            # Check failed-auth cooldown - skip accounts that recently failed authorization
+            with _failed_auth_lock:
+                if account in _failed_auth_accounts:
+                    fail_info = _failed_auth_accounts[account]
+                    elapsed = time.time() - fail_info['timestamp']
+                    if elapsed < _FAILED_AUTH_COOLDOWN:
+                        logger.warning(f"⏭️ Skipping account {account} - auth failed {elapsed:.0f}s ago (cooldown: {_FAILED_AUTH_COOLDOWN}s)")
+                        return False
+                    else:
+                        # Cooldown expired, allow retry
+                        del _failed_auth_accounts[account]
+                        logger.info(f"🔄 Auth cooldown expired for account {account} - allowing retry")
+            
+            logger.info(f"Attempting login to account {account}...")
+            
+            # Retry logic: balance checks get 1 attempt (fast fail), trading gets 3
+            is_balance_check = self.credentials.get('is_balance_check', False)
+            max_retries = 1 if is_balance_check else 3
             for attempt in range(1, max_retries + 1):
                 logger.info(f"MT5 connection attempt {attempt}/{max_retries}: Account={account}, Server={server}")
                 
                 try:
                     init_ok = False
                     
-                    # On retry attempts, shutdown and restart terminal to clear IPC state
+                    # On retry attempts, just wait longer for IPC - DON'T kill MT5 terminal
+                    # Killing the terminal causes loss of login session and requires manual re-login
+                    # Instead, just give IPC connection more time to recover
                     if attempt > 1:
-                        logger.info(f"  🔄 Cleaning up previous MT5 state before retry...")
-                        try:
-                            self.mt5.shutdown()
-                        except:
-                            pass
-                        time.sleep(2)
-                        # Kill any lingering MT5 processes
-                        try:
-                            subprocess.run(['taskkill', '/F', '/IM', 'terminal64.exe'], 
-                                         stderr=subprocess.DEVNULL, check=False)
-                            subprocess.run(['taskkill', '/F', '/IM', 'terminal.exe'], 
-                                         stderr=subprocess.DEVNULL, check=False)
-                        except:
-                            pass
-                        time.sleep(2)
-                        # Restart terminal
-                        logger.info(f"  ⏳ Waiting 15 seconds for MT5 terminal to restart...")
-                        time.sleep(15)
+                        logger.info(f"  🔄 Allowing MT5 IPC more time to stabilize before retry...")
+                        # CRITICAL FIX: Keep terminal running - just wait for recovery
+                        retry_wait = 5 + (2 * attempt)
+                        logger.info(f"     IPC recovery delay: {retry_wait} seconds (exponential backoff)")
+                        time.sleep(retry_wait)
                     
                     # ALWAYS use explicit Exness path (NO generic/standalone MT5 fallback)
                     if not self.mt5_path:
@@ -1854,9 +1914,19 @@ class MT5Connection(BrokerConnection):
                             normalized_path = candidate_32
 
                     if os.path.isfile(normalized_path):
-                        init_ok = self.mt5.initialize(path=normalized_path)
+                        # CRITICAL FIX: Pass login credentials directly to initialize()
+                        # Exness MT5 requires credentials in initialize() - calling initialize(path=...)
+                        # then login() separately causes "Authorization failed" (-6) error
+                        logger.info(f"  🔑 Calling mt5.initialize(path='{normalized_path}', login={account}, server='{server}')")
+                        init_ok = self.mt5.initialize(
+                            path=normalized_path,
+                            login=int(account),
+                            password=str(password),
+                            server=str(server)
+                        )
                         if init_ok:
                             self.mt5_path = normalized_path
+                            logger.info(f"  ✓ MT5 initialize() returned True")
                         else:
                             logger.warning(f"  ✗ Exness MT5 initialization failed: {self.mt5.last_error()}")
                     else:
@@ -1864,35 +1934,22 @@ class MT5Connection(BrokerConnection):
                         init_ok = False
 
                     if init_ok:
-                        # Successfully initialized, now try to login
-                        logger.info(f"  ✓ MT5 SDK initialized (path: {self.mt5_path})")
+                        # Successfully initialized AND authenticated (credentials passed to initialize)
+                        logger.info(f"  ✓ MT5 initialized and authenticated (path: {self.mt5_path})")
                         
-                        # CRITICAL: Extended IPC stabilization wait for Exness (terminal must be fully ready)
-                        # Exness terminal REQUIRES 60+ seconds to establish stable IPC connection
-                        # ALL attempts use same 60-second wait (consistent timing requirement)
-                        ipc_wait = 60
-                        logger.info(f"  ⏳ Waiting {ipc_wait} seconds for MT5 IPC stabilization (Attempt {attempt}/3)...")
-                        logger.warning(f"     [IPC STABILITY PHASE] Do NOT interrupt - terminal is initializing...")
+                        # Brief IPC stabilization wait
+                        ipc_wait = 3
+                        logger.info(f"  ⏳ Waiting {ipc_wait}s for MT5 IPC stabilization...")
                         time.sleep(ipc_wait)
                         
-                        # Try login with password first
-                        logger.info(f"  🔐 Attempting login with password...")
-                        try:
-                            login_result = self.mt5.login(account, password=password, server=server)
-                            login_error = self.mt5.last_error()
-                            logger.info(f"     Login result: {login_result}, Error: {login_error}")
-                        except Exception as login_ex:
-                            logger.warning(f"  ✗ Login exception: {login_ex}")
-                            login_result = False
-                            login_error = str(login_ex)
-                        
-                        if login_result:
+                        # Verify account is accessible
+                        acct_info = self.mt5.account_info()
+                        if acct_info and acct_info.login == int(account):
                             self.connected = True
+                            logger.info(f"✅ Logged in to MT5 account {account} successfully")
                             self.get_account_info()
-                            logger.info(f"✅ Connected to MT5 account {account} with password")
                             
                             # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
-                            # This allows balance API to return real data even while bots are trading
                             try:
                                 if self.account_info:
                                     with balance_cache_lock:
@@ -1905,66 +1962,15 @@ class MT5Connection(BrokerConnection):
                                             'timestamp': time.time()
                                         }
                                         logger.info(f"  💾 [BOT CACHE] Key='{cache_key}' Balance=${balance:.2f} (Total cache entries: {len(balance_cache)})")
-                                        logger.info(f"      DEBUG: account={account}, type={type(account)}, balance_cache keys={list(balance_cache.keys())}")
                             except Exception as e:
                                 logger.warning(f"  ⚠️  Failed to cache balance after login: {e}")
                             
                             # Subscribe to all symbols for trading
                             self._subscribe_symbols()
                             return True
-                        
-                        # If password fails, try guest login
-                        logger.warning(f"  ✗ Password login failed: {login_error}")
-                        logger.info(f"  ↻ Attempting guest login (no password)...")
-                        
-                        try:
-                            login_result = self.mt5.login(account, server=server)
-                            login_error = self.mt5.last_error()
-                            logger.info(f"     Guest login result: {login_result}, Error: {login_error}")
-                        except Exception as guest_ex:
-                            logger.warning(f"  ✗ Guest login exception: {guest_ex}")
-                            login_result = False
-                            login_error = str(guest_ex)
-                        
-                        if login_result:
-                            self.connected = True
-                            self.get_account_info()
-                            logger.info(f"✅ Connected to MT5 account {account} (guest mode)")
-                            
-                            # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
-                            # This allows balance API to return real data even while bots are trading
-                            try:
-                                if self.account_info:
-                                    with balance_cache_lock:
-                                        cache_key = get_balance_cache_key('Exness', account)
-                                        balance_cache[cache_key] = {
-                                            'balance': float(self.account_info.get('balance', 0)),
-                                            'equity': float(self.account_info.get('equity', 0)),
-                                            'marginFree': float(self.account_info.get('marginFree', 0)),
-                                            'timestamp': time.time()
-                                        }
-                                        logger.info(f"  💾 Cached balance IMMEDIATELY after guest login: {cache_key} = ${self.account_info.get('balance', 0):.2f} (cache now has {len(balance_cache)} entries)")
-                            except Exception as e:
-                                logger.warning(f"  ⚠️  Failed to cache balance after guest login: {e}")
-                            
-                            # Subscribe to all symbols for trading
-                            self._subscribe_symbols()
-                            return True
-                        
-                        # Both login methods failed
-                        logger.warning(f"  ✗ Both login methods failed: {login_error}")
-                        
-                        # Check if it's an IPC timeout - needs special handling
-                        error_code = login_error[0] if isinstance(login_error, tuple) else -1
-                        if error_code == -10005:  # IPC timeout error
-                            logger.warning(f"  ⚠️  IPC TIMEOUT DETECTED - Terminal may not be fully ready")
-                            logger.warning(f"     This typically means the terminal needs more time to initialize")
-                        
-                        # Shutdown for retry
-                        try:
-                            self.mt5.shutdown()
-                        except:
-                            pass
+                        else:
+                            logger.warning(f"  ✗ Account verification failed after initialize - will retry")
+                            continue
                     
                     else:
                         init_error = self.mt5.last_error()
@@ -1978,18 +1984,30 @@ class MT5Connection(BrokerConnection):
                 except Exception as e:
                     logger.warning(f"  ✗ Error during attempt {attempt}: {e}")
                 
-                # Wait before retry, exponential backoff (extra long for IPC issues)
+                # Wait before retry with exponential backoff
                 if attempt < max_retries:
-                    # CRITICAL: Exness terminal needs VERY long recovery time between attempts
-                    # Retry waits: 120sec (2min), 180sec (3min), 240sec (4min)
-                    wait_time = 60 + (60 * attempt)  
-                    logger.warning(f"  ⏳ CRITICAL WAIT: {wait_time} seconds before retry (IPC recovery phase)...")
-                    logger.warning(f"     Terminal is recovering from IPC connection failure - please wait...")
-                    logger.warning(f"     This is normal for Exness MT5 - do NOT interrupt the process")
+                    # Exponential backoff: 5s, 7s, (no 3rd wait as this completes loop)
+                    wait_time = 5 + (2 * attempt)
+                    logger.info(f"  ⏳ Retry in {wait_time}s (exponential backoff)...")
                     time.sleep(wait_time)
             
             # All retries exhausted
             logger.error(f"❌ Failed to connect to MT5 after {max_retries} attempts")
+            
+            # Track auth failures so we don't keep retrying bad credentials
+            # Only track if the failure was auth-related (not IPC timeout from contention)
+            try:
+                last_err = self.mt5.last_error() if self.mt5 else None
+                if last_err and isinstance(last_err, tuple) and last_err[0] == -6:  # Authorization failed
+                    with _failed_auth_lock:
+                        _failed_auth_accounts[account] = {
+                            'timestamp': time.time(),
+                            'error': str(last_err)
+                        }
+                        logger.warning(f"🚫 Account {account} added to auth cooldown ({_FAILED_AUTH_COOLDOWN}s) due to auth failure")
+            except Exception:
+                pass
+            
             return False
             
         except Exception as e:
@@ -3765,8 +3783,8 @@ def get_balance_cache_key(broker_name: str, account_id) -> str:
     """
     
     # ==================== LAYER 1: ACCOUNT-BASED AUTO-DETECTION ====================
-    # Some brokers are stored with generic names in the database but should use
-    # their actual broker name for cache keys. This map handles that.
+    # Only apply auto-detection when broker_name is generic (e.g., 'MetaTrader 5', 'MT5')
+    # Do NOT override when broker_name is already specific (Exness, XM, etc.)
     ACCOUNT_BROKER_MAPPING = {
         # Exness DEMO - known account that may be stored as 'MetaTrader 5' in DB
         '298997455': 'Exness',
@@ -3783,26 +3801,22 @@ def get_balance_cache_key(broker_name: str, account_id) -> str:
     except (ValueError, TypeError):
         account_str = str(account_id)
     
-    # Check if this account number has a known broker mapping
-    if account_str in ACCOUNT_BROKER_MAPPING:
-        # Use the auto-detected broker from the mapping
-        real_broker = ACCOUNT_BROKER_MAPPING[account_str]
-        cache_key = f"{real_broker}:{account_str}"
-        return cache_key
+    # Only use auto-detection if the broker name is generic (MetaTrader 5, MT5, etc.)
+    # If the broker name is already specific (Exness, XM, Binance), use it as-is
+    normalized_broker = canonicalize_broker_name(broker_name)
+    generic_broker_names = {'MetaTrader5', 'MetaTrader 5', 'MT5'}
     
-    # Also check integer keys in case account_id is passed as int
-    if account_id in ACCOUNT_BROKER_MAPPING:
-        real_broker = ACCOUNT_BROKER_MAPPING[account_id]
-        cache_key = f"{real_broker}:{account_str}"
-        return cache_key
+    if normalized_broker in generic_broker_names or broker_name in generic_broker_names:
+        # Check if this account number has a known broker mapping
+        if account_str in ACCOUNT_BROKER_MAPPING:
+            real_broker = ACCOUNT_BROKER_MAPPING[account_str]
+            return f"{real_broker}:{account_str}"
+        if account_id in ACCOUNT_BROKER_MAPPING:
+            real_broker = ACCOUNT_BROKER_MAPPING[account_id]
+            return f"{real_broker}:{account_str}"
     
     # ==================== LAYER 2: BROKER NAME NORMALIZATION ====================
-    # If account isn't in the auto-detection map, use normalized broker name
-    
-    # 1. Normalize broker name to standard format
-    normalized_broker = canonicalize_broker_name(broker_name)
-    
-    # 2. Return consistent format
+    # Use the provided broker name (normalized) for the cache key
     cache_key = f"{normalized_broker}:{account_str}"
     return cache_key
 
@@ -5035,6 +5049,7 @@ def get_account_balances():
     """
     import signal
     import threading
+    global balance_cache, balance_cache_lock
     
     def timeout_handler():
         """Handler for connection timeout"""
@@ -5084,69 +5099,68 @@ def get_account_balances():
             timed_out = False
             
             try:
-                if broker_name == 'Exness':
-                    # Connect to Exness MT5 with timeout
+                if broker_name in ['Exness', 'XM', 'XM Global']:
+                    # CRITICAL FIX: Balance checks must NEVER call mt5.initialize()
+                    # The MT5 terminal singleton is Exness - only Exness accounts can read from it.
+                    # XM/XM Global use a DIFFERENT MT5 terminal, so they must use cache only.
                     try:
-                        # CRITICAL FIX: Mark this as a balance check so MT5Connection uses 0.1s timeout (non-blocking)
-                        mt5_conn = MT5Connection({
-                            'account': int(account_num) if account_num else 0,
-                            'password': cred['password'],
-                            'server': cred['server'] or ('Exness-Real' if is_live else 'Exness-MT5Trial9'),
-                            'is_balance_check': True,  # Signal MT5Connection to use fast non-blocking timeout
-                        })
-                        # Use threading with timeout to prevent hanging
-                        result = [None]
-                        def connect_exness():
-                            if mt5_conn.connect():
-                                result[0] = mt5_conn.get_account_info()
-                            mt5_conn.disconnect()
+                        import MetaTrader5 as mt5
+                        account_int = int(account_num) if account_num else 0
                         
-                        thread = threading.Thread(target=connect_exness, daemon=True)
-                        thread.start()
-                        thread.join(timeout=2)  # 2-second thread timeout (will fail fast at MT5 lock level)
+                        # Step 1: Skip accounts in auth failure cooldown immediately
+                        skip_account = False
+                        with _failed_auth_lock:
+                            if account_int in _failed_auth_accounts:
+                                fail_info = _failed_auth_accounts[account_int]
+                                elapsed = time.time() - fail_info['timestamp']
+                                if elapsed < _FAILED_AUTH_COOLDOWN:
+                                    logger.info(f"⏭️ Balance: Skipping {broker_name} account {account_int} - auth cooldown ({elapsed:.0f}s / {_FAILED_AUTH_COOLDOWN}s)")
+                                    error_msg = "Account auth failed - using cached balance"
+                                    skip_account = True
+                                else:
+                                    del _failed_auth_accounts[account_int]
                         
-                        if thread.is_alive():
-                            logger.warning(f"Exness balance fetch timed out for {account_num}")
-                            timed_out = True
-                            error_msg = "Connection timeout"
-                        else:
-                            account_info = result[0]
-                            if not account_info:
-                                error_msg = "Failed to connect to Exness MT5"
+                        if not skip_account:
+                            # Step 2: Only Exness accounts can read from the MT5 session
+                            # (the MT5 terminal is Exness - XM would need its own terminal)
+                            if broker_name == 'Exness':
+                                try:
+                                    existing = mt5.account_info()
+                                    if existing and existing.login == account_int:
+                                        account_info = {
+                                            'balance': existing.balance,
+                                            'equity': existing.equity,
+                                            'marginFree': existing.margin_free,
+                                            'currency': existing.currency,
+                                            'accountNumber': account_num,
+                                            'broker': broker_name,
+                                            'leverage': existing.leverage,
+                                        }
+                                        logger.info(f"✅ Balance: Read directly from MT5 session for {broker_name} {account_int}: ${existing.balance:.2f}")
+                                        
+                                        # Update balance cache with fresh data
+                                        with balance_cache_lock:
+                                            cache_key = get_balance_cache_key(broker_name, account_num)
+                                            balance_cache[cache_key] = {
+                                                'balance': existing.balance,
+                                                'equity': existing.equity,
+                                                'marginFree': existing.margin_free,
+                                                'timestamp': time.time()
+                                            }
+                                    else:
+                                        # Different account or MT5 not connected - use cache
+                                        current_login = existing.login if existing else 'none'
+                                        logger.info(f"ℹ️ Balance: Exness {account_int} not active MT5 session (current: {current_login}) - using cache")
+                                        error_msg = "Account not currently connected - using cached balance"
+                                except Exception as e:
+                                    logger.info(f"ℹ️ Balance: MT5 not available for Exness {account_int}: {e} - using cache")
+                                    error_msg = "MT5 session not available - using cached balance"
+                            else:
+                                # XM / XM Global: Cannot read from Exness MT5 terminal - use cache
+                                logger.info(f"ℹ️ Balance: {broker_name} {account_int} uses different MT5 terminal - using cache")
+                                error_msg = "Broker uses separate MT5 terminal - using cached balance"
                     except Exception as e:
-                        logger.warning(f"Exness balance error: {e}")
-                        error_msg = str(e)
-                
-                elif broker_name in ['XM', 'XM Global']:
-                    # Connect to XM Global MT5 with timeout
-                    try:
-                        # CRITICAL FIX: Mark this as a balance check so MT5Connection uses 0.1s timeout (non-blocking)
-                        mt5_conn = MT5Connection({
-                            'account': int(account_num) if account_num else 0,
-                            'password': cred['password'],
-                            'server': cred['server'] or ('XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'),
-                            'is_balance_check': True,  # Signal MT5Connection to use fast non-blocking timeout
-                        })
-                        result = [None]
-                        def connect_xm():
-                            if mt5_conn.connect():
-                                result[0] = mt5_conn.get_account_info()
-                            mt5_conn.disconnect()
-                        
-                        thread = threading.Thread(target=connect_xm, daemon=True)
-                        thread.start()
-                        thread.join(timeout=2)  # 2-second thread timeout (will fail fast at MT5 lock level)
-                        
-                        if thread.is_alive():
-                            logger.warning(f"XM balance fetch timed out for {account_num}")
-                            timed_out = True
-                            error_msg = "Connection timeout"
-                        else:
-                            account_info = result[0]
-                            if not account_info:
-                                error_msg = "Failed to connect to XM MT5"
-                    except Exception as e:
-                        logger.warning(f"XM balance error: {e}")
+                        logger.warning(f"{broker_name} balance error: {e}")
                         error_msg = str(e)
                 
                 elif broker_name == 'Binance':
@@ -5253,7 +5267,6 @@ def get_account_balances():
                 accounts_summary['totalEquity'] += account_entry['equity']
             else:
                 # CRITICAL FIX: Connection failed (timeout or error) - check cache first before demo default
-                global balance_cache, balance_cache_lock
                 # Use SAME cache key format that bot uses (ensures consistent lookup)
                 cache_key = get_balance_cache_key(broker_name, account_num)
                 cached_balance = 0
@@ -6113,11 +6126,12 @@ def get_account_detailed():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get primary broker credential
+        # Get primary broker credential (ORDER BY credential_id to prefer the first/primary account)
         cursor.execute('''
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY credential_id
             LIMIT 1
         ''', (user_id,))
         
@@ -6130,16 +6144,44 @@ def get_account_detailed():
                 'error': 'No Exness credentials found'
             }), 404
         
-        # Connect to Exness and pull detailed data
-        mt5_conn = MT5Connection({
-            'account': int(cred[2]),
-            'password': cred[3],
-            'server': cred[4],
-        })
+        # CRITICAL FIX: Read from existing MT5 session instead of re-initializing
+        import MetaTrader5 as mt5
+        account_int = int(cred[2])
+        account_info = None
+        try:
+            existing = mt5.account_info()
+            if existing and existing.login == account_int:
+                account_info = {
+                    'accountNumber': cred[2],
+                    'balance': existing.balance,
+                    'equity': existing.equity,
+                    'marginFree': existing.margin_free,
+                    'currency': existing.currency,
+                    'leverage': existing.leverage,
+                    'broker': 'Exness',
+                    'profit': existing.profit,
+                    'margin': existing.margin,
+                    'margin_level': existing.margin_level if existing.margin_level else 0,
+                    'name': existing.name,
+                    'server': existing.server,
+                    'trade_mode': existing.trade_mode,
+                }
+                logger.info(f"✅ Account detailed: Read from existing MT5 session for {account_int}")
+        except Exception as e:
+            logger.warning(f"Could not read existing MT5 session: {e}")
         
-        if mt5_conn.connect():
-            account_info = mt5_conn.get_account_info()
-            mt5_conn.disconnect()
+        if not account_info:
+            # Fallback: try full connect (only if session doesn't match)
+            mt5_conn = MT5Connection({
+                'account': account_int,
+                'password': cred[3],
+                'server': cred[4],
+            })
+            if mt5_conn.connect():
+                account_info = mt5_conn.get_account_info()
+                mt5_conn.disconnect()
+        
+        if account_info:
             
             return jsonify({
                 'success': True,
@@ -6174,6 +6216,7 @@ def get_positions_detailed():
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY credential_id
             LIMIT 1
         ''', (user_id,))
         
@@ -6234,6 +6277,7 @@ def get_trades_history():
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY credential_id
             LIMIT 1
         ''', (user_id,))
         
@@ -6292,6 +6336,7 @@ def get_account_performance():
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY credential_id
             LIMIT 1
         ''', (user_id,))
         
@@ -6616,19 +6661,19 @@ SYMBOL_PARAMETERS = {
     # CRYPTOCURRENCIES - Extreme volatility
     'BTCUSDm': {
         'atr_multiplier': 2.0,  # Wide stops for crypto
-        'stop_loss_pips': 50,
-        'take_profit_pips': 100,
+        'stop_loss_pips': 50000,
+        'take_profit_pips': 100000,
         'max_slippage': 0.002,
-        'min_signal_strength': 70,
+        'min_signal_strength': 40,
         'volatility_high': 5.0,
         'volatility_low': 1.0,
     },
     'ETHUSDm': {
         'atr_multiplier': 2.0,
-        'stop_loss_pips': 40,
-        'take_profit_pips': 80,
+        'stop_loss_pips': 2000,
+        'take_profit_pips': 5000,
         'max_slippage': 0.002,
-        'min_signal_strength': 70,
+        'min_signal_strength': 40,
         'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
@@ -6752,7 +6797,7 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
     """
     try:
         # Get price data from market_data
-        current_price = market_data.get('current_price', 0)
+        current_price = market_data.get('current_price', 0) or market_data.get('price', 0)
         if current_price <= 0:
             return {
                 'signal': 'NEUTRAL',
@@ -6764,23 +6809,26 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
             }
         
         # Get price history
-        price_history = market_data.get('price_history', [current_price] * 30)[-30:]
+        price_history = market_data.get('price_history', [current_price] * 50)[-50:]
         if len(price_history) < 5:
-            price_history = [current_price] * 30
+            price_history = [current_price] * 50
         
         # Calculate technical indicators
         rsi = calculate_rsi(price_history, period=14)
         ma_short, ma_long = calculate_moving_averages(price_history, short=10, long=20)
         macd_line, signal_line, histogram = calculate_macd(price_history)
         
-        # Determine trend
-        if current_price > ma_long:
+        # Determine trend — use dead zone around ma_long to avoid flip-flopping
+        ma_diff_pct = (current_price - ma_long) / ma_long * 100 if ma_long > 0 else 0
+        if ma_diff_pct > 0.1:  # clearly above MA → uptrend or ranging
+            trend = 'UP' if ma_short > ma_long else 'RANGING'
+        elif ma_diff_pct < -0.1:  # clearly below MA → downtrend
+            trend = 'DOWN'
+        else:  # price near ma_long → use MA crossover for direction
             if ma_short > ma_long:
                 trend = 'UP'
             else:
-                trend = 'RANGING'
-        else:
-            trend = 'DOWN'
+                trend = 'DOWN'
         
         # Determine volatility from market data
         volatility_pct = market_data.get('volatility_pct', 1.0)
@@ -6807,35 +6855,74 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
             strength += 30
             signal = 'SELL'
             entry_reason.append(f'RSI overbought ({rsi:.0f})')
-        elif 45 < rsi < 55:
+        elif rsi < 45:
+            strength += 15
+            signal = 'BUY'
+            entry_reason.append(f'RSI leaning oversold ({rsi:.0f})')
+        elif rsi > 55:
+            strength += 15
+            signal = 'SELL'
+            entry_reason.append(f'RSI leaning overbought ({rsi:.0f})')
+        else:  # 45 <= rsi <= 55
             strength += 10
-            entry_reason.append(f'RSI neutral ({rsi:.0f})')
+            # Use recent price momentum for direction in neutral RSI zone
+            # Compare against price_history[-5] for wider momentum window
+            ref_idx = -5 if len(price_history) >= 5 else -len(price_history)
+            ref_price = price_history[ref_idx]
+            if current_price < ref_price:
+                signal = 'SELL'
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + bearish momentum')
+            elif current_price > ref_price:
+                signal = 'BUY'
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + bullish momentum')
+            else:
+                # Fallback: use MA crossover for direction
+                if ma_short < ma_long:
+                    signal = 'SELL'
+                    entry_reason.append(f'RSI neutral ({rsi:.0f}) + MA bearish')
+                elif ma_short > ma_long:
+                    signal = 'BUY'
+                    entry_reason.append(f'RSI neutral ({rsi:.0f}) + MA bullish')
+                else:
+                    entry_reason.append(f'RSI neutral ({rsi:.0f})')
         
         # MACD-based signals (0-30)
+        macd_direction = None
         if histogram > 0 and macd_line > signal_line:
             strength += 20
-            if signal == 'NEUTRAL':
-                signal = 'BUY'
+            macd_direction = 'BUY'
             entry_reason.append('MACD bullish')
         elif histogram < 0 and macd_line < signal_line:
             strength += 20
-            if signal == 'NEUTRAL':
-                signal = 'SELL'
+            macd_direction = 'SELL'
             entry_reason.append('MACD bearish')
         
-        # Trend-based signals (0-30)
+        # Trend-based signals (0-30) — always contribute when trend detected
+        trend_direction = None
         if trend == 'UP':
-            if signal != 'SELL':
-                strength += 15
-                if signal == 'NEUTRAL':
-                    signal = 'BUY'
-                entry_reason.append('Uptrend confirmed')
+            strength += 15
+            trend_direction = 'BUY'
+            entry_reason.append('Uptrend confirmed')
         elif trend == 'DOWN':
-            if signal != 'BUY':
-                strength += 15
-                if signal == 'NEUTRAL':
-                    signal = 'SELL'
-                entry_reason.append('Downtrend confirmed')
+            strength += 15
+            trend_direction = 'SELL'
+            entry_reason.append('Downtrend confirmed')
+        elif trend == 'RANGING' and signal != 'NEUTRAL':
+            strength += 15
+            entry_reason.append('Ranging market - follow signal')
+        
+        # Majority-vote direction: if MACD + trend disagree with RSI, majority wins
+        if signal != 'NEUTRAL' and macd_direction and trend_direction:
+            votes = {'BUY': 0, 'SELL': 0}
+            votes[signal] += 1  # RSI vote
+            votes[macd_direction] += 1  # MACD vote
+            votes[trend_direction] += 1  # Trend vote
+            majority = 'BUY' if votes['BUY'] > votes['SELL'] else 'SELL'
+            if majority != signal:
+                signal = majority
+        elif signal == 'NEUTRAL':
+            # Set direction from MACD or trend
+            signal = macd_direction or trend_direction or 'NEUTRAL'
         
         # Volatility adjustment (0-10)
         if volatility == 'LOW':
@@ -6844,6 +6931,10 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
         elif volatility == 'HIGH' and signal != 'NEUTRAL':
             strength -= 10
             entry_reason.append('High volatility - reduced confidence')
+        
+        # Debug logging for signal evaluation
+        if symbol in ['ETHUSDm', 'BTCUSDm', 'XAUUSDm']:
+            logger.info(f"[SIGNAL-DBG] {symbol}: rsi={rsi:.1f} macd_h={histogram:.6f} trend={trend} vol={volatility} sig={signal} str={strength} ma_diff={ma_diff_pct:.4f}% reasons={entry_reason}")
         
         # Determine signal strength category
         if signal == 'NEUTRAL':
@@ -6958,14 +7049,12 @@ def trend_following_strategy(symbol, account_id, risk_amount, market_data=None):
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
     params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
     
-    # Trend following needs strong trend + strong signal
-    if signal_eval['trend'] == 'RANGING':
-        return None
-    
+    # Trend following needs trend + signal (ranging allowed at normal threshold)
     if signal_eval['strength'] < params['min_signal_strength']:
         return None
     
-    order_type = 'BUY' if signal_eval['trend'] == 'UP' else 'SELL'
+    # Use the actual signal direction from the evaluator
+    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
     
     return {
         'symbol': symbol,
@@ -7496,6 +7585,11 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
             logger.warning(f"Could not load trades from DB for bot {row['bot_id']}: {e}")
     bot_state['profitHistory'] = bot_state.get('profitHistory') or []
     bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
+    # Clear today's P&L on restore — stale/sample-trade values from before a
+    # restart would otherwise immediately trigger daily-loss limits.  Real
+    # intra-day P&L will be recalculated from new trades placed after restart.
+    today_key = datetime.now().strftime('%Y-%m-%d')
+    bot_state['dailyProfits'].pop(today_key, None)
     bot_state['strategyHistory'] = bot_state.get('strategyHistory') or []
     bot_state['displayCurrency'] = str(bot_state.get('displayCurrency') or 'USD').upper()
     bot_state['profit'] = bot_state.get('totalProfit', 0.0) or 0.0
@@ -7526,32 +7620,44 @@ def persist_bot_runtime_state(bot_id: str):
     runtime_state = _extract_persistable_bot_state(bot_config)
     updated_at = datetime.now().isoformat()
 
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            '''
-            UPDATE user_bots
-            SET enabled = ?,
-                daily_profit = ?,
-                total_profit = ?,
-                runtime_state = ?,
-                updated_at = ?
-            WHERE bot_id = ?
-            ''',
-            (
-                1 if bot_config.get('enabled', False) else 0,
-                daily_profit,
-                total_profit,
-                json.dumps(runtime_state),
-                updated_at,
-                bot_id,
-            ),
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.warning(f"Could not persist runtime state for bot {bot_id}: {e}")
+    conn = None
+    for attempt in range(3):
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE user_bots
+                SET enabled = ?,
+                    daily_profit = ?,
+                    total_profit = ?,
+                    runtime_state = ?,
+                    updated_at = ?
+                WHERE bot_id = ?
+                ''',
+                (
+                    1 if bot_config.get('enabled', False) else 0,
+                    daily_profit,
+                    total_profit,
+                    json.dumps(runtime_state),
+                    updated_at,
+                    bot_id,
+                ),
+            )
+            conn.commit()
+            break
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+            else:
+                logger.warning(f"Could not persist runtime state for bot {bot_id}: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                conn = None
 
 
 def log_pause_event(bot_id: str, user_id: str, symbol: str, pause_type: str, retcode: int, 
@@ -8050,21 +8156,14 @@ def get_live_prices_from_mt5():
     global previous_prices
     
     try:
-        mt5_connection = broker_manager.connections.get('Exness MT5')
-        if not mt5_connection:
-            logger.debug("❌ Exness MT5 connection not found in broker_manager")
-            return None
+        # Use the global MT5 singleton directly (warmed up on main thread)
+        import MetaTrader5 as mt5
         
-        if not mt5_connection.connected:
-            logger.debug("❌ Exness MT5 connection exists but not connected")
+        if not mt5.terminal_info():
+            logger.debug("MT5 terminal not connected for live price updates")
             return None
         
         live_prices = {}
-        mt5 = mt5_connection.mt5
-        
-        if not mt5:
-            logger.debug("❌ MT5 SDK not initialized")
-            return None
         
         # Fetch prices for all valid symbols
         for symbol in VALID_SYMBOLS:
@@ -8225,9 +8324,11 @@ def get_live_prices_from_mt5():
                 
                 live_prices[symbol] = {
                     'price': round(current_price, 5),
+                    'current_price': round(current_price, 5),
                     'change': round(price_change, 3),  # Changed from 2 to 3 decimal places for precision
                     'trend': trend,
                     'volatility': volatility,
+                    'volatility_pct': round(spread_percent, 4),
                     'signal': signal,
                     'recommendation': recommendation,
                 }
@@ -8257,6 +8358,23 @@ def live_market_data_updater():
     # Initialize previous prices from current commodity_market_data
     initialize_previous_prices()
     
+    # Seed price_history from MT5 historical candles for better initial signals
+    try:
+        import MetaTrader5 as _mt5_hist
+        for symbol in list(commodity_market_data.keys()):
+            try:
+                rates = _mt5_hist.copy_rates_from_pos(symbol, _mt5_hist.TIMEFRAME_M5, 0, 50)
+                if rates is not None and len(rates) > 5:
+                    price_history = [float(r[4]) for r in rates]  # close prices
+                    commodity_market_data[symbol]['price_history'] = price_history
+                    commodity_market_data[symbol]['current_price'] = price_history[-1]
+                    logger.info(f"📈 Seeded {symbol} price history: {len(price_history)} M5 candles, latest={price_history[-1]:.2f}")
+            except Exception as e:
+                logger.debug(f"Could not seed price history for {symbol}: {e}")
+        logger.info("✅ Price history seeding complete")
+    except Exception as e:
+        logger.warning(f"Could not seed price history from MT5: {e}")
+    
     update_interval = 2  # Update prices every 2 seconds (faster updates = better signals)
     update_failed_count = 0
     max_failed_attempts = 10
@@ -8270,11 +8388,32 @@ def live_market_data_updater():
                 # Update commodity_market_data with live prices (thread-safe)
                 with market_data_lock:
                     updated_count = 0
+                    now_ts = time.time()
                     for symbol, data in live_prices.items():
                         if symbol in commodity_market_data:
-                            # Keep all original data but update prices and signals
+                            # Update display fields (current_price, trend, signal, etc.)
+                            # but do NOT touch price_history — that is re-seeded from M5 candles below
                             commodity_market_data[symbol].update(data)
                             updated_count += 1
+                    
+                    # Re-seed price_history from M5 candles every 300s (one M5 bar)
+                    # This keeps technical indicators (RSI, MACD, MA) operating on
+                    # proper OHLC data instead of flat tick-level noise.
+                    last_reseed = getattr(live_market_data_updater, '_last_m5_reseed', 0)
+                    if now_ts - last_reseed >= 300:
+                        try:
+                            import MetaTrader5 as _mt5_reseed
+                            for symbol in list(commodity_market_data.keys()):
+                                try:
+                                    rates = _mt5_reseed.copy_rates_from_pos(symbol, _mt5_reseed.TIMEFRAME_M5, 0, 50)
+                                    if rates is not None and len(rates) > 5:
+                                        commodity_market_data[symbol]['price_history'] = [float(r[4]) for r in rates]
+                                except Exception:
+                                    pass
+                            live_market_data_updater._last_m5_reseed = now_ts
+                            logger.info(f"📈 Re-seeded price_history from M5 candles for {len(commodity_market_data)} symbols")
+                        except Exception as e:
+                            logger.warning(f"M5 re-seed failed: {e}")
                     
                     if updated_count > 0:
                         # Count signal types for visibility
@@ -9487,7 +9626,7 @@ def request_bot_deletion(bot_id):
 
 BOT_RISK_LIMITS = {
     'riskPerTrade': (5.0, 30.0),
-    'maxDailyLoss': (20.0, 150.0),
+    'maxDailyLoss': (20.0, 2000.0),
     'profitLock': (0.0, 300.0),
     'drawdownPausePercent': (3.0, 12.0),
     'drawdownPauseHours': (2.0, 12.0),
@@ -9601,10 +9740,10 @@ def _generate_sample_trades_for_bot(symbols: List[str], trade_count: int = 10):
         total_profit = 0
         winning_trades = 0
         
-        # Generate trades over the last 30 days
+        # Generate trades over the last 30 days (exclude today so daily P&L starts clean)
         for i in range(trade_count):
-            # Random date within past 30 days
-            days_ago = random.randint(0, 30)
+            # Random date within past 30 days (starting from 1 day ago, not today)
+            days_ago = random.randint(1, 30)
             trade_time = now - timedelta(days=days_ago)
             date_key = trade_time.strftime('%Y-%m-%d')
             
@@ -9631,10 +9770,8 @@ def _generate_sample_trades_for_bot(symbols: List[str], trade_count: int = 10):
             
             total_profit += profit
         
-        # Ensure we have data for today
-        today_key = now.strftime('%Y-%m-%d')
-        if today_key not in daily_profits:
-            daily_profits[today_key] = random.uniform(-500, 2000)
+        # Do NOT generate fake profit for today - bot should start with clean daily P&L
+        # so it doesn't immediately hit daily loss limits before placing any real trades
         
         return trade_history, daily_profits, round(total_profit, 2), winning_trades
         
@@ -9693,13 +9830,16 @@ def create_bot():
                 return jsonify({'success': False, 'error': 'User not found'}), 404
 
             cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, is_active
                 FROM broker_credentials
                 WHERE credential_id = ? AND user_id = ?
             ''', (credential_id, user_id))
             credential_row = cursor.fetchone()
             if not credential_row:
                 return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
+
+            if not credential_row['is_active']:
+                return jsonify({'success': False, 'error': 'This broker credential has been deactivated. Please use an active credential.'}), 400
 
             credential_data = dict(credential_row)
             broker_name = credential_data['broker_name']
@@ -10058,24 +10198,32 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         # ==================== MARKET HOURS CONFIG ====================
         # Define market hours for different symbol groups (UTC time)
         market_hours = {
-            'FOREX': {'open': (21, 0), 'close': (21, 0), 'days': [0, 1, 2, 3, 4]},  # Sun-Thu, opens 21:00 UTC Fri, closes 21:00 UTC Fri
+            'FOREX': {'open': (0, 0), 'close': (24, 0), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri, effectively 24h (market opens Sun 21:00 UTC, closes Fri 21:00 UTC)
             'CRYPTO': {'open': (0, 0), 'close': (24, 0), 'days': [0, 1, 2, 3, 4, 5, 6]},  # 24/7
             'INDICES': {'open': (8, 0), 'close': (22, 0), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri
-            'COMMODITIES': {'open': (8, 0), 'close': (22, 0), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri
+            'COMMODITIES': {'open': (1, 0), 'close': (23, 59), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri (gold/oil trade ~23h/day)
+            'STOCKS': {'open': (13, 30), 'close': (20, 0), 'days': [0, 1, 2, 3, 4]},  # US stocks: 9:30 AM - 4:00 PM ET = 13:30 - 20:00 UTC
         }
+        
+        # Known US stock symbols on Exness (end with 'm' suffix)
+        STOCK_SYMBOLS = {'AAPL', 'AMD', 'MSFT', 'NVDA', 'JPM', 'BAC', 'WFC', 'GOOGL', 'META', 'ORCL', 'TSM',
+                         'AAPLM', 'AMDM', 'MSFTM', 'NVDAM', 'JPMM', 'BACM', 'WFCM', 'GOOGLM', 'METAM', 'ORCLM', 'TSMM'}
         
         def get_symbol_category(symbol):
             """Determine symbol category from its name"""
             symbol_upper = symbol.upper()
-            if any(pair in symbol_upper for pair in ['EUR', 'GBP', 'USD', 'JPY', 'CHF']):
-                return 'FOREX'
+            # Check commodities FIRST (XAU/XAG contain USD but are commodities, not forex)
+            if any(com in symbol_upper for com in ['XAU', 'XAG', 'OIL', 'GAS', 'WHEAT']):
+                return 'COMMODITIES'
             elif any(crypto in symbol_upper for crypto in ['BTC', 'ETH', 'XRP', 'USDT']):
                 return 'CRYPTO'
-            elif any(idx in symbol_upper for idx in ['SPX', 'NDX', 'TECH', 'DOW']):
+            elif any(idx in symbol_upper for idx in ['SPX', 'NDX', 'TECH', 'DOW', 'USTEC']):
                 return 'INDICES'
-            elif any(com in symbol_upper for com in ['XAU', 'XAG', 'OIL', 'GAS', 'WHEAT']):
-                return 'COMMODITIES'
-            return 'FOREX'  # Default
+            elif symbol_upper in STOCK_SYMBOLS:
+                return 'STOCKS'
+            elif any(pair in symbol_upper for pair in ['EUR', 'GBP', 'USD', 'JPY', 'CHF']):
+                return 'FOREX'
+            return 'STOCKS'  # Default to STOCKS (safer - has restricted hours)
         
         def is_market_open_for_symbol(symbol, mt5_conn=None):
             """Check if market is open for the given symbol"""
@@ -10181,11 +10329,26 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             else:
                                 # Create new connection and cache it
                                 if bot_credentials:
-                                    mt5_conn = MT5Connection(bot_credentials)
+                                    # CRITICAL FIX: Use global MT5 singleton instead of creating new instances
+                                    # BEFORE: Each bot created MT5Connection → 14 terminal windows
+                                    # NOW: All bots reuse single global connection → 1 terminal window
+                                    mt5_conn = get_global_mt5()
+                                    if not mt5_conn:
+                                        logger.info(f"Bot {bot_id}: Creating global MT5 singleton connection...")
+                                        mt5_conn = MT5Connection(bot_credentials)
+                                        set_global_mt5(mt5_conn)
+                                    else:
+                                        logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
                                 else:
-                                    mt5_conn = MT5Connection()
+                                    mt5_conn = get_global_mt5()
+                                    if not mt5_conn:
+                                        logger.info(f"Bot {bot_id}: Creating global MT5 singleton (no credentials)...")
+                                        mt5_conn = MT5Connection()
+                                        set_global_mt5(mt5_conn)
+                                    else:
+                                        logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
                                 broker_connection_cache[cache_key] = mt5_conn
-                                logger.debug(f"✨ Bot {bot_id}: New MT5 connection created and cached")
+                                logger.debug(f"✨ Bot {bot_id}: MT5 connection cached")
                         
                         if not mt5_conn.connect():
                             logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
@@ -10391,15 +10554,56 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             else:
                                 symbols_to_try = [symbol, 'EURUSDm']  # Fallback only if primary fails
                             
+                            # ✅ CHECK: Skip if bot already has an open position on this symbol
+                            existing_positions = mt5_conn.get_positions()
+                            bot_id_short = bot_id.split('_')[-1][:8]
+                            comment_short = f'ZBot{bot_id_short}'
+                            has_open_position = False
+                            for ep in existing_positions:
+                                ep_comment = ep.get('comment', '') or ''
+                                ep_symbol = ep.get('symbol', '')
+                                if comment_short in ep_comment and ep_symbol == symbol:
+                                    has_open_position = True
+                                    logger.info(f"📌 Bot {bot_id}: Already has open position on {symbol} (ticket={ep.get('ticket')}) - skipping new order")
+                                    break
+                            if has_open_position:
+                                continue
+                            
+                            # ✅ Calculate SL/TP price levels for MT5
+                            sl_price = None
+                            tp_price = None
+                            try:
+                                _tick = mt5_conn.mt5.symbol_info_tick(symbol)
+                                _sym_info = mt5_conn.mt5.symbol_info(symbol)
+                                if _tick and _sym_info:
+                                    _point = _sym_info.point
+                                    _spread = _tick.ask - _tick.bid
+                                    _sl_pips = trade_params.get('stop_loss', 50)
+                                    _tp_pips = trade_params.get('take_profit', 100)
+                                    _sl_dist = _sl_pips * _point
+                                    _tp_dist = _tp_pips * _point
+                                    # Ensure SL is at least 3x spread, TP at least 5x spread
+                                    _sl_dist = max(_sl_dist, _spread * 3)
+                                    _tp_dist = max(_tp_dist, _spread * 5)
+                                    if order_type == 'BUY':
+                                        sl_price = round(_tick.ask - _sl_dist, _sym_info.digits)
+                                        tp_price = round(_tick.ask + _tp_dist, _sym_info.digits)
+                                    else:
+                                        sl_price = round(_tick.bid + _sl_dist, _sym_info.digits)
+                                        tp_price = round(_tick.bid - _tp_dist, _sym_info.digits)
+                                    logger.info(f"📐 Bot {bot_id}: SL={sl_price}, TP={tp_price} (spread={_spread:.2f}, sl_dist={_sl_dist:.2f}, tp_dist={_tp_dist:.2f})")
+                            except Exception as e:
+                                logger.warning(f"Bot {bot_id}: Could not calculate SL/TP: {e}")
+                            
                             for index, attempt_symbol in enumerate(symbols_to_try):
                                 try:
-                                    bot_id_short = bot_id.split('_')[-1][:8]
-                                    comment_short = f'ZBot{bot_id_short}'
                                     order_result = mt5_conn.place_order(
                                         symbol=attempt_symbol,
                                         order_type=order_type,
                                         volume=round(adjusted_volume, 2),
-                                        comment=comment_short
+                                        comment=comment_short,
+                                        stopLoss=sl_price,
+                                        takeProfit=tp_price
                                     )
                                     
                                     if order_result.get('success', False):
@@ -10419,8 +10623,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol} ({order_result.get('error')}) - trying {symbols_to_try[index+1]}...")
                                             continue
                                         else:
-                                            # Check if this was a critical symbol that couldn't be retried
-                                            if attempt_symbol in critical_symbols:
+                                            # Don't log CRITICAL for pause conditions (position limit, market closed, etc.)
+                                            if attempt_symbol in critical_symbols and not order_result.get('is_paused'):
                                                 logger.error(f"❌ CRITICAL SYMBOL FAILED: Bot {bot_id}: {attempt_symbol} failed and NO fallback allowed: {order_result.get('error')}")
                                             logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
                                             break
@@ -10512,6 +10716,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             break
                                 
                                 if matched_pos:
+                                    # Get the position's current P&L
+                                    trade_profit = matched_pos.get('netProfit', matched_pos.get('pnl', 0))
+                                    pos_symbol = matched_pos.get('symbol') or matched_pos.get('instrument') or symbol
+                                    pos_type = matched_pos.get('type') or matched_pos.get('direction', order_type)
+                                    
                                     # ==================== PROFIT-LOCKING SYSTEM ====================
                                     # If position has reached 50% of profit target, move stop loss to breakeven
                                     expected_max_profit = trade_params.get('take_profit', 30)  # In pips
@@ -10575,12 +10784,29 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     
                                     # Store in database
                                     try:
-                                        trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db')
+                                        trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
                                         trade_cursor = trade_conn.cursor()
+                                        trade_id = f"trade_{int(datetime.now().timestamp()*1000)}_{bot_id[-8:]}"
                                         trade_cursor.execute('''
-                                            INSERT INTO trades (bot_id, user_id, trade_data, timestamp)
-                                            VALUES (?, ?, ?, ?)
-                                        ''', (bot_id, user_id, json.dumps(trade), trade['timestamp']))
+                                            INSERT INTO trades (trade_id, bot_id, user_id, symbol, order_type, volume, price, profit, ticket, time_open, time_close, status, created_at, trade_data, timestamp)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        ''', (
+                                            trade_id,
+                                            bot_id,
+                                            user_id,
+                                            trade.get('symbol', symbol),
+                                            trade.get('type', 'UNKNOWN'),
+                                            trade.get('volume', 0),
+                                            trade.get('entryPrice', 0),
+                                            trade.get('profit', 0),
+                                            trade.get('ticket', None),
+                                            trade.get('entryTime', datetime.now().isoformat()),
+                                            trade.get('exitTime', datetime.now().isoformat()),
+                                            'closed',
+                                            datetime.now().isoformat(),
+                                            json.dumps(trade),
+                                            trade['timestamp']
+                                        ))
                                         trade_conn.commit()
                                         trade_conn.close()
                                     except Exception as e:
@@ -11446,6 +11672,7 @@ def bot_status():
                 'profitability': round(profitability, 2),
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
+                'enabled': bot.get('enabled', True),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
                 'pauseReason': bot.get('pauseReason'),
                 'lastPauseEvent': bot.get('lastPauseEvent'),  # Include last market pause event
@@ -11461,7 +11688,7 @@ def bot_status():
         
         return jsonify({
             'success': True,
-            'activeBots': len([b for b in bots_list if b.get('enabled', True)]),
+            'activeBots': len([b for b in bots_list if b.get('enabled', True) or b.get('status') == 'Active']),
             'bots': bots_list,
             'timestamp': datetime.now().isoformat(),
         }), 200
@@ -16078,6 +16305,30 @@ if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
     logger.info(f"Mode: {ENVIRONMENT.upper()}")
     logger.info("Connections will be established when users provide broker credentials")
+    
+    # CRITICAL: Warm up MT5 connection on main thread BEFORE any bot threads start
+    # This establishes the IPC pipe to the terminal; bot threads can then reuse it
+    if MT5_CONFIG.get('path') and MT5_CONFIG.get('account') and MT5_CONFIG.get('password'):
+        try:
+            import MetaTrader5 as _mt5_warmup
+            logger.info("[STARTUP] Warming up MT5 connection on main thread...")
+            warmup_ok = _mt5_warmup.initialize(
+                path=MT5_CONFIG['path'],
+                login=int(MT5_CONFIG['account']),
+                password=str(MT5_CONFIG['password']),
+                server=str(MT5_CONFIG['server'])
+            )
+            if warmup_ok:
+                _acct = _mt5_warmup.account_info()
+                if _acct:
+                    logger.info(f"[STARTUP] ✅ MT5 warm-up successful: Account {_acct.login}, Balance ${_acct.balance:.2f}")
+                else:
+                    logger.warning("[STARTUP] MT5 initialized but no account info")
+                # Keep connection open for bot threads to reuse
+            else:
+                logger.warning(f"[STARTUP] ⚠️ MT5 warm-up failed: {_mt5_warmup.last_error()}")
+        except Exception as e:
+            logger.warning(f"[STARTUP] MT5 warm-up exception: {e}")
     
     # Initialize demo bots on startup (DISABLED for production cleanup)
     # logger.info("Initializing demo trading bots...")

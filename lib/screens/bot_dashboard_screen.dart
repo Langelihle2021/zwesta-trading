@@ -100,7 +100,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               botId.contains(_searchQuery.toLowerCase()) ||
               symbol.contains(_searchQuery.toLowerCase()) ||
               strategy.contains(_searchQuery.toLowerCase());
-          final isEnabled = bot['enabled'] == true;
+          final isEnabled = bot['enabled'] == true || bot['status'] == 'Active';
           final matchesFilter = _filterStatus == 'all' ||
               (_filterStatus == 'active' && isEnabled) ||
               (_filterStatus == 'inactive' && !isEnabled);
@@ -118,7 +118,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         final featuredBotIds = top5.map((bot) => (bot['botId'] ?? '').toString()).toSet();
         final remainingBots = bots.where((bot) => !featuredBotIds.contains((bot['botId'] ?? '').toString())).toList();
 
-        final activeBots = allBots.where((b) => b['enabled'] == true).length;
+        final activeBots = allBots.where((b) => b['enabled'] == true || b['status'] == 'Active').length;
         final totalProfit = allBots.fold<double>(
           0, (sum, b) => sum + (double.tryParse(b['profit']?.toString() ?? '0') ?? 0),
         );
@@ -415,7 +415,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
 
   Widget _buildUnifiedBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) {
     final botId = bot['botId'] ?? 'Unknown';
-    final isEnabled = bot['enabled'] == true;
+    final isEnabled = bot['enabled'] == true || bot['status'] == 'Active';
     final status = (bot['status'] ?? (isEnabled ? 'Active' : 'Inactive')).toString().toUpperCase();
     final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
     final totalTrades = int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0;
