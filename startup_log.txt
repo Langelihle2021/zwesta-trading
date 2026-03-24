@@ -1,0 +1,163 @@
+INFO:__main__:\u2705 MT5 connection lock initialized - ensures sequential MT5 connections
+INFO:__main__:\U0001f30d Running environment: LOCAL (DEVELOPMENT)
+WARNING:__main__:\u26a0\ufe0f  MT5 login dialogs will be SKIPPED on local dev machine (no visual dialogs)
+INFO:__main__:\u2705 MT5 login session cache initialized - prevents duplicate login dialogs
+INFO:__main__:\u2705 MT5 login gate initialized - prevents cascading retry storms
+INFO:__main__:\u2705 Bot creation lock initialized - prevents concurrent bot creation
+INFO:__main__:\u2705 Balance cache initialized - stores real balances from successful MT5 connections
+INFO:__main__:\u2705 EMERGENCY: Loaded hardcoded demo balances from startup
+INFO:__main__:   Cache keys: ['Exness:298997455', 'Exness:295619855']
+INFO:__main__:   Exness:298997455 \u2192 $197,663.49
+INFO:__main__:   Exness:295619855 \u2192 $197,663.49
+INFO:__main__:Found Exness MT5 at: C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
+INFO:__main__:Found XM Global MT5 at: C:\Program Files\XM Global MT5\terminal64.exe
+INFO:__main__:[DEMO] Using Exness demo credentials - Account: 298997455
+INFO:__main__:[DEMO] To trade live, set ENVIRONMENT=LIVE in .env and restart
+INFO:__main__:[INIT] Backend initialized in DEMO mode
+INFO:__main__:[DEMO] DEMO MODE - Exness Account: 298997455 (Demo)
+INFO:__main__:[DEMO] Available in DEMO: 298997455
+INFO:__main__:[DEMO] Available in LIVE: 295619855
+INFO:__main__:Database initialized
+INFO:__main__:\U0001f504 Checking database health...
+INFO:system.backup_and_recovery:\U0001f50d Checking database health on startup...
+INFO:system.backup_and_recovery:\u2705 Database integrity check passed
+INFO:system.backup_and_recovery:\U0001f4ca Data verification:
+INFO:system.backup_and_recovery:   Users: 3
+INFO:system.backup_and_recovery:   Bots: 7
+INFO:system.backup_and_recovery:   Credentials: 3
+INFO:__main__:\u2705 Database verified: {'users': 3, 'bots': 7, 'credentials': 3}
+INFO:system.backup_and_recovery:\U0001f504 Auto-backup started (interval: 1800s)
+INFO:__main__:\u2705 Backup system initialized
+INFO:system.backup_and_recovery:\u2705 Database backed up: backup_20260323_134957.db.gz (0.02MB)
+INFO:__main__:\u2705 IG API service loaded
+INFO:__main__:\u2705 OANDA API service loaded
+INFO:__main__:\u2705 FXCM API service loaded
+INFO:__main__:\u2705 Binance API service loaded
+INFO:__main__:\u2705 Unified broker service loaded
+INFO:__main__:Starting Zwesta Multi-Broker Backend
+INFO:__main__:Mode: DEMO
+INFO:__main__:Connections will be established when users provide broker credentials
+INFO:__main__:\u2705 MT5 terminal already running - reusing active instance
+INFO:__main__:\u2705 Loaded 7 user-created bots from database
+INFO:__main__:\u2705 Repopulated 7 bots from database on startup.
+INFO:__main__:Loading user-created bots from database...
+INFO:__main__:[OK] Loaded 0 user bots from database
+INFO:__main__:[OK] Total bots ready: 7
+INFO:__main__:\U0001f916 Bot bot_1774130460891_3c5cae0f: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:\u267b\ufe0f Restarted bot bot_1774130460891_3c5cae0f from persisted runtime state
+INFO:__main__:Bot bot_1774130460891_3c5cae0f: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot bot_1774130460891_3c5cae0f: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #1 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:   Initial delay: 0.0s (prevents simultaneous MT5 connection)
+INFO:__main__:\U0001f504 Bot bot_1774130460891_3c5cae0f: Trade cycle #1 starting at 2026-03-23T13:49:57.479267
+INFO:__main__:[BOT bot_1774130460891_3c5cae0f] symbols_list from config: ['EURUSDm']
+INFO:__main__:[BOT bot_1774130460891_3c5cae0f] symbol_to_trade: EURUSDm
+INFO:__main__:[MARKET] Checking symbol: EURUSDm -> EURUSDM
+INFO:__main__:\u23f8\ufe0f  Bot bot_1774130460891_3c5cae0f: Market closed - FOREX trading hours: 21:00-21:00 UTC - will wait for next cycle
+INFO:__main__:   \u23f0 Next check in 300 seconds
+INFO:__main__:\U0001f916 Bot FixedETHBot: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:Bot FixedETHBot: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot FixedETHBot: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #2 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:   Initial delay: 42.9s (prevents simultaneous MT5 connection)
+INFO:__main__:   \u23f3 Waiting 42.9s before first trade cycle...
+INFO:__main__:\u267b\ufe0f Restarted bot FixedETHBot from persisted runtime state
+INFO:__main__:\U0001f916 Bot TestInvestment2500: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:Bot TestInvestment2500: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot TestInvestment2500: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #3 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:\u267b\ufe0f Restarted bot TestInvestment2500 from persisted runtime state
+INFO:__main__:   Initial delay: 85.7s (prevents simultaneous MT5 connection)
+INFO:__main__:   \u23f3 Waiting 85.7s before first trade cycle...
+INFO:__main__:\U0001f916 Bot bot_1774134216472_f8f14bed: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:Bot bot_1774134216472_f8f14bed: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot bot_1774134216472_f8f14bed: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #4 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:   Initial delay: 128.6s (prevents simultaneous MT5 connection)
+INFO:__main__:   \u23f3 Waiting 128.6s before first trade cycle...
+INFO:__main__:\u267b\ufe0f Restarted bot bot_1774134216472_f8f14bed from persisted runtime state
+INFO:__main__:\U0001f916 Bot bot_1774134472767_48fc28de: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:\u267b\ufe0f Restarted bot bot_1774134472767_48fc28de from persisted runtime state
+INFO:__main__:Bot bot_1774134472767_48fc28de: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot bot_1774134472767_48fc28de: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #5 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:   Initial delay: 171.4s (prevents simultaneous MT5 connection)
+INFO:__main__:   \u23f3 Waiting 171.4s before first trade cycle...
+INFO:__main__:\U0001f916 Bot bot_1774134597027_9e824c14: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:\u267b\ufe0f Restarted bot bot_1774134597027_9e824c14 from persisted runtime state
+INFO:__main__:Bot bot_1774134597027_9e824c14: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot bot_1774134597027_9e824c14: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #6 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:   Initial delay: 214.3s (prevents simultaneous MT5 connection)
+INFO:__main__:   \u23f3 Waiting 214.3s before first trade cycle...
+INFO:__main__:\U0001f916 Bot bot_1774173092126_c2003132: CONTINUOUS TRADING LOOP STARTED (user 6531812c-ae51-4f53-b16a-a346aae873a1)
+INFO:__main__:\u267b\ufe0f Restarted bot bot_1774173092126_c2003132 from persisted runtime state
+INFO:__main__:Bot bot_1774173092126_c2003132: \u23f1\ufe0f TIME-BASED MODE - trades every 300s (5.0 min)
+INFO:__main__:\U0001f500 Bot bot_1774173092126_c2003132: Applying stagger delay for MT5 lock management
+INFO:__main__:   Bot #7 of 7
+INFO:__main__:   Trading cycle interval: 300s
+INFO:__main__:   Stagger per bot: 42.9s
+INFO:__main__:   Initial delay: 257.1s (prevents simultaneous MT5 connection)
+INFO:__main__:   \u23f3 Waiting 257.1s before first trade cycle...
+INFO:__main__:[OK] Auto-restarted 7 enabled bots after backend startup
+INFO:__main__:\u2705 Live market data updater thread started
+INFO:__main__:\U0001f504 Live market data updater thread started
+INFO:__main__:Starting auto-withdrawal monitoring thread...
+INFO:__main__:Auto-withdrawal monitoring thread started
+INFO:__main__:Attempting to start on http://0.0.0.0:9000
+
+======================================================================
+[ENVIRONMENT] Current Mode: DEMO
+======================================================================
+
+======================================================================
+[DEMO MODE] ­ƒƒó USING DEMO ACCOUNTS (Safe for Testing)
+======================================================================
+EXNESS:    Account 298997455 | Server: Exness-MT5Trial9
+XM GLOBAL: Demo account (check .env for XM_ACCOUNT if not using defaults)
+BINANCE:   Testnet mode (check .env for BINANCE_DEMO_API_KEY)
+======================================================================
+
+­ƒôî TO SWITCH TO LIVE MODE:
+   1. Edit .env file and set: ENVIRONMENT=LIVE
+   2. Update EXNESS_ACCOUNT, XM_ACCOUNT, BINANCE_API_KEY with YOUR credentials
+   3. Restart backend: python multi_broker_backend_updated.py
+   4. Check logs for: [LIVE] mode indicators
+
+ * Serving Flask app 'multi_broker_backend_updated'
+ * Debug mode: off
+INFO:werkzeug:WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:9000
+ * Running on http://192.168.0.137:9000
+INFO:werkzeug:Press CTRL+C to quit
+INFO:__main__:\u2705 Prepared price tracking for 16 symbols (will baseline on first MT5 fetch)
+WARNING:__main__:\u26a0\ufe0f  Could not fetch live prices from MT5 - MT5 connection may not be ready
+INFO:__main__:\U0001f504 Bot FixedETHBot: Trade cycle #1 starting at 2026-03-23T13:50:45.363710
+INFO:__main__:[BOT FixedETHBot] symbols_list from config: ['ETHUSDm']
+INFO:__main__:[BOT FixedETHBot] symbol_to_trade: ETHUSDm
+INFO:__main__:[MARKET] Checking symbol: ETHUSDm -> ETHUSDM
+INFO:__main__:\u2705 CRYPTO 24/7: ETHUSDm allowed to trade on weekends/weekdays
+INFO:__main__:[MT5 Terminal] Using Exness MT5 terminal (launched on backend startup)
+INFO:__main__:\u23f3 Waiting for exclusive MT5 connection lock (max 35s, sequential mode...)
+INFO:__main__:\u2705 Acquired MT5 connection lock - proceeding with connection
+INFO:__main__:MT5 connection attempt 1/3: Account=298997455, Server=Exness-MT5Trial9
+WARNING:__main__:  \u2717 Exness MT5 initialization failed: (-6, 'Terminal: Authorization failed')
+WARNING:__main__:  \u2717 MT5 initialization failed: (-6, 'Terminal: Authorization failed')
+WARNING:__main__:  \u23f3 Retrying in 5 seconds (attempt 1/3)...
+INFO:__main__:MT5 connection attempt 2/3: Account=298997455, Server=Exness-MT5Trial9
+INFO:__main__:  \U0001f504 Cleaning up previous MT5 IPC state before retry...
+INFO:__main__:     \u2713 MT5.shutdown() called successfully (IPC disconnected)
+INFO:__main__:  \u23f3 Waiting 5 seconds for MT5 IPC to reset (terminal stays running)...

@@ -1207,7 +1207,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
       return const SizedBox.shrink();
     }
 
-    final recent = _igTransactions.length > 10 ? _igTransactions.sublist(0, 10) : _igTransactions;
+    final recent = _igTransactions.length > 50 ? _igTransactions.sublist(0, 50) : _igTransactions;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1541,8 +1541,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
       );
     }
 
-    final recentTrades = tradeHistory.length > 10
-        ? tradeHistory.sublist(tradeHistory.length - 10)
+    final recentTrades = tradeHistory.length > 50
+        ? tradeHistory.sublist(tradeHistory.length - 50)
         : tradeHistory;
 
     return Column(
