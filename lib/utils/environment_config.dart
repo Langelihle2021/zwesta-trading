@@ -3,14 +3,14 @@ import 'package:flutter/foundation.dart';
 enum Environment { development, staging, production }
 
 class EnvironmentConfig {
-  // VPS Configuration (via SSH Tunnel - localhost.run)
-  static const String _vpsHost = 'eb1f287822e264.lhr.life';
-  static const int _vpsPort = 443; // HTTPS via SSH tunnel
+  // VPS Configuration (Direct connection)
+  static const String _vpsHost = '38.247.146.198';
+  static const int _vpsPort = 9000;
 
   // Default API URLs - can be overridden by environment variables
-  static const String _devApiUrl = 'https://eb1f287822e264.lhr.life';
-  static const String _stagingApiUrl = 'https://eb1f287822e264.lhr.life';
-  static const String _prodApiUrl = 'https://eb1f287822e264.lhr.life';
+  static const String _devApiUrl = 'http://38.247.146.198:9000';
+  static const String _stagingApiUrl = 'http://38.247.146.198:9000';
+  static const String _prodApiUrl = 'http://38.247.146.198:9000';
 
   static const String _devApiKey = 'your_generated_api_key_here_dev';
   static const String _stagingApiKey = 'your_generated_api_key_here_staging';
