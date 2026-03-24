@@ -4,13 +4,13 @@ enum Environment { development, staging, production }
 
 class EnvironmentConfig {
   // VPS Configuration
-  static const String _vpsHost = '38.247.146.198';
+  static const String _vpsHost = '192.168.0.137';
   static const int _vpsPort = 9000; // Flask backend port
 
   // Default API URLs - can be overridden by environment variables
   static const String _devApiUrl = 'http://localhost:9000';
-  static const String _stagingApiUrl = 'http://38.247.146.198:9000';
-  static const String _prodApiUrl = 'http://38.247.146.198:9000';
+  static const String _stagingApiUrl = 'http://192.168.0.137:9000';
+  static const String _prodApiUrl = 'http://192.168.0.137:9000';
 
   static const String _devApiKey = 'your_generated_api_key_here_dev';
   static const String _stagingApiKey = 'your_generated_api_key_here_staging';
