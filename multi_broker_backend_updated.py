@@ -35,6 +35,7 @@ from enum import Enum
 import sys
 import atexit
 from system.backup_and_recovery import BackupManager, RecoveryManager
+from worker_manager import WorkerPoolManager
 
 # Load environment variables from .env file
 try:
@@ -318,13 +319,21 @@ BOT_STARTUP_RESTART_LIMIT = max(0, int(os.getenv('BOT_STARTUP_RESTART_LIMIT', '0
 # API Security Configuration
 API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production')
 
+# ==================== WORKER POOL CONFIG ====================
+WORKER_COUNT = max(0, int(os.getenv('WORKER_COUNT', '0')))  # 0 = single-process (legacy), 1+ = multi-process
+MAX_BOTS_PER_WORKER = max(1, int(os.getenv('MAX_BOTS_PER_WORKER', '35')))
+
 # ==================== ENVIRONMENT MODE ====================
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'DEMO').upper()
 DEPLOYMENT_MODE = os.getenv('DEPLOYMENT_MODE', 'LOCAL').upper()  # LOCAL or VPS
 print(f"\n{'='*70}")
 print(f"[ENVIRONMENT] Current Mode: {ENVIRONMENT}")
 print(f"[DEPLOYMENT] Mode: {DEPLOYMENT_MODE}")
+print(f"[WORKERS] Worker Count: {WORKER_COUNT} ({'multi-process' if WORKER_COUNT > 0 else 'single-process (legacy)'})")
 print(f"{'='*70}\n")
+
+# ==================== WORKER POOL MANAGER ====================
+worker_pool_manager = WorkerPoolManager(worker_count=WORKER_COUNT, max_bots_per_worker=MAX_BOTS_PER_WORKER)
 
 # MT5 Credentials - DEMO (default)
 # Exness MT5 Configuration Only (NO standalone MT5 fallback)
@@ -975,6 +984,33 @@ class BrokerType(Enum):
 # ==================== DATABASE SETUP ====================
 # ==================== DATABASE SETUP ====================
 DATABASE_PATH = r'C:\backend\zwesta_trading.db'
+
+# ==================== WORKER POOL STATUS ENDPOINT ====================
+@app.route('/api/admin/workers', methods=['GET'])
+def get_worker_pool_status():
+    """Get status of all worker processes (admin endpoint)"""
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if api_key != API_KEY:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    if not worker_pool_manager or not worker_pool_manager.enabled:
+        return jsonify({
+            'success': True,
+            'mode': 'single-process',
+            'worker_count': 0,
+            'workers': [],
+            'message': 'Worker pool disabled (WORKER_COUNT=0). Using single-process mode.'
+        })
+
+    workers = worker_pool_manager.get_worker_status()
+    return jsonify({
+        'success': True,
+        'mode': 'multi-process',
+        'worker_count': worker_pool_manager.worker_count,
+        'max_bots_per_worker': worker_pool_manager.max_bots_per_worker,
+        'workers': workers,
+    })
+
 
 # ==================== CLEANUP ENDPOINT ====================
 @app.route('/api/bots/cleanup', methods=['POST'])
@@ -1771,6 +1807,52 @@ def init_database():
             created_at TEXT,
             updated_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+
+    # ==================== WORKER POOL TABLES (100+ User Scaling) ====================
+    # Worker pool: tracks each worker subprocess and its health
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS worker_pool (
+            worker_id INTEGER PRIMARY KEY,
+            pid INTEGER,
+            status TEXT DEFAULT 'stopped',
+            account_group TEXT,
+            mt5_path TEXT,
+            heartbeat_at TEXT,
+            started_at TEXT,
+            stopped_at TEXT,
+            bot_count INTEGER DEFAULT 0,
+            error_message TEXT
+        )
+    ''')
+
+    # Worker bot queue: assigns bots to workers and sends commands
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS worker_bot_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            worker_id INTEGER,
+            command TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            bot_config TEXT,
+            credentials TEXT,
+            created_at TEXT,
+            processed_at TEXT,
+            FOREIGN KEY (worker_id) REFERENCES worker_pool(worker_id)
+        )
+    ''')
+
+    # Worker bot assignments: persistent mapping of bot → worker
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS worker_bot_assignments (
+            bot_id TEXT PRIMARY KEY,
+            worker_id INTEGER NOT NULL,
+            account_number TEXT,
+            broker_name TEXT,
+            assigned_at TEXT,
+            FOREIGN KEY (worker_id) REFERENCES worker_pool(worker_id)
         )
     ''')
 
@@ -8382,7 +8464,11 @@ def start_enabled_bots_on_startup():
 
 
 def stop_bot_runtime(bot_id: str, bot_config: Dict[str, Any]) -> Dict[str, Any]:
-    if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+    # If worker pool is active, send stop via worker queue
+    if worker_pool_manager and worker_pool_manager.enabled:
+        worker_pool_manager.stop_bot(bot_id)
+        logger.info(f"🛑 Bot {bot_id}: Stop dispatched to worker pool")
+    elif bot_id in bot_threads and bot_threads[bot_id].is_alive():
         logger.info(f"🛑 Bot {bot_id}: Stopping background trading thread...")
         bot_stop_flags[bot_id] = True
         bot_threads[bot_id].join(timeout=30)
@@ -10621,60 +10707,79 @@ def create_bot():
             running_bots[bot_id] = True
             bot_stop_flags[bot_id] = False
 
-            def _async_start_bot():
-                """Start bot in background without blocking the API response"""
-                try:
-                    time.sleep(0.5)
+            # ==================== WORKER POOL DISPATCH ====================
+            if worker_pool_manager and worker_pool_manager.enabled:
+                # Dispatch to a worker subprocess instead of local thread
+                _worker_creds = None
+                if credential_id:
+                    try:
+                        _wc_conn = get_db_connection()
+                        _wc_cursor = _wc_conn.cursor()
+                        _wc_cursor.execute('SELECT account_number, password, server FROM broker_credentials WHERE credential_id = ? AND user_id = ?', (credential_id, user_id))
+                        _wc_row = _wc_cursor.fetchone()
+                        _wc_conn.close()
+                        if _wc_row:
+                            _worker_creds = {'account_number': _wc_row['account_number'] or account_number, 'password': _wc_row['password'], 'server': _wc_row['server'], 'is_live': bool(is_live)}
+                    except Exception as e:
+                        logger.warning(f'Worker dispatch: could not fetch credentials: {e}')
+                worker_pool_manager.dispatch_bot(bot_id, user_id, active_bots[bot_id], _worker_creds)
+                logger.info(f"🚀 Bot {bot_id}: Dispatched to worker pool")
+            else:
+                # Legacy single-process mode
+                def _async_start_bot():
+                    """Start bot in background without blocking the API response"""
+                    try:
+                        time.sleep(0.5)
 
-                    bot_credentials = None
-                    if credential_id:
-                        conn_local = None
-                        try:
-                            conn_local = get_db_connection()
-                            cursor_local = conn_local.cursor()
-                            cursor_local.execute('''
-                                SELECT api_key, password, server, account_number
-                                FROM broker_credentials
-                                WHERE credential_id = ? AND user_id = ?
-                            ''', (credential_id, user_id))
-                            cred_row = cursor_local.fetchone()
+                        bot_credentials = None
+                        if credential_id:
+                            conn_local = None
+                            try:
+                                conn_local = get_db_connection()
+                                cursor_local = conn_local.cursor()
+                                cursor_local.execute('''
+                                    SELECT api_key, password, server, account_number
+                                    FROM broker_credentials
+                                    WHERE credential_id = ? AND user_id = ?
+                                ''', (credential_id, user_id))
+                                cred_row = cursor_local.fetchone()
 
-                            if cred_row:
-                                if canonicalize_broker_name(broker_name) == 'Binance':
-                                    bot_credentials = {
-                                        'api_key': cred_row['api_key'],
-                                        'api_secret': cred_row['password'],
-                                        'server': cred_row['server'] or 'spot',
-                                        'is_live': bool(is_live),
-                                    }
-                                else:
-                                    bot_credentials = {
-                                        'account_number': cred_row['account_number'] or account_number,
-                                        'password': cred_row['password'],
-                                        'server': cred_row['server'],
-                                        'is_live': bool(is_live),
-                                    }
-                        except Exception as e:
-                            logger.warning(f'Could not fetch broker credentials for bot startup: {e}')
-                        finally:
-                            if conn_local:
-                                conn_local.close()
+                                if cred_row:
+                                    if canonicalize_broker_name(broker_name) == 'Binance':
+                                        bot_credentials = {
+                                            'api_key': cred_row['api_key'],
+                                            'api_secret': cred_row['password'],
+                                            'server': cred_row['server'] or 'spot',
+                                            'is_live': bool(is_live),
+                                        }
+                                    else:
+                                        bot_credentials = {
+                                            'account_number': cred_row['account_number'] or account_number,
+                                            'password': cred_row['password'],
+                                            'server': cred_row['server'],
+                                            'is_live': bool(is_live),
+                                        }
+                            except Exception as e:
+                                logger.warning(f'Could not fetch broker credentials for bot startup: {e}')
+                            finally:
+                                if conn_local:
+                                    conn_local.close()
 
-                    if bot_id not in bot_threads or not bot_threads[bot_id].is_alive():
-                        bot_thread = threading.Thread(
-                            target=continuous_bot_trading_loop,
-                            args=(bot_id, user_id, bot_credentials),
-                            daemon=True,
-                            name=f"BotThread-{bot_id}"
-                        )
-                        bot_threads[bot_id] = bot_thread
-                        bot_thread.start()
-                        logger.info(f"🚀 Bot {bot_id}: Background thread launched (async start)")
-                except Exception as e:
-                    logger.error(f"Error in async bot start: {e}")
+                        if bot_id not in bot_threads or not bot_threads[bot_id].is_alive():
+                            bot_thread = threading.Thread(
+                                target=continuous_bot_trading_loop,
+                                args=(bot_id, user_id, bot_credentials),
+                                daemon=True,
+                                name=f"BotThread-{bot_id}"
+                            )
+                            bot_threads[bot_id] = bot_thread
+                            bot_thread.start()
+                            logger.info(f"🚀 Bot {bot_id}: Background thread launched (async start)")
+                    except Exception as e:
+                        logger.error(f"Error in async bot start: {e}")
 
-            startup_thread = threading.Thread(target=_async_start_bot, daemon=True)
-            startup_thread.start()
+                startup_thread = threading.Thread(target=_async_start_bot, daemon=True)
+                startup_thread.start()
 
             account_balance = 10000.0
             try:
@@ -12015,43 +12120,61 @@ def quick_create_bot():
             running_bots[bot_id] = True
             bot_stop_flags[bot_id] = False
 
-            def _async_start_quick_bot():
-                try:
-                    time.sleep(0.5)
+            # ==================== WORKER POOL DISPATCH (QUICK BOT) ====================
+            if worker_pool_manager and worker_pool_manager.enabled:
+                _qb_creds = None
+                if credential_id:
+                    try:
+                        _qbc = get_db_connection()
+                        _qbr = _qbc.cursor()
+                        _qbr.execute('SELECT account_number, password, server, is_live FROM broker_credentials WHERE credential_id = ?', (credential_id,))
+                        _qrow = _qbr.fetchone()
+                        _qbc.close()
+                        if _qrow:
+                            _qrow = dict(_qrow)
+                            _qb_creds = {'account_number': _qrow['account_number'], 'password': _qrow['password'], 'server': _qrow.get('server', ''), 'is_live': bool(_qrow['is_live'])}
+                    except Exception as e:
+                        logger.warning(f'Quick bot worker dispatch: could not fetch credentials: {e}')
+                worker_pool_manager.dispatch_bot(bot_id, user_id, active_bots[bot_id], _qb_creds)
+                logger.info(f"🚀 Quick bot {bot_id}: Dispatched to worker pool")
+            else:
+                def _async_start_quick_bot():
+                    try:
+                        time.sleep(0.5)
 
-                    bot_credentials = None
-                    if credential_id:
-                        conn_local = None
-                        try:
-                            conn_local = get_db_connection()
-                            cursor_local = conn_local.cursor()
-                            cursor_local.execute('SELECT api_key, password, server, is_live, account_number FROM broker_credentials WHERE credential_id = ?', (credential_id,))
-                            cred_row = cursor_local.fetchone()
+                        bot_credentials = None
+                        if credential_id:
+                            conn_local = None
+                            try:
+                                conn_local = get_db_connection()
+                                cursor_local = conn_local.cursor()
+                                cursor_local.execute('SELECT api_key, password, server, is_live, account_number FROM broker_credentials WHERE credential_id = ?', (credential_id,))
+                                cred_row = cursor_local.fetchone()
 
-                            if cred_row:
-                                cred_dict = dict(cred_row)
-                                bot_credentials = {
-                                    'api_key': cred_dict['api_key'],
-                                    'api_secret': cred_dict['password'],
-                                    'account_number': cred_dict['account_number'],
-                                    'server': cred_dict.get('server', 'spot'),
-                                    'broker': broker_name,
-                                    'is_live': bool(cred_dict['is_live'])
-                                }
-                        except Exception as e:
-                            logger.warning(f"Could not load credential details: {e}")
-                        finally:
-                            if conn_local:
-                                conn_local.close()
+                                if cred_row:
+                                    cred_dict = dict(cred_row)
+                                    bot_credentials = {
+                                        'api_key': cred_dict['api_key'],
+                                        'api_secret': cred_dict['password'],
+                                        'account_number': cred_dict['account_number'],
+                                        'server': cred_dict.get('server', 'spot'),
+                                        'broker': broker_name,
+                                        'is_live': bool(cred_dict['is_live'])
+                                    }
+                            except Exception as e:
+                                logger.warning(f"Could not load credential details: {e}")
+                            finally:
+                                if conn_local:
+                                    conn_local.close()
 
-                    continuous_bot_trading_loop(bot_id, user_id, bot_credentials)
-                except Exception as e:
-                    logger.error(f"Error auto-starting quick bot {bot_id}: {e}")
-                    running_bots[bot_id] = False
+                        continuous_bot_trading_loop(bot_id, user_id, bot_credentials)
+                    except Exception as e:
+                        logger.error(f"Error auto-starting quick bot {bot_id}: {e}")
+                        running_bots[bot_id] = False
 
-            bot_thread = threading.Thread(target=_async_start_quick_bot, daemon=True)
-            bot_threads[bot_id] = bot_thread
-            bot_thread.start()
+                bot_thread = threading.Thread(target=_async_start_quick_bot, daemon=True)
+                bot_threads[bot_id] = bot_thread
+                bot_thread.start()
 
             logger.info(f"✅ Quick bot created: {bot_id} for user {user_id}")
             logger.info(f"   Preset: {preset} | Symbols: {symbols}")
@@ -17500,9 +17623,12 @@ else:
 
 
 def shutdown_backup():
-    """Create final backup before shutdown"""
+    """Create final backup and stop workers before shutdown"""
     logger.info("🛑 Creating final backup on shutdown...")
     try:
+        # Shutdown worker pool first
+        if worker_pool_manager and worker_pool_manager.enabled:
+            worker_pool_manager.shutdown()
         backup_manager.create_backup()
         backup_manager.stop_auto_backup()
         logger.info("✅ Final backup complete. System shutdown.")
@@ -17557,6 +17683,14 @@ if __name__ == '__main__':
 
     restarted_bots = start_enabled_bots_on_startup()
     logger.info(f"[OK] Auto-restarted {restarted_bots} enabled bots after backend startup")
+    
+    # ==================== START WORKER POOL ====================
+    if worker_pool_manager and worker_pool_manager.enabled:
+        logger.info(f"🏭 Starting worker pool with {WORKER_COUNT} workers...")
+        worker_pool_manager.start_all()
+        logger.info(f"[OK] Worker pool started ({WORKER_COUNT} workers, max {MAX_BOTS_PER_WORKER} bots/worker)")
+    else:
+        logger.info("[OK] Worker pool disabled (WORKER_COUNT=0) - using single-process mode")
     
     # Start live market data updater thread (fetches real prices from MT5)
     market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
