@@ -250,6 +250,54 @@ if DEPLOYMENT_MODE == 'LOCAL':
 else:
     logger.info(f"[VPS MODE] Not searching for local PXBT MT5 - will connect to remote terminal")
 
+
+def get_known_mt5_paths(broker_name: str) -> List[str]:
+    """Return known terminal paths for broker-specific MT5 installations."""
+    normalized = canonicalize_broker_name(broker_name)
+
+    if normalized == 'PXBT':
+        return [
+            r'C:\Program Files\PXBT Trading MT5 Terminal\terminal64.exe',
+            r'C:\Program Files (x86)\PXBT Trading MT5 Terminal\terminal64.exe',
+            r'C:\Program Files\PrimeXBT MT5\terminal64.exe',
+            r'C:\MT5\PXBT\terminal64.exe',
+        ]
+
+    if normalized in ['XM', 'XM Global']:
+        return [
+            r'C:\Program Files\MetaTrader 5 XM\terminal64.exe',
+            r'C:\Program Files\XM Global MT5\terminal64.exe',
+            r'C:\Program Files (x86)\XM MT5\terminal64.exe',
+            r'C:\MT5\XM\terminal64.exe',
+        ]
+
+    return [
+        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+        r'C:\Program Files\Exness MT5\terminal64.exe',
+        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+        r'C:\MT5\Exness\terminal64.exe',
+    ]
+
+
+def find_mt5_terminal_path(broker_name: str, configured_path: str = None) -> Optional[str]:
+    """Resolve a broker-specific terminal path even on VPS/local mixed setups."""
+    candidate_paths = []
+
+    if configured_path:
+        candidate_paths.append(configured_path)
+
+    env_path = os.getenv(f"{canonicalize_broker_name(broker_name).upper().replace(' ', '_')}_PATH", '').strip()
+    if env_path:
+        candidate_paths.append(env_path)
+
+    candidate_paths.extend(get_known_mt5_paths(broker_name))
+
+    for path in candidate_paths:
+        if path and os.path.exists(path):
+            return path
+
+    return None
+
 # Binance Configuration - Support DEMO and LIVE modes
 BINANCE_CONFIG = {
     'api_key': os.getenv('BINANCE_API_KEY', ''),
@@ -1835,7 +1883,10 @@ class MT5Connection(BrokerConnection):
             self.mt5 = mt5
             broker_cfg = get_mt5_config_for_broker(self.mt5_broker)
             # Prefer explicit credential path, then broker-specific config path.
-            self.mt5_path = credentials.get('path') or broker_cfg.get('path')
+            self.mt5_path = find_mt5_terminal_path(
+                self.mt5_broker,
+                credentials.get('path') or broker_cfg.get('path')
+            )
         except ImportError:
             logger.error("MetaTrader5 not installed")
             self.mt5 = None
@@ -4375,28 +4426,32 @@ def detect_mt5_terminal_for_broker(broker_name: str, configured_path: str = None
     try:
         import MetaTrader5 as mt5
 
-        path_ok = True
-        if configured_path:
-            path_ok = os.path.exists(configured_path)
+        resolved_path = find_mt5_terminal_path(broker_name, configured_path)
+        path_ok = bool(resolved_path and os.path.exists(resolved_path))
         
         # Try to initialize MT5 to check if it's installed
         if hasattr(mt5, 'version'):
-            logger.info(f"✅ {broker_name} MT5 detected on system")
+            if path_ok:
+                logger.info(f"✅ {broker_name} MT5 detected on system at {resolved_path}")
+            else:
+                logger.warning(f"⚠️ {broker_name} MT5 SDK found but broker terminal path was not found")
             return {
-                'available': True,
+                'available': path_ok,
                 'installed': True,
                 'version': str(mt5.version if hasattr(mt5, 'version') else 'Unknown'),
-                'terminal_path': configured_path,
+                'terminal_path': resolved_path,
                 'path_exists': path_ok,
+                'reason': None if path_ok else f'{broker_name} terminal not found in configured/common paths',
             }
         else:
             logger.warning("⚠️ MetaTrader 5 library found but version info unavailable")
             return {
-                'available': True,
+                'available': path_ok,
                 'installed': True,
                 'version': 'Unknown',
-                'terminal_path': configured_path,
+                'terminal_path': resolved_path,
                 'path_exists': path_ok,
+                'reason': None if path_ok else f'{broker_name} terminal not found in configured/common paths',
             }
     except ImportError:
         logger.warning("⚠️ MetaTrader 5 library not installed")
@@ -5315,9 +5370,11 @@ def get_account_balances():
                     # Generic MT5 fallback with timeout
                     try:
                         mt5_conn = MT5Connection({
+                            'broker': broker_name,
                             'account': int(account_num) if account_num else 0,
                             'password': cred['password'],
                             'server': cred['server'] or 'MetaQuotes-Demo',
+                            'path': find_mt5_terminal_path(broker_name, get_mt5_config_for_broker(broker_name).get('path')),
                         })
                         result = [None]
                         def connect_mt5():
@@ -6518,6 +6575,13 @@ BINANCE_VALID_SYMBOLS = {
     'SANDUSDT', 'MANAUSDT', 'RUNEUSDT', 'ALGOUSDT',
 }
 
+PXBT_VALID_SYMBOLS = {
+    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF',
+    'XAUUSD', 'XAGUSD',
+    'US30', 'EUR50', 'BRENT',
+    'BTCUSDT', 'ETHUSDT',
+}
+
 SYMBOL_MAPPING = {
     # Exness "m" suffix mappings (symbols received without "m" need to map to "m" version)
     'BTCUSD': 'BTCUSDm',
@@ -6623,6 +6687,38 @@ def validate_and_correct_symbols(symbols, broker_name=None):
                 logger.warning(f"⚠️ Unsupported Binance symbol {symbol} - skipping")
 
         return corrected or ['BTCUSDT']
+
+    if broker_name == 'PXBT':
+        if not symbols:
+            return ['EURUSD']
+
+        corrected = []
+        pxbt_symbol_map = {
+            'EURUSDM': 'EURUSD', 'EURUSD': 'EURUSD',
+            'GBPUSDM': 'GBPUSD', 'GBPUSD': 'GBPUSD',
+            'USDJPYM': 'USDJPY', 'USDJPY': 'USDJPY',
+            'USDCHFM': 'USDCHF', 'USDCHF': 'USDCHF',
+            'XAUUSDM': 'XAUUSD', 'XAUUSD': 'XAUUSD', 'GOLD': 'XAUUSD',
+            'XAGUSDM': 'XAGUSD', 'XAGUSD': 'XAGUSD', 'SILVER': 'XAGUSD',
+            'US30M': 'US30', 'US30': 'US30', 'DJ30': 'US30',
+            'EUR50M': 'EUR50', 'EUR50': 'EUR50',
+            'BRENTUSD': 'BRENT', 'BRENTM': 'BRENT', 'BRENT': 'BRENT',
+            'BTCUSDM': 'BTCUSDT', 'BTCUSD': 'BTCUSDT', 'BTCUSDT': 'BTCUSDT', 'BITCOIN': 'BTCUSDT',
+            'ETHUSDM': 'ETHUSDT', 'ETHUSD': 'ETHUSDT', 'ETHUSDT': 'ETHUSDT', 'ETHEREUM': 'ETHUSDT',
+        }
+
+        for symbol in symbols:
+            normalized = str(symbol).upper().replace('/', '').replace('_', '')
+            normalized = pxbt_symbol_map.get(normalized, normalized)
+
+            if normalized in PXBT_VALID_SYMBOLS and normalized not in corrected:
+                corrected.append(normalized)
+            else:
+                logger.warning(f"⚠️ Unknown PXBT symbol {symbol} -> defaulting to EURUSD")
+                if 'EURUSD' not in corrected:
+                    corrected.append('EURUSD')
+
+        return corrected[:5] or ['EURUSD']
 
     if broker_name in ('XM', 'XM Global'):
         if not symbols:
@@ -9219,8 +9315,19 @@ def test_broker_connection():
                     lock_acquired = mt5_connection_lock.acquire(timeout=2.0)  # Short timeout for balance check
                     if lock_acquired:
                         try:
-                            # Terminal is already running - just switch account (fast, no 60s wait)
-                            login_ok = mt5_mod.login(int(account), password=password, server=server)
+                            terminal_path = find_mt5_terminal_path(broker)
+                            init_ok = False
+                            if terminal_path:
+                                init_ok = mt5_mod.initialize(
+                                    path=terminal_path,
+                                    login=int(account),
+                                    password=str(password),
+                                    server=str(server),
+                                )
+                            else:
+                                init_ok = mt5_mod.initialize(login=int(account), password=str(password), server=str(server))
+
+                            login_ok = init_ok
                             if login_ok:
                                 info = mt5_mod.account_info()
                                 if info:
@@ -9230,6 +9337,7 @@ def test_broker_connection():
                             else:
                                 err = mt5_mod.last_error()
                                 logger.warning(f"⚠️ Quick MT5 login failed: {err} - using default balance")
+                            mt5_mod.shutdown()
                         finally:
                             mt5_connection_lock.release()
                     else:
