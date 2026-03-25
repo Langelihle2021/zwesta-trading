@@ -60,7 +60,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _totalBrokerBalance = 0;
 
   // Balance tracking for increases/decreases
-  Map<String, double> _previousBalances = {};
+  // _sessionStartBalances is set ONCE on first fetch and never updated,
+  // so balanceChange = currentBalance - sessionStart = total change this session.
+  Map<String, double> _sessionStartBalances = {};
   Map<String, double> _balanceChanges = {};
 
   // Withdrawal data
@@ -104,14 +106,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true && mounted) {
-          // Calculate balance changes
+          // Calculate balance changes vs session start (set once, never overwritten)
           Map<String, double> newChanges = {};
           for (var account in (data['accounts'] ?? [])) {
             final key = '${account['broker']}_${account['accountNumber']}';
             final currentBalance = (account['balance'] as num?)?.toDouble() ?? 0;
-            final previousBalance = _previousBalances[key] ?? currentBalance;
-            newChanges[key] = currentBalance - previousBalance;
-            _previousBalances[key] = currentBalance;
+            // Only record the starting balance the very first time we see this account
+            _sessionStartBalances[key] ??= currentBalance;
+            newChanges[key] = currentBalance - _sessionStartBalances[key]!;
           }
           
           setState(() {

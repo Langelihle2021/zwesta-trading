@@ -22,36 +22,6 @@ class BotConfigurationScreen extends StatefulWidget {
 }
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
-  static const List<Map<String, dynamic>> _accountRiskPresets = [
-    {
-      'id': 'starter_300',
-      'label': 'R300 Starter',
-      'riskPerTrade': '10',
-      'maxDailyLoss': '30',
-      'profitLock': '40',
-      'drawdownPausePercent': '4',
-      'allowedVolatility': ['Low'],
-    },
-    {
-      'id': 'starter_500',
-      'label': 'R500 Starter',
-      'riskPerTrade': '15',
-      'maxDailyLoss': '45',
-      'profitLock': '60',
-      'drawdownPausePercent': '5',
-      'allowedVolatility': ['Low', 'Medium'],
-    },
-    {
-      'id': 'starter_1000',
-      'label': 'R1000+',
-      'riskPerTrade': '20',
-      'maxDailyLoss': '60',
-      'profitLock': '80',
-      'drawdownPausePercent': '5',
-      'allowedVolatility': ['Low', 'Medium'],
-    },
-  ];
-
   static const List<Map<String, String>> _binanceSymbols = [
     // --- Tier 1: Large Cap ---
     {'symbol': 'BTCUSDT',  'name': '₿ Bitcoin / Tether',     'category': 'Large Cap'},
@@ -177,17 +147,17 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       return amount;
     }
   late TextEditingController _botIdController;
-  late TextEditingController _riskPerTradeController;
-  late TextEditingController _maxDailyLossController;
-  late TextEditingController _profitLockController;
-  late TextEditingController _drawdownPauseController;
   late TextEditingController _investmentAmountController;
   FundService _fundService = FundService();
 
   List<String> _allowedVolatility = ['Low', 'Medium'];
+  
+  // ========== NEW: Automated Risk Management Settings ==========
+  double _riskPercent = 2.0;          // Risk per trade as %
+  int _maxOpenTrades = 3;             // Max simultaneous trades
+  double _maxDrawdownPercent = 20.0;  // Max allowed drawdown %
 
   String _selectedStrategy = 'Trend Following';
-  String _selectedRiskPresetId = 'starter_1000';
   List<String> _selectedSymbols = [];
   bool _isCreating = false;
   bool _isLoadingData = true;
@@ -204,10 +174,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   
   // Currency & Settings
   String _currencyChoice = 'USD'; // 'USD' or 'ZAR' (Rand)
-  bool _useAutoSettings = true; // Toggle between auto and custom
-  double _customInvestmentAmount = 1000; // Custom amount in chosen currency
   
-  // NEW: Broker integration
+  // Broker integration
   late BrokerCredentialsService _brokerService;
   late CommissionService _commissionService;
   
@@ -295,33 +263,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     setState(() {
       _selectedSymbols = symbols;
     });
-  }
-
-  void _applyRiskPreset(String presetId) {
-    final preset = _accountRiskPresets.firstWhere(
-      (item) => item['id'] == presetId,
-      orElse: () => _accountRiskPresets.last,
-    );
-
-    setState(() {
-      _selectedRiskPresetId = presetId;
-      _riskPerTradeController.text = preset['riskPerTrade'] as String;
-      _maxDailyLossController.text = preset['maxDailyLoss'] as String;
-      _profitLockController.text = preset['profitLock'] as String;
-      _drawdownPauseController.text = preset['drawdownPausePercent'] as String;
-      _allowedVolatility = List<String>.from(preset['allowedVolatility'] as List);
-    });
-  }
-
-  String _currencySymbol(AppCurrency currency) {
-    switch (currency) {
-      case AppCurrency.usd:
-        return '\$';
-      case AppCurrency.zar:
-        return 'R';
-      case AppCurrency.gbp:
-        return 'GBP';
-    }
   }
 
   String _currencyCode(AppCurrency currency) {
@@ -464,10 +405,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _botIdController = TextEditingController(
       text: 'bot_${DateTime.now().millisecondsSinceEpoch}',
     );
-    _riskPerTradeController = TextEditingController(text: '20');
-    _maxDailyLossController = TextEditingController(text: '60');
-    _profitLockController = TextEditingController(text: '80');
-    _drawdownPauseController = TextEditingController(text: '5');
     _investmentAmountController = TextEditingController(text: '1000');
     
     // Initialize services
@@ -475,7 +412,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _commissionService = CommissionService();
     
     _initializeScreen();
-    _commissionService.fetchCommissions(); // Load commission data
+    _commissionService.fetchCommissions();
+    _loadRiskSettings();  // Load automation risk settings from API
   }
 
   Future<void> _initializeScreen() async {
@@ -484,10 +422,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       return;
     }
     _fetchTradingData();
-    // Apply auto settings if enabled
-    if (_useAutoSettings) {
-      _applyAutoSettings();
-    }
   }
 
   Future<void> _fetchTradingData() async {
@@ -575,41 +509,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   @override
   void dispose() {
     _botIdController.dispose();
-    _riskPerTradeController.dispose();
-    _maxDailyLossController.dispose();
-    _profitLockController.dispose();
-    _drawdownPauseController.dispose();
     _investmentAmountController.dispose();
     super.dispose();
   }
 
-  /// Apply auto-recommended settings based on investment amount
-  void _applyAutoSettings() {
-    final investmentAmount = _customInvestmentAmount;
-    
-    // Calculate risk parameters as % of investment
-    // For beginners/conservative: Risk 2% per trade
-    double riskPerTrade = investmentAmount * 0.02;
-    
-    // Max daily loss: 5% of investment
-    double maxDailyLoss = investmentAmount * 0.05;
-    
-    // Daily profit target: 3% of investment (lock in after reaching)
-    double profitLock = investmentAmount * 0.03;
-    
-    // Clamp values to reasonable ranges
-    riskPerTrade = riskPerTrade.clamp(5, 100);
-    maxDailyLoss = maxDailyLoss.clamp(20, 500);
-    profitLock = profitLock.clamp(20, 1000);
-    
-    setState(() {
-      _riskPerTradeController.text = riskPerTrade.toStringAsFixed(0);
-      _maxDailyLossController.text = maxDailyLoss.toStringAsFixed(0);
-      _profitLockController.text = profitLock.toStringAsFixed(0);
-      _drawdownPauseController.text = '5'; // 5% drawdown pause
-      _allowedVolatility = ['Low', 'Medium']; // Conservative volatility
-    });
-  }
 
   Future<void> _createAndStartBot() async {
     // STEP 1: Check if broker is integrated
@@ -670,7 +573,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
-      final currencyProvider = context.read<CurrencyProvider>();
       
       if (sessionToken == null) {
         throw Exception('Session expired. Please login again.');
@@ -680,10 +582,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       final credential = _brokerService.activeCredential;
       if (credential == null) {
         throw Exception('Broker credential lost. Please setup broker integration again.');
-      }
-      
-      if (credential.credentialId == null || credential.credentialId.isEmpty) {
-        throw Exception('Invalid broker credential. Please setup broker integration again.');
       }
 
       print('🤖 Creating bot with broker credential: ${credential.credentialId}');
@@ -696,11 +594,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'credentialId': credential.credentialId, // ✅ Safe null-checked credential reference
         'symbols': _selectedSymbols,
         'strategy': _selectedStrategy,
-        'riskPerTrade': double.parse(_riskPerTradeController.text),
-        'maxDailyLoss': double.parse(_maxDailyLossController.text),
-        'profitLock': double.tryParse(_profitLockController.text) ?? 0.0,
-        'drawdownPausePercent': double.tryParse(_drawdownPauseController.text) ?? 0.0,
-        'displayCurrency': _currencyCode(currencyProvider.currency),
+        'riskPercent': _riskPercent,               // ✅ NEW: Automated risk %
+        'maxOpenTrades': _maxOpenTrades,           // ✅ NEW: Max open trades
+        'maxDrawdownPercent': _maxDrawdownPercent, // ✅ NEW: Max drawdown %
+        'displayCurrency': _currencyCode(context.read<CurrencyProvider>().currency),
         'allowedVolatility': _allowedVolatility,
         'enabled': true,
         'autoWithdrawal': _enableAutoWithdrawal ? {
@@ -799,27 +696,77 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
   }
 
-  void _resetForm() {
-    _botIdController.text = 'bot_${DateTime.now().millisecondsSinceEpoch}';
-    _riskPerTradeController.text = '20';
-    _maxDailyLossController.text = '60';
-    _profitLockController.text = '80';
-    _drawdownPauseController.text = '5';
-    _selectedSymbols.clear();
-    _selectedStrategy = 'Trend Following';
-    _selectedRiskPresetId = 'starter_1000';
-    _allowedVolatility = ['Low', 'Medium'];
-  }
-
   void _showError(String message) {
     setState(() => _errorMessage = message);
+  }
+
+  // ========== AUTOMATED RISK MANAGEMENT METHODS ==========
+  
+  /// Load risk settings from backend API
+  Future<void> _loadRiskSettings() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/risk-settings/get'),
+        headers: {'Cookie': 'session=${await _getSessionId()}'},
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final settings = data['settings'] ?? {};
+        setState(() {
+          _riskPercent = (settings['risk_percent'] ?? 2.0).toDouble();
+          _maxOpenTrades = (settings['max_open_trades'] ?? 3) as int;
+          _maxDrawdownPercent = (settings['max_drawdown_percent'] ?? 20.0).toDouble();
+        });
+      }
+    } catch (e) {
+      print('Error loading risk settings: $e');
+    }
+  }
+
+  /// Save risk settings to backend API
+  Future<void> _saveRiskSettings() async {
+    try {
+      final response = await http.post(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/risk-settings/save'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': 'session=${await _getSessionId()}',
+        },
+        body: jsonEncode({
+          'risk_percent': _riskPercent,
+          'max_open_trades': _maxOpenTrades,
+          'max_drawdown_percent': _maxDrawdownPercent,
+        }),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Risk settings saved! Bot will use automatic lot sizing.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error saving risk settings: $e'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  /// Get session ID from SharedPreferences
+  Future<String> _getSessionId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('session_id') ?? '';
   }
 
   @override
   Widget build(BuildContext context) {
     final currencyProvider = context.watch<CurrencyProvider>();
-    final currencySymbol = _currencySymbol(currencyProvider.currency);
-    final currencyCode = _currencyCode(currencyProvider.currency);
 
     return Scaffold(
       appBar: AppBar(
@@ -1382,221 +1329,205 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                   const SizedBox(height: 16),
 
                   // Settings Mode Selection
+                  const SizedBox(height: 16),
+
+                  // ========== AUTOMATED RISK MANAGEMENT SETTINGS ==========
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
-                      border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                      border: Border.all(color: Colors.green.withOpacity(0.5)),
                       borderRadius: BorderRadius.circular(12),
+                      color: Colors.green.withOpacity(0.05),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Risk Configuration Mode',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: Colors.orange[200],
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
                         Row(
                           children: [
+                            const Icon(Icons.security, color: Colors.green, size: 24),
+                            const SizedBox(width: 12),
                             Expanded(
                               child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ChoiceChip(
-                                    label: const Text('⚡ Auto'),
-                                    selected: _useAutoSettings,
-                                    onSelected: (_) {
-                                      setState(() => _useAutoSettings = true);
-                                      _applyAutoSettings();
-                                    },
-                                  ),
-                                  const SizedBox(height: 6),
                                   Text(
-                                    'System chooses\nfor you',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                    textAlign: TextAlign.center,
+                                    'Automated Risk Management',
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      color: Colors.green,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  ChoiceChip(
-                                    label: const Text('⚙️ Custom'),
-                                    selected: !_useAutoSettings,
-                                    onSelected: (_) => setState(() => _useAutoSettings = false),
-                                  ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 4),
                                   Text(
-                                    'You control\nall settings',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                    textAlign: TextAlign.center,
+                                    'Bot automatically calculates lot sizes, SL/TP levels, and enforces trading limits',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                                   ),
                                 ],
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _useAutoSettings
-                              ? '✓ Smart settings based on your trading experience level'
-                              : '✓ Full control - customize all risk parameters',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _useAutoSettings ? Colors.green[300] : Colors.orange[300],
-                            fontStyle: FontStyle.italic,
-                          ),
+                        const SizedBox(height: 16),
+                        
+                        // Risk % Slider
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '💰 Risk Per Trade',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${_riskPercent.toStringAsFixed(2)}%',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Slider(
+                              value: _riskPercent,
+                              min: 0.1,
+                              max: 10.0,
+                              divisions: 99,
+                              onChanged: (value) => setState(() => _riskPercent = value),
+                              label: '${_riskPercent.toStringAsFixed(2)}%',
+                            ),
+                            Text(
+                              'Amount risked per trade relative to account balance. Conservative: 1-2%, Moderate: 2-3%, Aggressive: 3-5%',
+                              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Custom Investment Amount (for non-Binance)
-                  if (!_isBinanceBroker)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Investment Amount',
-                          style: Theme.of(context).textTheme.titleSmall,
+                        const SizedBox(height: 16),
+                        
+                        // Max Open Trades Slider
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '📊 Max Open Trades',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '$_maxOpenTrades trades',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Slider(
+                              value: _maxOpenTrades.toDouble(),
+                              min: 1,
+                              max: 20,
+                              divisions: 19,
+                              onChanged: (value) => setState(() => _maxOpenTrades = value.toInt()),
+                              label: '$_maxOpenTrades',
+                            ),
+                            Text(
+                              'Limits total simultaneous positions. Lower = less risk, Higher = more diversification. Recommended: 2-3',
+                              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _investmentAmountController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'Custom Amount ($_currencyChoice)',
-                            hintText: '1000',
-                            prefixText: _currencyChoice == 'USD' ? '\$ ' : 'R ',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
+                        const SizedBox(height: 16),
+                        
+                        // Max Drawdown Slider
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '📉 Max Drawdown',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${_maxDrawdownPercent.toStringAsFixed(1)}%',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.purple),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Slider(
+                              value: _maxDrawdownPercent,
+                              min: 5,
+                              max: 50,
+                              divisions: 45,
+                              onChanged: (value) => setState(() => _maxDrawdownPercent = value),
+                              label: '${_maxDrawdownPercent.toStringAsFixed(1)}%',
+                            ),
+                            Text(
+                              'Trading pauses when account loses this %. Allows system recovery before resuming. Recommended: 15-20%',
+                              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // Save Settings Button
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _saveRiskSettings,
+                            icon: const Icon(Icons.save),
+                            label: const Text('Save Risk Settings'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
-                          onChanged: (value) {
-                            setState(() {
-                              _customInvestmentAmount = double.tryParse(value) ?? 1000;
-                            });
-                            // Reapply auto settings if in auto mode
-                            if (_useAutoSettings) {
-                              _applyAutoSettings();
-                            }
-                          },
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'This is your initial investment amount for this bot',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.grey[400],
-                            fontSize: 11,
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info, color: Colors.blue, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'These settings are used for automatic lot sizing. No manual position entry needed!',
+                                  style: TextStyle(fontSize: 11, color: Colors.blue[200]),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  const SizedBox(height: 16),
-
-                  // Risk Management
-                  Text(
-                    'Risk Management',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Working currency: $currencyCode. Use the same currency as the trading account. South African clients can keep this on Rand.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Client Account Size Preset',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _accountRiskPresets.map((preset) {
-                      final presetId = preset['id'] as String;
-                      return ChoiceChip(
-                        label: Text(preset['label'] as String),
-                        selected: presetId == _selectedRiskPresetId,
-                        onSelected: (_) => _applyRiskPreset(presetId),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _riskPerTradeController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Risk Per Trade ($currencySymbol)',
-                      hintText: '20',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _maxDailyLossController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Max Daily Loss ($currencySymbol)',
-                      hintText: '60',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _profitLockController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Daily Profit Lock-In ($currencySymbol)',
-                      hintText: '80',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _drawdownPauseController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Drawdown Pause (%)',
-                      hintText: '5',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Allowed Volatility:', style: Theme.of(context).textTheme.bodyMedium),
-                  Wrap(
-                    spacing: 8,
-                    children: ['Very Low', 'Low', 'Medium', 'High', 'Very High'].map((level) {
-                      final selected = _allowedVolatility.contains(level);
-                      return FilterChip(
-                        label: Text(level),
-                        selected: selected,
-                        onSelected: (val) {
-                          setState(() {
-                            if (val) {
-                              _allowedVolatility.add(level);
-                            } else {
-                              _allowedVolatility.remove(level);
-                            }
-                          });
-                        },
-                      );
-                    }).toList(),
                   ),
                   const SizedBox(height: 24),
                   
