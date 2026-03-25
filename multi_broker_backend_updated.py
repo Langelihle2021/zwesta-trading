@@ -383,7 +383,7 @@ PXBT_CONFIG = {
     'broker': 'PXBT',
     'account': os.getenv('PXBT_ACCOUNT', ''),
     'password': os.getenv('PXBT_PASSWORD', ''),
-    'server': os.getenv('PXBT_SERVER', 'PXBT-Demo'),
+    'server': os.getenv('PXBT_SERVER', 'PXBTTrading-1'),
     'path': None
 }
 
@@ -475,7 +475,7 @@ if ENVIRONMENT == 'LIVE':
 
     pxbt_account = os.getenv('PXBT_ACCOUNT', '').strip()
     pxbt_password = os.getenv('PXBT_PASSWORD', '').strip()
-    pxbt_server = os.getenv('PXBT_SERVER', 'PXBT-Real').strip()
+    pxbt_server = os.getenv('PXBT_SERVER', 'PXBTTrading-1').strip()
     
     binance_key = os.getenv('BINANCE_API_KEY', '').strip()
     binance_secret = os.getenv('BINANCE_API_SECRET', '').strip()
@@ -2145,8 +2145,8 @@ class MT5Connection(BrokerConnection):
                 server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
             elif broker_name in ['XM', 'XM Global'] and (not server or 'xm' not in str(server).lower()):
                 server = 'XMGlobal-Real' if ENVIRONMENT == 'LIVE' else 'XMGlobal-MT5Demo'
-            elif broker_name == 'PXBT' and not server:
-                server = 'PXBT-Real' if ENVIRONMENT == 'LIVE' else 'PXBT-Demo'
+            elif broker_name == 'PXBT':
+                server = 'PXBTTrading-1'
             
             # Ensure account is integer for proper comparison with MT5 login field
             account = int(account)
@@ -4780,7 +4780,7 @@ def get_pxbt_session_status():
         for cred in creds:
             credential_id = cred['credential_id']
             account_num = cred['account_number']
-            server = cred['server'] or 'PXBT-Demo'
+            server = cred['server'] or 'PXBTTrading-1'
             is_live = cred['is_live']
             
             # Check MT5 connection health
@@ -4856,7 +4856,7 @@ def reconnect_pxbt():
         credential_id = cred['credential_id']
         account_num = cred['account_number']
         password = cred['password']
-        server = cred['server'] or 'PXBT-Demo'
+        server = cred['server'] or 'PXBTTrading-1'
         
         logger.info(f"🔄 PXBT Reconnect requested for user {user_id}, account {account_num}")
         
@@ -5455,12 +5455,12 @@ def get_trading_mode():
 
 
 @app.route('/api/user/switch-mode', methods=['POST'])
-@require_api_key
+@require_session
 def switch_trading_mode():
     """Switch between DEMO and LIVE trading modes"""
     try:
         data = request.get_json()
-        user_id = request.headers.get('X-User-ID', 'default_user')
+        user_id = request.user_id  # From @require_session decorator
         mode = data.get('mode', 'DEMO').upper()
         
         if mode not in ['DEMO', 'LIVE']:
@@ -5844,12 +5844,13 @@ def get_account_balances():
                     cached_margin = cache.get('cached_margin_free', 0) or 0
                     logger.info(f"✅ Using SQLite cached balance for {cache_key}: ${cached_balance:.2f}")
                 
-                # In DEMO mode, if still no cached value, use demo default
+                # In DEMO mode, if still no cached value, show $0 (not connected)
+                # Previously used $10K default which inflated portfolio totals
                 if ENVIRONMENT == 'DEMO' and cached_balance == 0:
-                    cached_balance = 10000
-                    cached_equity = 10000
-                    cached_margin = 10000
-                    logger.info(f"ℹ️  Demo mode - using default balance for {cache_key}: ${cached_balance:.2f}")
+                    cached_balance = 0
+                    cached_equity = 0
+                    cached_margin = 0
+                    logger.info(f"ℹ️  No cached balance for {cache_key} - broker not connected")
                 
                 account_entry.update({
                     'balance': float(cached_balance),
@@ -5857,8 +5858,8 @@ def get_account_balances():
                     'marginFree': float(cached_margin),
                     'currency': 'USD',
                     'connected': False,
-                    'dataSource': 'cache_fresh' if cached_balance > 10001 else ('cache_old' if cached_balance > 0 else 'demo'),
-                    'warning': 'Using last known balance (connection timeout)' if (cached_balance > 0 and cached_balance != 10000) else ('Demo mode - showing default balance' if cached_balance == 10000 else None),
+                    'dataSource': 'cache_fresh' if cached_balance > 10001 else ('cache_old' if cached_balance > 0 else 'not_connected'),
+                    'warning': 'Using last known balance (connection timeout)' if cached_balance > 0 else 'Broker not connected - balance unavailable',
                 })
                 
                 # Add to broker group
@@ -9354,7 +9355,7 @@ def save_broker_credentials():
                 elif broker_name in ['XM', 'XM Global']:
                     server = 'XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'
                 elif broker_name == 'PXBT':
-                    server = 'PXBT-Real' if is_live else 'PXBT-Demo'
+                    server = 'PXBTTrading-1'
                 else:  # MetaTrader 5
                     server = 'MetaTrader5-Real' if is_live else 'MetaTrader5-Demo'
         elif broker_name in ['Exness']:
@@ -9645,7 +9646,7 @@ def test_broker_connection():
                 elif broker_l == 'exness':
                     expected_server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
                 elif broker_l in ['pxbt', 'prime xbt', 'primexbt']:
-                    expected_server = 'PXBT-Real' if ENVIRONMENT == 'LIVE' else 'PXBT-Demo'
+                    expected_server = 'PXBTTrading-1'
                 else:
                     expected_server = 'MetaQuotes-Demo' if not ENVIRONMENT == 'LIVE' else 'MetaQuotes-Live'
 
@@ -10500,6 +10501,14 @@ def create_bot():
             drawdown_pause_hours = sanitized_risk_config['drawdownPauseHours']
             display_currency = sanitized_risk_config['displayCurrency']
             trading_enabled = data.get('enabled', True)
+            trade_amount = data.get('tradeAmount')  # Fixed dollar trade amount (overrides risk %)
+            if trade_amount is not None:
+                try:
+                    trade_amount = float(trade_amount)
+                    if trade_amount <= 0:
+                        trade_amount = None
+                except (ValueError, TypeError):
+                    trade_amount = None
 
             account_id = f"{broker_name}_{account_number}"
             created_at = datetime.now().isoformat()
@@ -10569,6 +10578,7 @@ def create_bot():
                 'drawdownPauseHours': drawdown_pause_hours,
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
+                'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
                 'basePositionSize': data.get('basePositionSize', 1.0),
                 'totalTrades': len(sample_trades),
                 'winningTrades': sample_winning_trades,
@@ -10699,6 +10709,7 @@ def create_bot():
                 'balance': round(account_balance, 2),
                 'mode': mode or 'demo',
                 'displayCurrency': display_currency or 'USD',
+                'tradeAmount': trade_amount,
                 'appliedRiskConfig': {
                     'riskPerTrade': risk_per_trade or 20.0,
                     'maxDailyLoss': max_daily_loss or 60.0,
@@ -11000,6 +11011,26 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             time.sleep(actual_wait)
                             continue
                         
+                        # ==================== MULTI-USER ACCOUNT VERIFICATION ====================
+                        # Verify MT5 is logged into THIS bot's account before trading.
+                        # If another user's bot switched the account, we must re-login.
+                        try:
+                            import MetaTrader5 as _mt5_check
+                            current_info = _mt5_check.account_info()
+                            expected_account = int(bot_credentials.get('account', 0))
+                            if current_info and expected_account and current_info.login != expected_account:
+                                logger.warning(f"⚠️  Bot {bot_id}: MT5 logged into account {current_info.login} but bot needs {expected_account} - switching...")
+                                # Force re-login with this bot's credentials
+                                mt5_conn.connected = False
+                                if not mt5_conn.connect():
+                                    logger.error(f"Bot {bot_id}: Account switch to {expected_account} failed - will retry")
+                                    time.sleep(trading_interval)
+                                    continue
+                                logger.info(f"✅ Bot {bot_id}: Switched MT5 to account {expected_account}")
+                        except Exception as acct_err:
+                            logger.debug(f"Bot {bot_id}: Account verification check: {acct_err}")
+                        # ==================== END MULTI-USER VERIFICATION ====================
+                        
                         if trade_cycle == 1:
                             logger.info(f"Bot {bot_id}: First trade cycle - waiting for MT5 readiness (up to {mt5_ready_timeout}s)...")
                             timeout_for_this_cycle = mt5_ready_timeout
@@ -11119,7 +11150,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     
                     try:
                         # Dynamic position sizing
-                        if bot_config.get('dynamicSizing', True):
+                        fixed_trade_amount = bot_config.get('tradeAmount')
+                        if fixed_trade_amount:
+                            # Fixed dollar amount: convert to lot size
+                            # Standard lot = 100,000 units, so $amount / 100000 gives lots
+                            position_size = max(0.01, round(fixed_trade_amount / 100000, 2))
+                            logger.info(f"💵 Bot {bot_id}: Using fixed trade amount ${fixed_trade_amount} -> {position_size} lots")
+                        elif bot_config.get('dynamicSizing', True):
                             position_size = position_sizer.calculate_position_size(
                                 bot_config,
                                 volatility_level=bot_config.get('volatilityLevel', 'Medium')
@@ -11728,7 +11765,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 # Normalize Exness server name based on live/demo mode
                 server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
             elif 'pxbt' in server.lower() or 'primexbt' in server.lower() or broker_name == 'PXBT':
-                server = 'PXBT-Real' if is_live else 'PXBT-Demo'
+                server = 'PXBTTrading-1'
             
             logger.info(f"Bot {bot_id}: Connecting to MT5 - Account: {account_number}, Server: {server}")
             

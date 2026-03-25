@@ -597,6 +597,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'riskPercent': _riskPercent,               // ✅ NEW: Automated risk %
         'maxOpenTrades': _maxOpenTrades,           // ✅ NEW: Max open trades
         'maxDrawdownPercent': _maxDrawdownPercent, // ✅ NEW: Max drawdown %
+        if (_investmentAmountController.text.isNotEmpty)
+          'tradeAmount': double.tryParse(_investmentAmountController.text),
         'displayCurrency': _currencyCode(context.read<CurrencyProvider>().currency),
         'allowedVolatility': _allowedVolatility,
         'enabled': true,
@@ -1364,6 +1366,34 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   ),
                                 ],
                               ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // Trade Amount Input
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '💵 Trade Amount (USD)',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _investmentAmountController,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: InputDecoration(
+                                hintText: 'Fixed dollar amount per trade (optional)',
+                                prefixText: '\$ ',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                filled: true,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Fixed dollar amount per trade. Leave empty to use Risk % instead.',
+                              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                             ),
                           ],
                         ),
