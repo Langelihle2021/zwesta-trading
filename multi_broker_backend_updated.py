@@ -5611,10 +5611,12 @@ def get_account_balances():
             timed_out = False
             
             try:
-                if broker_name in ['Exness', 'XM', 'XM Global']:
+                if broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
                     # CRITICAL FIX: Balance checks must NEVER call mt5.initialize()
                     # The MT5 terminal singleton is Exness - only Exness accounts can read from it.
-                    # XM/XM Global use a DIFFERENT MT5 terminal, so they must use cache only.
+                    # XM/XM Global/PXBT use DIFFERENT MT5 terminals, so they must use cache only.
+                    # PXBT added here because its MT5 init causes IPC conflicts that hold the
+                    # global MT5 lock for 60+ seconds, blocking all trading bots.
                     try:
                         import MetaTrader5 as mt5
                         account_int = int(account_num) if account_num else 0
@@ -5718,6 +5720,7 @@ def get_account_balances():
                 
                 else:
                     # Generic MT5 fallback with timeout
+                    # CRITICAL: Use is_balance_check=True to prevent holding lock during retries
                     try:
                         mt5_conn = MT5Connection({
                             'broker': broker_name,
@@ -5725,6 +5728,8 @@ def get_account_balances():
                             'password': cred['password'],
                             'server': cred['server'] or 'MetaQuotes-Demo',
                             'path': find_mt5_terminal_path(broker_name, get_mt5_config_for_broker(broker_name).get('path')),
+                            'is_balance_check': True,
+                            'lock_timeout': 0.1,
                         })
                         result = [None]
                         def connect_mt5():
