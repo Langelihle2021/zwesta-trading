@@ -8,7 +8,6 @@ import '../utils/constants.dart';
 import '../utils/environment_config.dart';
 import '../services/trading_service.dart';
 import '../services/broker_connection_service.dart';
-import '../services/connection_analytics_service.dart';
 import '../services/broker_credentials_service.dart';
 import '../widgets/logo_widget.dart';
 import '../models/broker_connection_model.dart';
@@ -62,7 +61,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     'FP Markets',
     'Zulu Trade (SA)',
     'Ovex (SA)',
-    'Prime XBT',
+    'PXBT',
     'Trade Nations',
     'MetaQuotes',
   ];
@@ -82,7 +81,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     'FP Markets': 'FPMarkets-Live',
     'Zulu Trade (SA)': 'ZuluTrade ZA',
     'Ovex (SA)': 'Ovex SA',
-    'Prime XBT': 'PrimeXBT-MT5',
+    'PXBT': 'PXBT-Demo',
+    'Prime XBT': 'PXBT-Demo',
     'Trade Nations': 'TradeNations-MT5',
     'MetaQuotes': 'MetaQuotes-MT5',
   };
@@ -103,6 +103,9 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   bool get _isBinanceBroker => _selectedBroker.toLowerCase() == 'binance';
   bool get _isOandaBroker => _selectedBroker.toLowerCase() == 'oanda';
   bool get _isExnessBroker => _selectedBroker.toLowerCase() == 'exness';
+  bool get _isPxbtBroker =>
+      _selectedBroker.toLowerCase() == 'pxbt' ||
+      _selectedBroker.toLowerCase() == 'prime xbt';
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
 
   void _loadSavedAccounts() async {
@@ -240,8 +243,38 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     }
   }
 
+  /// Check if PXBT MT5 is available on the backend
+  Future<Map<String, dynamic>> _checkPxbtAvailability() async {
+    try {
+      final baseUrl = EnvironmentConfig.apiUrl;
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/brokers/check-pxbt'),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return {
+          'available': data['available'] ?? false,
+          'installed': data['installed'] ?? false,
+          'version': data['version'] ?? 'Unknown',
+          'error': data['error'],
+        };
+      } else {
+        return {
+          'available': false,
+          'error': 'Failed to check PXBT availability',
+        };
+      }
+    } catch (e) {
+      return {
+        'available': false,
+        'error': 'Error checking PXBT: $e',
+      };
+    }
+  }
+
   void _testConnection() async {
-    // Check Exness availability first if Exness is selected
+    // Check Exness/PXBT availability first when selected
     if (_isExnessBroker) {
       setState(() => _isTestingConnection = true);
       
@@ -253,6 +286,26 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('❌ Exness MT5 not available: ${exnessCheck['error'] ?? "Unknown error"}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    if (_isPxbtBroker) {
+      setState(() => _isTestingConnection = true);
+
+      final pxbtCheck = await _checkPxbtAvailability();
+
+      if (!pxbtCheck['available'] == true) {
+        if (mounted) {
+          setState(() => _isTestingConnection = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ PXBT MT5 not available: ${pxbtCheck['error'] ?? "Unknown error"}'),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 5),
             ),
@@ -276,11 +329,20 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
     setState(() => _isTestingConnection = true);
 
-    // Show loading message with context about Exness delays
+    // Show loading message with context about MT5 connection delays
     if (_isExnessBroker) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('🔌 Testing Exness connection... (may take 30-60 seconds)'),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.blue.withOpacity(0.7),
+        ),
+      );
+    }
+    if (_isPxbtBroker) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('🔌 Testing PXBT connection... (may take 30-60 seconds)'),
           duration: const Duration(seconds: 3),
           backgroundColor: Colors.blue.withOpacity(0.7),
         ),

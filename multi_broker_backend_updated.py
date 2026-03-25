@@ -222,6 +222,34 @@ if DEPLOYMENT_MODE == 'LOCAL':
 else:
     logger.info(f"[VPS MODE] Not searching for local XM MT5 - will connect to remote terminal")
 
+# PXBT MT5 Configuration - Support DEMO and LIVE modes
+PXBT_CONFIG = {
+    'broker': 'PXBT',
+    'account': os.getenv('PXBT_ACCOUNT', ''),
+    'password': os.getenv('PXBT_PASSWORD', ''),
+    'server': os.getenv('PXBT_SERVER', 'PXBT-Demo'),
+    'path': None
+}
+
+# DEPLOYMENT-AWARE: Only auto-detect local PXBT paths if LOCAL deployment
+if DEPLOYMENT_MODE == 'LOCAL':
+    pxbt_paths = [
+        r'C:\Program Files\PXBT Trading MT5 Terminal\terminal64.exe',
+        r'C:\Program Files (x86)\PXBT Trading MT5 Terminal\terminal64.exe',
+        r'C:\Program Files\PrimeXBT MT5\terminal64.exe',
+        r'C:\MT5\PXBT\terminal64.exe',
+    ]
+    for path in pxbt_paths:
+        if os.path.exists(path):
+            PXBT_CONFIG['path'] = path
+            logger.info(f"Found PXBT MT5 at: {path}")
+            break
+
+    if PXBT_CONFIG['path'] is None:
+        logger.warning("⚠️  PXBT MT5 not found in common paths - ensure PXBT terminal is installed")
+else:
+    logger.info(f"[VPS MODE] Not searching for local PXBT MT5 - will connect to remote terminal")
+
 # Binance Configuration - Support DEMO and LIVE modes
 BINANCE_CONFIG = {
     'api_key': os.getenv('BINANCE_API_KEY', ''),
@@ -240,6 +268,10 @@ if ENVIRONMENT == 'LIVE':
     xm_account = os.getenv('XM_ACCOUNT', '').strip()
     xm_password = os.getenv('XM_PASSWORD', '').strip()
     xm_server = os.getenv('XM_SERVER', 'XMGlobal-Real').strip()
+
+    pxbt_account = os.getenv('PXBT_ACCOUNT', '').strip()
+    pxbt_password = os.getenv('PXBT_PASSWORD', '').strip()
+    pxbt_server = os.getenv('PXBT_SERVER', 'PXBT-Real').strip()
     
     binance_key = os.getenv('BINANCE_API_KEY', '').strip()
     binance_secret = os.getenv('BINANCE_API_SECRET', '').strip()
@@ -284,12 +316,26 @@ if ENVIRONMENT == 'LIVE':
         BINANCE_CONFIG['api_secret'] = binance_secret
         BINANCE_CONFIG['is_live'] = True
         logger.info(f"[LIVE] ✅ BINANCE - Live mode enabled")
+
+    # PXBT LIVE VALIDATION
+    if not pxbt_account or not pxbt_password:
+        logger.warning("[LIVE] ⚠️  PXBT credentials missing (optional)")
+    else:
+        PXBT_CONFIG = {
+            'broker': 'PXBT',
+            'account': int(pxbt_account),
+            'password': pxbt_password,
+            'server': pxbt_server,
+            'path': os.getenv('PXBT_PATH') or PXBT_CONFIG.get('path') or None
+        }
+        logger.info(f"[LIVE] ✅ PXBT - Account: {PXBT_CONFIG['account']}, Server: {pxbt_server}")
     
     print(f"\n{'='*70}")
     print(f"[LIVE MODE ACTIVATED] 🔴 REAL MONEY TRADING")
     print(f"{'='*70}")
     print(f"EXNESS:    Account {live_account} | Server: {live_server}")
     print(f"XM GLOBAL: Account {xm_account or 'NOT SET'} | Server: {xm_server}")
+    print(f"PXBT:      Account {pxbt_account or 'NOT SET'} | Server: {pxbt_server}")
     print(f"BINANCE:   {('Enabled' if binance_key else 'NOT SET')}")
     print(f"{'='*70}\n")
     logger.warning(f"[LIVE] 🔴 REAL MONEY TRADING ACTIVE - Verify all credentials before starting bots!")
@@ -301,6 +347,7 @@ else:
     print(f"{'='*70}")
     print(f"EXNESS:    Account 298997455 | Server: Exness-MT5Trial9")
     print(f"XM GLOBAL: Demo account (check .env for XM_ACCOUNT if not using defaults)")
+    print(f"PXBT:      Demo account (check .env for PXBT_ACCOUNT if using PXBT)")
     print(f"BINANCE:   Testnet mode (check .env for BINANCE_DEMO_API_KEY)")
     print(f"{'='*70}")
     print(f"\n📌 TO SWITCH TO LIVE MODE:")
@@ -704,6 +751,7 @@ class BrokerType(Enum):
     PEPPERSTONE = "pepperstone"
     FXOPEN = "fxopen"
     EXNESS = "exness"
+    PXBT = "pxbt"
     DARWINEX = "darwinex"
 
     FXM = "fxm"
@@ -1771,22 +1819,23 @@ class MT5Connection(BrokerConnection):
         # CRITICAL FIX: DO NOT launch terminal on every connection attempt!
         # Terminal should only be launched ONCE during backend startup
         # Reuse the existing terminal for all subsequent connections
-        broker = canonicalize_broker_name(credentials.get('broker', 'Exness'))
+        self.mt5_broker = canonicalize_broker_name(credentials.get('broker', 'Exness'))
         
         # Check if terminal is already running (avoid duplicate launches)
         try:
             import subprocess, sys, os
             # Simply skip terminal launch - assume it was launched at startup
             # If terminal crashes, MT5Connection.connect() will timeout and retry
-            logger.info(f"[MT5 Terminal] Using Exness MT5 terminal (launched on backend startup)")
+            logger.info(f"[MT5 Terminal] Using {self.mt5_broker} MT5 terminal (launched on backend startup)")
         except Exception as e:
             logger.error(f"[MT5 Terminal Manager] Error checking terminal: {e}")
         
         try:
             import MetaTrader5 as mt5
             self.mt5 = mt5
-            # Use path from MT5_CONFIG or credentials
-            self.mt5_path = credentials.get('path') or MT5_CONFIG.get('path')
+            broker_cfg = get_mt5_config_for_broker(self.mt5_broker)
+            # Prefer explicit credential path, then broker-specific config path.
+            self.mt5_path = credentials.get('path') or broker_cfg.get('path')
         except ImportError:
             logger.error("MetaTrader5 not installed")
             self.mt5 = None
@@ -1835,16 +1884,20 @@ class MT5Connection(BrokerConnection):
                 logger.error("MetaTrader5 SDK not available")
                 return False
 
-            account = self.credentials.get('account') or MT5_CONFIG['account']
-            password = self.credentials.get('password') or MT5_CONFIG['password']
-            server = self.credentials.get('server') or MT5_CONFIG['server']
+            broker_name = canonicalize_broker_name(self.credentials.get('broker', self.mt5_broker))
+            broker_cfg = get_mt5_config_for_broker(broker_name)
+
+            account = self.credentials.get('account') or broker_cfg.get('account')
+            password = self.credentials.get('password') or broker_cfg.get('password')
+            server = self.credentials.get('server') or broker_cfg.get('server')
             
-            # Override server based on ENVIRONMENT setting (DEMO/LIVE)
-            # This ensures bots respect the global ENVIRONMENT variable
-            if ENVIRONMENT == 'DEMO':
-                server = 'Exness-MT5Trial9'
-            elif ENVIRONMENT == 'LIVE':
-                server = 'Exness-Real'
+            # Broker-specific server normalization for MT5 providers
+            if broker_name == 'Exness':
+                server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
+            elif broker_name in ['XM', 'XM Global'] and (not server or 'xm' not in str(server).lower()):
+                server = 'XMGlobal-Real' if ENVIRONMENT == 'LIVE' else 'XMGlobal-MT5Demo'
+            elif broker_name == 'PXBT' and not server:
+                server = 'PXBT-Real' if ENVIRONMENT == 'LIVE' else 'PXBT-Demo'
             
             # Ensure account is integer for proper comparison with MT5 login field
             account = int(account)
@@ -1898,12 +1951,12 @@ class MT5Connection(BrokerConnection):
                         logger.info(f"     IPC recovery delay: {retry_wait} seconds (exponential backoff)")
                         time.sleep(retry_wait)
                     
-                    # ALWAYS use explicit Exness path (NO generic/standalone MT5 fallback)
+                    # Always use broker-specific MT5 path (NO generic fallback)
                     if not self.mt5_path:
-                        logger.error("❌ No Exness MT5 path configured - cannot continue without broker-specific MT5")
+                        logger.error(f"❌ No {broker_name} MT5 path configured - cannot continue without broker-specific MT5")
                         continue
                     
-                    # Initialize with Exness-specific path only
+                    # Initialize with broker-specific path only
                     normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
                     if os.path.isdir(normalized_path):
                         candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
@@ -1914,9 +1967,7 @@ class MT5Connection(BrokerConnection):
                             normalized_path = candidate_32
 
                     if os.path.isfile(normalized_path):
-                        # CRITICAL FIX: Pass login credentials directly to initialize()
-                        # Exness MT5 requires credentials in initialize() - calling initialize(path=...)
-                        # then login() separately causes "Authorization failed" (-6) error
+                        # Pass login credentials directly in initialize() to avoid MT5 auth races.
                         logger.info(f"  🔑 Calling mt5.initialize(path='{normalized_path}', login={account}, server='{server}')")
                         init_ok = self.mt5.initialize(
                             path=normalized_path,
@@ -1928,9 +1979,9 @@ class MT5Connection(BrokerConnection):
                             self.mt5_path = normalized_path
                             logger.info(f"  ✓ MT5 initialize() returned True")
                         else:
-                            logger.warning(f"  ✗ Exness MT5 initialization failed: {self.mt5.last_error()}")
+                            logger.warning(f"  ✗ {broker_name} MT5 initialization failed: {self.mt5.last_error()}")
                     else:
-                        logger.warning(f"  ✗ Exness MT5 path not found: {normalized_path}")
+                        logger.warning(f"  ✗ {broker_name} MT5 path not found: {normalized_path}")
                         init_ok = False
 
                     if init_ok:
@@ -1953,7 +2004,7 @@ class MT5Connection(BrokerConnection):
                             try:
                                 if self.account_info:
                                     with balance_cache_lock:
-                                        cache_key = get_balance_cache_key('Exness', account)
+                                        cache_key = get_balance_cache_key(broker_name, account)
                                         balance = float(self.account_info.get('balance', 0))
                                         balance_cache[cache_key] = {
                                             'balance': balance,
@@ -3748,12 +3799,25 @@ def canonicalize_broker_name(broker_name: str) -> str:
         'fxm': 'FXCM',
         'oanda': 'OANDA',
         'exness': 'Exness',
+        'pxbt': 'PXBT',
+        'prime xbt': 'PXBT',
+        'primexbt': 'PXBT',
+        'pxbt trading': 'PXBT',
     }
     return broker_map.get(normalized, broker_name)
 
 
 def is_mt5_broker_name(broker_name: str) -> bool:
-    return canonicalize_broker_name(broker_name) in ['Exness', 'MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']
+    return canonicalize_broker_name(broker_name) in ['Exness', 'PXBT', 'MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']
+
+
+def get_mt5_config_for_broker(broker_name: str) -> Dict:
+    normalized = canonicalize_broker_name(broker_name)
+    if normalized == 'XM' or normalized == 'XM Global':
+        return XM_CONFIG
+    if normalized == 'PXBT':
+        return PXBT_CONFIG
+    return MT5_CONFIG
 
 
 def get_balance_cache_key(broker_name: str, account_id) -> str:
@@ -4306,25 +4370,33 @@ def vps_heartbeat(vps_id):
 
 # ==================== BROKER DETECTION ====================
 
-def detect_exness_mt5():
-    """Detect if Exness MT5 is available on the system"""
+def detect_mt5_terminal_for_broker(broker_name: str, configured_path: str = None):
+    """Detect if MT5 is available for a broker and whether configured terminal path exists."""
     try:
         import MetaTrader5 as mt5
+
+        path_ok = True
+        if configured_path:
+            path_ok = os.path.exists(configured_path)
         
         # Try to initialize MT5 to check if it's installed
         if hasattr(mt5, 'version'):
-            logger.info("✅ Exness MT5 detected on system")
+            logger.info(f"✅ {broker_name} MT5 detected on system")
             return {
                 'available': True,
                 'installed': True,
-                'version': str(mt5.version if hasattr(mt5, 'version') else 'Unknown')
+                'version': str(mt5.version if hasattr(mt5, 'version') else 'Unknown'),
+                'terminal_path': configured_path,
+                'path_exists': path_ok,
             }
         else:
             logger.warning("⚠️ MetaTrader 5 library found but version info unavailable")
             return {
                 'available': True,
                 'installed': True,
-                'version': 'Unknown'
+                'version': 'Unknown',
+                'terminal_path': configured_path,
+                'path_exists': path_ok,
             }
     except ImportError:
         logger.warning("⚠️ MetaTrader 5 library not installed")
@@ -4334,12 +4406,22 @@ def detect_exness_mt5():
             'reason': 'MetaTrader 5 library not installed. Install with: pip install MetaTrader5'
         }
     except Exception as e:
-        logger.error(f"❌ Error detecting Exness MT5: {e}")
+        logger.error(f"❌ Error detecting {broker_name} MT5: {e}")
         return {
             'available': False,
             'installed': False,
             'error': str(e)
         }
+
+
+def detect_exness_mt5():
+    """Detect if Exness MT5 is available on the system"""
+    return detect_mt5_terminal_for_broker('Exness', MT5_CONFIG.get('path'))
+
+
+def detect_pxbt_mt5():
+    """Detect if PXBT MT5 is available on the system"""
+    return detect_mt5_terminal_for_broker('PXBT', PXBT_CONFIG.get('path'))
 
 
 def check_exness_connectivity(account_id=None, password=None, server='Exness-MT5'):
@@ -4396,6 +4478,20 @@ def check_exness():
         }), 500
 
 
+@app.route('/api/brokers/check-pxbt', methods=['GET'])
+def check_pxbt():
+    """Check if PXBT is available and can be used"""
+    try:
+        pxbt_info = detect_pxbt_mt5()
+        return jsonify(pxbt_info), 200
+    except Exception as e:
+        logger.error(f"❌ Error checking PXBT availability: {e}")
+        return jsonify({
+            'available': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/brokers/verify-exness', methods=['POST'])
 def verify_exness():
     """Verify Exness connectivity with credentials"""
@@ -4429,6 +4525,8 @@ def list_brokers():
     # Detect Exness availability
     exness_status = detect_exness_mt5()
     exness_broker_status = 'active' if exness_status.get('available') else 'inactive'
+    pxbt_status = detect_pxbt_mt5()
+    pxbt_broker_status = 'active' if pxbt_status.get('available') else 'inactive'
     
     brokers = [
         {
@@ -4446,6 +4544,15 @@ def list_brokers():
             'description': 'MetaTrader 5 - Most popular forex platform',
             'assets': ['Forex', 'Metals', 'Indices', 'Stocks', 'Cryptos'],
             'status': 'active'
+        },
+        {
+            'type': 'pxbt',
+            'name': 'PXBT MT5',
+            'description': 'PXBT Trading - MetaTrader 5 broker integration',
+            'assets': ['Forex', 'Metals', 'Indices', 'Stocks', 'Cryptos'],
+            'status': pxbt_broker_status,
+            'installed': pxbt_status.get('installed', False),
+            'version': pxbt_status.get('version', 'Not installed')
         },
         {
             'type': 'oanda',
@@ -8539,6 +8646,15 @@ REGISTERED_BROKERS = [
         'description': 'High leverage forex trading',
     },
     {
+        'id': 'pxbt',
+        'name': 'PXBT',
+        'display_name': 'PXBT Trading',
+        'logo': '🚀',
+        'account_types': ['DEMO', 'LIVE'],
+        'is_active': True,
+        'description': 'PXBT Trading MT5 broker',
+    },
+    {
         'id': 'darwinex',
         'name': 'Darwinex',
         'display_name': 'Darwinex',
@@ -8697,6 +8813,7 @@ def save_broker_credentials():
     - FXCM: token/api_key, optional account_number
     - OANDA: api_key, account_number
     - Exness: account_number, password, server, is_live
+    - PXBT: account_number, password, server, is_live
     """
     try:
         user_id = request.user_id
@@ -8744,7 +8861,7 @@ def save_broker_credentials():
                 }), 400
             server = server or 'REST-API'
             password = ''
-        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5']:
+        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'PXBT']:
             if not account_number or not password:
                 return jsonify({
                     'success': False,
@@ -8755,6 +8872,8 @@ def save_broker_credentials():
                     server = 'MetaQuotes-Demo'
                 elif broker_name in ['XM', 'XM Global']:
                     server = 'XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'
+                elif broker_name == 'PXBT':
+                    server = 'PXBT-Real' if is_live else 'PXBT-Demo'
                 else:  # MetaTrader 5
                     server = 'MetaTrader5-Real' if is_live else 'MetaTrader5-Demo'
         elif broker_name in ['Exness']:
@@ -8768,7 +8887,7 @@ def save_broker_credentials():
         else:
             return jsonify({
                 'success': False,
-                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, XM Global/XM, Binance, FXCM, OANDA, Exness'
+                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, XM Global/XM, Exness, PXBT, Binance, FXCM, OANDA'
             }), 400
         
         created_at = datetime.now().isoformat()
@@ -8792,7 +8911,7 @@ def save_broker_credentials():
             # Update existing credential
             credential_id = existing[0]
             # IG Markets integration removed
-            if broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness']:
+            if broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness', 'PXBT']:
                 cursor.execute('''
                     UPDATE broker_credentials
                     SET account_number = ?, password = ?, server = ?, is_live = ?, updated_at = ?
@@ -8891,7 +9010,7 @@ def test_broker_connection():
         if broker == 'IG Markets':
             return jsonify({
                 'success': False,
-                'error': 'IG Markets integration has been removed. Supported brokers: Exness, XM Global, Binance, FXCM, OANDA'
+                'error': 'IG Markets integration has been removed. Supported brokers: Exness, PXBT, XM Global, Binance, FXCM, OANDA'
             }), 400
 
         # ==================== BINANCE ====================
@@ -9039,11 +9158,13 @@ def test_broker_connection():
             
             # Fix server name for MT5 brokers
             broker_l = broker.lower()
-            if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness']:
+            if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness', 'pxbt', 'prime xbt', 'primexbt']:
                 if broker_l in ['xm', 'xm global']:
                     expected_server = 'XMGlobal-Demo' if not ENVIRONMENT == 'LIVE' else 'XMGlobal-Real'
                 elif broker_l == 'exness':
                     expected_server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
+                elif broker_l in ['pxbt', 'prime xbt', 'primexbt']:
+                    expected_server = 'PXBT-Real' if ENVIRONMENT == 'LIVE' else 'PXBT-Demo'
                 else:
                     expected_server = 'MetaQuotes-Demo' if not ENVIRONMENT == 'LIVE' else 'MetaQuotes-Live'
 
@@ -9077,6 +9198,8 @@ def test_broker_connection():
                         cached_connection_id = 'Exness MT5'
                     elif normalized_broker in ['XM', 'XM Global']:
                         cached_connection_id = 'XM Global MT5'
+                    elif normalized_broker == 'PXBT':
+                        cached_connection_id = 'PXBT MT5'
                     
                     if cached_connection_id:
                         cached_conn = broker_manager.connections.get(cached_connection_id)
@@ -10056,6 +10179,8 @@ def create_bot():
                         cached_connection_id = 'Exness MT5'
                     elif normalized_broker_name in ['XM', 'XM Global']:
                         cached_connection_id = 'XM Global MT5'
+                    elif normalized_broker_name == 'PXBT':
+                        cached_connection_id = 'PXBT MT5'
 
                     cached_connection = broker_manager.connections.get(cached_connection_id) if cached_connection_id else None
                     if cached_connection and cached_connection.connected:
@@ -10285,7 +10410,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 # Detect broker type
                 broker_type = bot_config.get('broker_type', 'MT5')
                 is_ig = broker_type == 'IG Markets'
-                is_mt5 = broker_type in ['MetaTrader 5', 'MetaQuotes', 'XM Global', 'XM', 'Exness', 'MT5']
+                is_mt5 = broker_type in ['MetaTrader 5', 'MetaQuotes', 'XM Global', 'XM', 'Exness', 'PXBT', 'MT5']
                 
                 mt5_conn = None
                 ig_conn = None
@@ -10321,7 +10446,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     # MT5 broker - connect via terminal SDK
                     try:
                         # Check connection cache first (OPTIMIZATION: avoid creating new connection every cycle)
-                        cache_key = f"{user_id}|Exness|{bot_credentials.get('account', 'unknown')}"
+                        normalized_cache_broker = canonicalize_broker_name(bot_config.get('broker_type', 'MetaTrader 5'))
+                        cache_key = f"{user_id}|{normalized_cache_broker}|{bot_credentials.get('account', 'unknown')}"
                         with broker_connection_cache_lock:
                             if cache_key in broker_connection_cache:
                                 mt5_conn = broker_connection_cache[cache_key]
@@ -11065,8 +11191,8 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             logger.error(error_msg)
             return None, error_msg
         
-        # ✅ METATRADER 5 - MetaQuotes, XM Global, or Exness
-        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness']:
+        # ✅ METATRADER 5 - MetaQuotes, XM Global, Exness, or PXBT
+        elif broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness', 'PXBT']:
             logger.info(f"[Broker Switch] Bot {bot_id}: Using MetaTrader 5 SDK")
             account_number = cred['account_number']
             password = cred['password']
@@ -11086,6 +11212,8 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             elif 'exness' in server.lower():
                 # Normalize Exness server name based on live/demo mode
                 server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+            elif 'pxbt' in server.lower() or 'primexbt' in server.lower() or broker_name == 'PXBT':
+                server = 'PXBT-Real' if is_live else 'PXBT-Demo'
             
             logger.info(f"Bot {bot_id}: Connecting to MT5 - Account: {account_number}, Server: {server}")
             
@@ -11095,6 +11223,8 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 broker_for_mt5 = 'XM'
             elif broker_name == 'Exness':
                 broker_for_mt5 = 'Exness'
+            elif broker_name == 'PXBT':
+                broker_for_mt5 = 'PXBT'
             else:
                 broker_for_mt5 = 'MetaQuotes'
             
@@ -11115,7 +11245,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 return None, error_msg
         
         else:
-            error_msg = f"Unknown broker type: {broker_name}. Supported: IG Markets, MetaQuotes, XM Global/XM, Exness, Binance, FXCM, OANDA"
+            error_msg = f"Unknown broker type: {broker_name}. Supported: IG Markets, MetaQuotes, XM Global/XM, Exness, PXBT, Binance, FXCM, OANDA"
             logger.error(error_msg)
             return None, error_msg
     
