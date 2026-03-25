@@ -74,6 +74,15 @@ logger = logging.getLogger(__name__)
 mt5_connection_lock = threading.Lock()
 logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connections")
 
+# ==================== MT5 ACCOUNT QUEUE (Multi-User Support) ====================
+# When multiple users have different MT5 accounts, the single MT5 process must
+# switch between accounts. This queue serializes access per-account to minimize
+# unnecessary switches. Bots on the SAME account share the session; bots on
+# DIFFERENT accounts wait for their turn.
+mt5_current_account = None       # Account number currently logged in
+mt5_account_lock = threading.Lock()  # Protects mt5_current_account reads/writes
+logger.info("✅ MT5 account queue initialized - supports multi-user account switching")
+
 # ==================== BOT CREATION LOCK ====================
 # Prevents multiple simultaneous bot creations which compete for MT5 resources
 # Only ONE bot should be created at a time to avoid MT5 lock contention
@@ -2160,6 +2169,10 @@ class MT5Connection(BrokerConnection):
                     logger.info(f"✅ MT5 already logged in to account {account} - reusing existing connection")
                     self.connected = True
                     self.account_info = existing_info
+                    # Track which account is active for multi-user awareness
+                    with mt5_account_lock:
+                        global mt5_current_account
+                        mt5_current_account = account
                     return True
             except Exception as e:
                 logger.debug(f"  (Checking existing session: {e})")
@@ -2247,6 +2260,10 @@ class MT5Connection(BrokerConnection):
                         if acct_info and acct_info.login == int(account):
                             self.connected = True
                             logger.info(f"✅ Logged in to MT5 account {account} successfully")
+                            # Track which account is active for multi-user awareness
+                            with mt5_account_lock:
+                                global mt5_current_account
+                                mt5_current_account = int(account)
                             self.get_account_info()
                             
                             # CRITICAL FIX: Populate balance cache IMMEDIATELY after login success
@@ -11014,12 +11031,16 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         # ==================== MULTI-USER ACCOUNT VERIFICATION ====================
                         # Verify MT5 is logged into THIS bot's account before trading.
                         # If another user's bot switched the account, we must re-login.
+                        # Uses fast mt5_current_account check first to avoid expensive MT5 IPC call.
                         try:
-                            import MetaTrader5 as _mt5_check
-                            current_info = _mt5_check.account_info()
                             expected_account = int(bot_credentials.get('account', 0))
-                            if current_info and expected_account and current_info.login != expected_account:
-                                logger.warning(f"⚠️  Bot {bot_id}: MT5 logged into account {current_info.login} but bot needs {expected_account} - switching...")
+                            needs_switch = False
+                            with mt5_account_lock:
+                                if mt5_current_account and expected_account and mt5_current_account != expected_account:
+                                    needs_switch = True
+                            
+                            if needs_switch:
+                                logger.warning(f"⚠️  Bot {bot_id}: MT5 on account {mt5_current_account} but bot needs {expected_account} - switching...")
                                 # Force re-login with this bot's credentials
                                 mt5_conn.connected = False
                                 if not mt5_conn.connect():
@@ -11027,6 +11048,16 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     time.sleep(trading_interval)
                                     continue
                                 logger.info(f"✅ Bot {bot_id}: Switched MT5 to account {expected_account}")
+                            elif expected_account and not mt5_current_account:
+                                # First time — verify via MT5 IPC
+                                import MetaTrader5 as _mt5_check
+                                current_info = _mt5_check.account_info()
+                                if current_info and current_info.login != expected_account:
+                                    mt5_conn.connected = False
+                                    if not mt5_conn.connect():
+                                        logger.error(f"Bot {bot_id}: Initial account login to {expected_account} failed")
+                                        time.sleep(trading_interval)
+                                        continue
                         except Exception as acct_err:
                             logger.debug(f"Bot {bot_id}: Account verification check: {acct_err}")
                         # ==================== END MULTI-USER VERIFICATION ====================
