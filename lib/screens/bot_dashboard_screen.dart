@@ -14,6 +14,7 @@ import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
 import '../widgets/trading_mode_switcher.dart';
 import '../widgets/account_display_widget.dart';
+import '../widgets/pxbt_session_manager.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
 
@@ -221,6 +222,14 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                             const SizedBox(height: 16),
                           ],
                         ),
+                      ),
+
+                      // 🔌 PXBT SESSION MANAGER - Check connection status and reconnect if needed
+                      PxbtSessionManager(
+                        onStatusChanged: () {
+                          // Refresh bot list when PXBT status changes
+                          context.read<BotService>().fetchActiveBots();
+                        },
                       ),
 
                       // Summary row

@@ -127,7 +127,123 @@ def set_global_mt5(connection):
     with global_mt5_lock:
         global_mt5_instance = connection
 
+# ==================== PXBT SESSION PERSISTENCE ====================
+# Maintains last known PXBT credentials for auto-reconnect
+pxbt_session_cache = {}  # { credential_id: { 'account': X, 'password': X, 'server': X, 'timestamp': Z } }
+pxbt_session_lock = threading.Lock()
+
+def cache_pxbt_credentials(credential_id: str, account: str, password: str, server: str):
+    """Cache PXBT credentials for auto-reconnect on session loss"""
+    with pxbt_session_lock:
+        pxbt_session_cache[credential_id] = {
+            'account': account,
+            'password': password,
+            'server': server,
+            'timestamp': time.time(),
+            'last_check': time.time(),
+        }
+    logger.info(f"✅ PXBT session cached for credential {credential_id}: account={account}, server={server}")
+
+def get_cached_pxbt_credentials(credential_id: str):
+    """Get cached PXBT credentials (for auto-reconnect on session loss)"""
+    with pxbt_session_lock:
+        if credential_id in pxbt_session_cache:
+            cred = pxbt_session_cache[credential_id]
+            elapsed = time.time() - cred['timestamp']
+            logger.debug(f"✅ Retrieved cached PXBT credentials for {credential_id} (cached {elapsed:.0f}s ago)")
+            return cred
+    return None
+
+def is_pxbt_connection_healthy(mt5_conn: 'MT5Connection') -> bool:
+    """Check if PXBT MT5 connection is still healthy
+    
+    Returns: True if connection is valid and logged in, False if reconnect needed
+    """
+    try:
+        if not mt5_conn or not hasattr(mt5_conn, 'connected'):
+            return False
+        
+        if not mt5_conn.connected:
+            logger.warning("⚠️  PXBT connection status: DISCONNECTED")
+            return False
+        
+        # Try to get account info (will fail if session expired)
+        import MetaTrader5 as mt5
+        try:
+            account_info = mt5.account_info()
+            if account_info is None:
+                logger.warning("⚠️  PXBT connection health check failed: account_info() returned None")
+                return False
+            logger.debug(f"✅ PXBT connection health check passed: account {account_info.login}")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️  PXBT connection health check failed: {e}")
+            return False
+    except Exception as e:
+        logger.warning(f"⚠️  Error checking PXBT connection health: {e}")
+        return False
+
+def ensure_pxbt_connection_active(mt5_conn: 'MT5Connection', credentials: Dict, retry_count: int = 3) -> bool:
+    """Ensure PXBT connection is active, reconnect if needed
+    
+    This handles the case where PXBT MT5 terminal session expires or disconnects.
+    Will attempt to reconnect using cached credentials.
+    
+    Returns: True if connection is active, False if reconnect failed
+    """
+    try:
+        # Check if connection is still healthy
+        if is_pxbt_connection_healthy(mt5_conn):
+            logger.debug("✅ PXBT connection is active and healthy")
+            return True
+        
+        # Connection is not healthy - attempt to reconnect
+        logger.warning(f"⚠️  PXBT connection lost - attempting auto-reconnect...")
+        
+        for attempt in range(1, retry_count + 1):
+            try:
+                logger.info(f"   Reconnect attempt {attempt}/{retry_count}...")
+                
+                # Disconnect first to reset state
+                if hasattr(mt5_conn, 'disconnect'):
+                    try:
+                        mt5_conn.disconnect()
+                    except:
+                        pass
+                
+                # Wait before reconnecting (exponential backoff: 2s, 4s, 8s)
+                wait_time = 2 ** (attempt - 1)
+                logger.info(f"   Waiting {wait_time}s before reconnect attempt...")
+                time.sleep(wait_time)
+                
+                # Attempt to reconnect
+                if mt5_conn.connect():
+                    logger.info(f"✅ PXBT auto-reconnect successful on attempt {attempt}")
+                    # Re-cache the credentials on successful reconnect
+                    if credentials:
+                        cache_pxbt_credentials(
+                            credentials.get('credential_id', 'unknown'),
+                            credentials.get('account', ''),
+                            credentials.get('password', ''),
+                            credentials.get('server', '')
+                        )
+                    return True
+                else:
+                    logger.warning(f"   Reconnect attempt {attempt} failed - will retry")
+            except Exception as e:
+                logger.warning(f"   Reconnect attempt {attempt} exception: {e}")
+        
+        logger.error(f"❌ PXBT auto-reconnect failed after {retry_count} attempts")
+        return False
+    
+    except Exception as e:
+        logger.error(f"❌ Error in ensure_pxbt_connection_active: {e}")
+        return False
+
+logger.info("✅ PXBT session persistence initialized - auto-connect on session loss enabled")
+
 logger.info("✅ Global MT5 singleton initialized - will reuse single terminal across all bots")
+
 
 app = Flask(__name__)
 CORS(app)
@@ -4545,6 +4661,183 @@ def check_pxbt():
             'available': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/brokers/pxbt/session-status', methods=['GET'])
+@require_session
+def get_pxbt_session_status():
+    """Check PXBT MT5 connection status and health
+    
+    Returns connection status, last activity timestamp, and suggestion for action
+    """
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get PXBT credentials for this user
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, server, is_live
+            FROM broker_credentials
+            WHERE user_id = ? AND is_active = 1 AND broker_name LIKE '%PXBT%'
+        ''', (user_id,))
+        
+        creds = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        if not creds:
+            return jsonify({
+                'success': True,
+                'connected': False,
+                'message': 'No PXBT account connected',
+                'accounts': []
+            }), 200
+        
+        # Check status for each PXBT account
+        account_status = []
+        for cred in creds:
+            credential_id = cred['credential_id']
+            account_num = cred['account_number']
+            server = cred['server'] or 'PXBT-Demo'
+            is_live = cred['is_live']
+            
+            # Check MT5 connection health
+            mt5_conn = get_global_mt5()
+            is_healthy = is_pxbt_connection_healthy(mt5_conn) if mt5_conn else False
+            
+            # Check if session is cached
+            cached_creds = get_cached_pxbt_credentials(credential_id)
+            cached_time = cached_creds.get('timestamp') if cached_creds else None
+            
+            account_status.append({
+                'credentialId': credential_id,
+                'accountNumber': account_num,
+                'server': server,
+                'mode': 'LIVE' if is_live else 'DEMO',
+                'connected': is_healthy,
+                'lastActivityTime': cached_time,
+                'suggestion': 'Connection healthy - no action needed' if is_healthy else 'PXBT disconnected - click reconnect to restore'
+            })
+        
+        return jsonify({
+            'success': True,
+            'connected': any(acc['connected'] for acc in account_status),
+            'accounts': account_status,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error getting PXBT session status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/brokers/pxbt/reconnect', methods=['POST'])
+@require_session
+def reconnect_pxbt():
+    """Force PXBT reconnection - useful when connection drops
+    
+    Attempts to re-establish MT5 connection using cached credentials
+    """
+    try:
+        user_id = request.user_id
+        data = request.get_json() or {}
+        credential_id = data.get('credentialId')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get PXBT credentials (either specific credential or first active one)
+        if credential_id:
+            cursor.execute('''
+                SELECT credential_id, broker_name, account_number, password, server, is_live
+                FROM broker_credentials
+                WHERE credential_id = ? AND user_id = ? AND is_active = 1
+            ''', (credential_id, user_id))
+        else:
+            cursor.execute('''
+                SELECT credential_id, broker_name, account_number, password, server, is_live
+                FROM broker_credentials
+                WHERE user_id = ? AND is_active = 1 AND broker_name LIKE '%PXBT%'
+                LIMIT 1
+            ''', (user_id,))
+        
+        cred_row = cursor.fetchone()
+        conn.close()
+        
+        if not cred_row:
+            return jsonify({
+                'success': False,
+                'error': 'PXBT credential not found'
+            }), 404
+        
+        cred = dict(cred_row)
+        credential_id = cred['credential_id']
+        account_num = cred['account_number']
+        password = cred['password']
+        server = cred['server'] or 'PXBT-Demo'
+        
+        logger.info(f"🔄 PXBT Reconnect requested for user {user_id}, account {account_num}")
+        
+        # Get current connection
+        mt5_conn = get_global_mt5()
+        
+        # Build credentials dict for reconnect
+        reconnect_creds = {
+            'credential_id': credential_id,
+            'broker': 'PXBT',
+            'account': account_num,
+            'password': password,
+            'server': server,
+            'is_live': cred['is_live']
+        }
+        
+        if mt5_conn:
+            # Try to reconnect existing connection
+            if ensure_pxbt_connection_active(mt5_conn, reconnect_creds, retry_count=5):
+                logger.info(f"✅ PXBT reconnection successful for {account_num}")
+                return jsonify({
+                    'success': True,
+                    'message': f'Successfully reconnected to PXBT account {account_num}',
+                    'accountNumber': account_num,
+                    'server': server
+                }), 200
+            else:
+                logger.error(f"❌ PXBT reconnection failed for {account_num}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to reconnect to PXBT account {account_num} - try again in a moment'
+                }), 500
+        else:
+            # No existing connection - create new one
+            logger.info(f"Creating new MT5 connection for PXBT...")
+            try:
+                mt5_conn = MT5Connection(reconnect_creds)
+                if mt5_conn.connect():
+                    set_global_mt5(mt5_conn)
+                    cache_pxbt_credentials(credential_id, account_num, password, server)
+                    logger.info(f"✅ New PXBT connection created and connected")
+                    return jsonify({
+                        'success': True,
+                        'message': f'Created and connected to PXBT account {account_num}',
+                        'accountNumber': account_num,
+                        'server': server
+                    }), 200
+                else:
+                    logger.error(f"❌ Failed to connect new MT5 connection for PXBT")
+                    return jsonify({
+                        'success': False,
+                        'error': 'Failed to create new connection to PXBT'
+                    }), 500
+            except Exception as e:
+                logger.error(f"❌ Exception creating MT5 connection: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Error: {str(e)}'
+                }), 500
+    
+    except Exception as e:
+        logger.error(f"Error reconnecting PXBT: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/brokers/verify-exness', methods=['POST'])
@@ -10565,6 +10858,20 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             if cache_key in broker_connection_cache:
                                 mt5_conn = broker_connection_cache[cache_key]
                                 logger.debug(f"♻️  Bot {bot_id}: Using cached MT5 connection (savings: 3-5s)")
+                                
+                                # ✨ NEW: Health check for PXBT to detect session loss
+                                if normalized_cache_broker == 'PXBT':
+                                    if not is_pxbt_connection_healthy(mt5_conn):
+                                        logger.warning(f"⚠️  Bot {bot_id}: PXBT connection health check failed - attempting auto-reconnect")
+                                        if ensure_pxbt_connection_active(mt5_conn, bot_credentials):
+                                            logger.info(f"✅ Bot {bot_id}: PXBT reconnected successfully")
+                                        else:
+                                            logger.error(f"❌ Bot {bot_id}: PXBT auto-reconnect failed - will retry next cycle")
+                                            stagger_delay = random.uniform(1, 15)
+                                            actual_wait = trading_interval + stagger_delay
+                                            logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                            time.sleep(actual_wait)
+                                            continue
                             else:
                                 # Create new connection and cache it
                                 if bot_credentials:
@@ -10576,6 +10883,14 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         logger.info(f"Bot {bot_id}: Creating global MT5 singleton connection...")
                                         mt5_conn = MT5Connection(bot_credentials)
                                         set_global_mt5(mt5_conn)
+                                        # ✨ NEW: Cache PXBT credentials for auto-reconnect
+                                        if normalized_cache_broker == 'PXBT':
+                                            cache_pxbt_credentials(
+                                                bot_credentials.get('credential_id', 'unknown'),
+                                                bot_credentials.get('account', ''),
+                                                bot_credentials.get('password', ''),
+                                                bot_credentials.get('server', '')
+                                            )
                                     else:
                                         logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
                                 else:
