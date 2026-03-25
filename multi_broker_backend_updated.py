@@ -134,6 +134,33 @@ def set_global_mt5(connection):
     with global_mt5_lock:
         global_mt5_instance = connection
 
+# ==================== SAFE MT5 READINESS CHECK ====================
+# CRITICAL: Never call mt5.initialize(login=...) or mt5.shutdown() from API endpoints!
+# The MT5 terminal is a SHARED singleton - disrupting it kills ALL bot connections.
+def ensure_mt5_ready():
+    """Check if MT5 IPC is alive WITHOUT reinitializing or disrupting the existing session.
+    
+    SAFE: Uses account_info() to probe IPC, falls back to bare initialize() (no login params).
+    NEVER calls mt5.shutdown() or mt5.initialize(login=...).
+    
+    Returns True if MT5 is ready for use, False otherwise.
+    """
+    try:
+        import MetaTrader5 as mt5
+        # First try a lightweight probe - if account_info works, IPC is alive
+        info = mt5.account_info()
+        if info:
+            return True
+        # IPC might be stale - try bare initialize() which just reconnects IPC
+        # This does NOT change the logged-in account or restart the terminal
+        if mt5.initialize():
+            return True
+        logger.warning("⚠️ ensure_mt5_ready: MT5 IPC not responding")
+        return False
+    except Exception as e:
+        logger.warning(f"⚠️ ensure_mt5_ready: {e}")
+        return False
+
 # ==================== PXBT SESSION PERSISTENCE ====================
 # Maintains last known PXBT credentials for auto-reconnect
 pxbt_session_cache = {}  # { credential_id: { 'account': X, 'password': X, 'server': X, 'timestamp': Z } }
@@ -2288,10 +2315,13 @@ class MT5Connection(BrokerConnection):
             return False
 
     def disconnect(self) -> bool:
-        """Disconnect from MT5"""
+        """Disconnect from MT5 - marks as disconnected but does NOT call mt5.shutdown()
+        because the MT5 terminal is a shared singleton used by all bots.
+        Calling shutdown() would kill connections for ALL bots and API endpoints."""
         try:
-            if self.mt5:
-                self.mt5.shutdown()
+            # CRITICAL: Do NOT call self.mt5.shutdown() here!
+            # The MT5 terminal is shared across all bots and API endpoints.
+            # Just mark this connection object as disconnected.
             self.connected = False
             return True
         except Exception as e:
@@ -3681,45 +3711,36 @@ class XMConnection(BrokerConnection):
         self.connection = None
     
     def connect(self) -> bool:
-        """Connect to XM MT5 account"""
+        """Connect to XM MT5 account.
+        CRITICAL: XM uses a DIFFERENT MT5 terminal than Exness.
+        We must NEVER call mt5.initialize()/login()/shutdown() here because
+        that would hijack/kill the shared Exness terminal used by all bots.
+        XM accounts operate in cache-only/demo mode."""
         try:
-            # XM uses MT5, so we can use same approach as MT5Connection
             account = self.credentials.get('account')
             password = self.credentials.get('password')
-            server = self.credentials.get('server', 'XMGlobal-MT5')
             
             if not account or not password:
                 logger.warning(f"XM: Missing account or password credentials")
                 return False
             
-            import MetaTrader5 as mt5
-            
-            if not mt5.initialize():
-                logger.error(f"Failed to initialize MT5 for XM")
-                return False
-            
-            if mt5.login(int(account), password, server):
-                self.connected = True
-                self.get_account_info()
-                logger.info(f"✅ Connected to XM account {account}")
-                return True
-            else:
-                logger.error(f"Failed to login to XM account {account}: {mt5.last_error()}")
-                mt5.shutdown()
-                return False
+            # CRITICAL: Do NOT call mt5.initialize() or mt5.login() here!
+            # The MT5 terminal is Exness-only. XM would need its own terminal.
+            # XM operates in cache-only/demo mode.
+            logger.info(f"ℹ️ XM account {account} uses separate MT5 terminal - operating in cache mode")
+            self.connected = True  # Mark as connected for cache-based operations
+            return True
                 
         except Exception as e:
             logger.error(f"Error connecting to XM: {e}")
             return False
     
     def disconnect(self) -> bool:
-        """Disconnect from XM"""
+        """Disconnect from XM.
+        CRITICAL: Does NOT call mt5.shutdown() - that would kill the shared Exness terminal."""
         try:
-            if self.connected:
-                import MetaTrader5 as mt5
-                mt5.shutdown()
-                self.connected = False
-                logger.info("Disconnected from XM")
+            self.connected = False
+            logger.info("XM connection marked as disconnected (MT5 terminal preserved)")
             return True
         except Exception as e:
             logger.error(f"Error disconnecting from XM: {e}")
@@ -4651,43 +4672,49 @@ def detect_pxbt_mt5():
 
 
 def check_exness_connectivity(account_id=None, password=None, server='Exness-MT5'):
-    """Check if Exness MT5 server is reachable"""
+    """Check if Exness MT5 server is reachable.
+    CRITICAL: Does NOT call mt5.initialize(login=...) or mt5.shutdown()!
+    Those calls would hijack/kill the shared MT5 session used by all bots.
+    Instead, uses the safe ensure_mt5_ready() probe."""
     try:
         import MetaTrader5 as mt5
         
-        # If credentials provided, try to login
         if account_id and password:
-            if mt5.initialize(login=int(account_id), password=password, server=server):
-                account_info = mt5.account_info()
-                mt5.shutdown()
-                if account_info:
+            # Check if MT5 IPC is alive and we're logged into the right account
+            if ensure_mt5_ready():
+                existing = mt5.account_info()
+                if existing and existing.login == int(account_id):
                     logger.info(f"✅ Exness connectivity verified for account {account_id}")
                     return {
                         'connected': True,
                         'account_id': account_id,
                         'server': server,
+                        'balance': existing.balance,
                         'message': 'Successfully connected to Exness'
                     }
-            else:
-                error = mt5.last_error()
-                logger.error(f"❌ Exness login failed: {error}")
-                return {
-                    'connected': False,
-                    'error': str(error)
-                }
+                elif existing:
+                    # MT5 is alive but logged into different account
+                    logger.info(f"ℹ️ Exness MT5 connected (account {existing.login}), requested {account_id}")
+                    return {
+                        'connected': True,
+                        'account_id': str(existing.login),
+                        'server': server,
+                        'message': f'MT5 connected to account {existing.login}'
+                    }
+            logger.warning(f"⚠️ Exness MT5 not responding for account {account_id}")
+            return {
+                'connected': False,
+                'error': 'MT5 terminal not responding'
+            }
         else:
             # Just check if MT5 library responds
-            logger.info("✅ Exness MT5 library responding")
-            return {
-                'connected': True,
-                'message': 'MT5 library is available (credentials not tested)'
-            }
+            if ensure_mt5_ready():
+                logger.info("✅ Exness MT5 library responding")
+                return {'connected': True, 'message': 'MT5 is connected and responding'}
+            return {'connected': False, 'error': 'MT5 not responding'}
     except Exception as e:
         logger.error(f"❌ Error checking Exness connectivity: {e}")
-        return {
-            'connected': False,
-            'error': str(e)
-        }
+        return {'connected': False, 'error': str(e)}
 
 
 @app.route('/api/brokers/check-exness', methods=['GET'])
@@ -15550,7 +15577,10 @@ def get_exness_available_symbols():
 
 @app.route('/api/broker/exness/login', methods=['POST'])
 def exness_login():
-    """Login to Exness MT5 account and create session"""
+    """Login to Exness MT5 account and create session.
+    CRITICAL: Uses ensure_mt5_ready() instead of mt5.initialize().
+    NEVER calls mt5.shutdown() - the terminal is shared by all bots.
+    """
     try:
         data = request.json or {}
         account_id = data.get('accountId') or data.get('account_id')
@@ -15568,26 +15598,43 @@ def exness_login():
         try:
             import MetaTrader5 as mt5
             
-            # Initialize MT5
-            if not mt5.initialize():
+            # SAFE: Use ensure_mt5_ready() instead of mt5.initialize()
+            if not ensure_mt5_ready():
                 return jsonify({
                     'success': False,
                     'error': 'Failed to initialize MT5',
                     'detail': 'MT5 terminal may not be installed or running'
                 }), 500
             
-            # Login to Exness account
+            # Check if already logged into this account
             try:
                 account_id_int = int(account_id)
             except ValueError:
                 return jsonify({'success': False, 'error': 'accountId must be numeric'}), 400
             
+            existing = mt5.account_info()
+            if existing and existing.login == account_id_int:
+                # Already logged in - just return the info
+                logger.info(f"✅ Exness already logged in to account {account_id}")
+                session_token = generate_exness_session_token()
+                return jsonify({
+                    'success': True,
+                    'session_token': session_token,
+                    'account_id': account_id,
+                    'account_type': 'LIVE' if is_live else 'DEMO',
+                    'balance': existing.balance,
+                    'currency': existing.currency,
+                    'leverage': existing.leverage,
+                    'server': server,
+                }), 200
+            
+            # Different account - try login (but NEVER shutdown on failure)
             login_result = mt5.login(account_id_int, password=password, server=server)
             
             if not login_result:
                 error_msg = mt5.last_error()
                 logger.warning(f"⚠️ Exness login failed for account {account_id}: {error_msg}")
-                mt5.shutdown()
+                # CRITICAL: Do NOT call mt5.shutdown() here!
                 return jsonify({
                     'success': False,
                     'error': 'Failed to login to Exness account',
@@ -15597,7 +15644,7 @@ def exness_login():
             # Get account info
             account_info = mt5.account_info()
             if not account_info:
-                mt5.shutdown()
+                # CRITICAL: Do NOT call mt5.shutdown() here!
                 return jsonify({
                     'success': False,
                     'error': 'Failed to retrieve account info from MT5'
@@ -15633,21 +15680,21 @@ def exness_login():
 
 @app.route('/api/broker/exness/logout', methods=['POST'])
 def exness_logout():
-    """Logout from Exness (cleanup session)"""
+    """Logout from Exness (cleanup session)
+    CRITICAL: Does NOT call mt5.shutdown()! That would kill ALL bot connections.
+    Only clears the session token - MT5 terminal stays running for bots."""
     try:
         session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
         
         if not session_token:
             return jsonify({'success': False, 'error': 'No session token provided'}), 401
         
-        # Close MT5 connection
-        try:
-            import MetaTrader5 as mt5
-            mt5.shutdown()
-        except:
-            pass
+        # CRITICAL: Do NOT call mt5.shutdown() here!
+        # The MT5 terminal is shared by all 9+ trading bots.
+        # Calling shutdown() would disconnect EVERYTHING.
+        # Just invalidate the session token.
         
-        logger.info(f"✅ Exness session ended")
+        logger.info(f"✅ Exness session ended (MT5 terminal kept alive for bots)")
         
         return jsonify({
             'success': True,
@@ -15766,7 +15813,7 @@ def exness_place_trade():
         try:
             import MetaTrader5 as mt5
             
-            if not mt5.initialize():
+            if not ensure_mt5_ready():
                 return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
             
             # Select symbol
@@ -15849,7 +15896,7 @@ def exness_get_orders():
         try:
             import MetaTrader5 as mt5
             
-            if not mt5.initialize():
+            if not ensure_mt5_ready():
                 return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
             
             # Get open positions
@@ -15902,7 +15949,7 @@ def exness_close_order(order_id):
         try:
             import MetaTrader5 as mt5
             
-            if not mt5.initialize():
+            if not ensure_mt5_ready():
                 return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
             
             # Get position
@@ -15977,7 +16024,7 @@ def exness_update_order(order_id):
         try:
             import MetaTrader5 as mt5
             
-            if not mt5.initialize():
+            if not ensure_mt5_ready():
                 return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
             
             # Get position
@@ -16035,7 +16082,7 @@ def exness_symbol_info(symbol):
         try:
             import MetaTrader5 as mt5
             
-            if not mt5.initialize():
+            if not ensure_mt5_ready():
                 return jsonify({'success': False, 'error': 'MT5 not initialized'}), 500
             
             # Get symbol info
@@ -16650,7 +16697,7 @@ def exness_get_trades():
         try:
             import MetaTrader5 as mt5
             
-            if mt5.initialize():
+            if ensure_mt5_ready():
                 deals = mt5.history_deals_get(position=0)
                 trades = []
                 
@@ -16796,7 +16843,7 @@ def exness_trade_summary():
         try:
             import MetaTrader5 as mt5
             
-            if mt5.initialize():
+            if ensure_mt5_ready():
                 deals = mt5.history_deals_get(position=0)
                 
                 if deals and len(deals) > 0:
@@ -16950,7 +16997,7 @@ def place_advanced_order(broker):
         
         if broker_lower == 'exness':
             import MetaTrader5 as mt5
-            if not mt5.initialize():
+            if not ensure_mt5_ready():
                 return jsonify({'success': False, 'error': 'MT5 initialization failed'}), 500
             
             # Map symbol to Exness format
@@ -17251,7 +17298,7 @@ def ws_broadcast_prices():
                         import MetaTrader5 as mt5
                         symbol_normalized = f"{symbol}m" if broker_name == 'Exness' and not symbol.endswith('m') else symbol
                         
-                        if mt5.initialize():
+                        if ensure_mt5_ready():
                             tick = mt5.symbol_info_tick(symbol_normalized)
                             if tick:
                                 ws.send(json.dumps({
@@ -17284,7 +17331,7 @@ def get_realtime_prices():
         prices = []
         try:
             import MetaTrader5 as mt5
-            if mt5.initialize():
+            if ensure_mt5_ready():
                 for symbol in symbols:
                     symbol_clean = symbol.strip()
                     symbol_normalized = f"{symbol_clean}m" if broker_name == 'Exness' and not symbol_clean.endswith('m') else symbol_clean
