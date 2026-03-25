@@ -5410,6 +5410,9 @@ def get_account_balances():
                 'broker': broker_name,
                 'accountNumber': account_num,
                 'mode': mode,
+                'is_live': is_live,  # Include is_live flag for frontend mode filtering
+                'active_bots': 0,  # TODO: Query active bots count from database
+                'last_update': datetime.now().isoformat() if account_info else cached_data.get(cred['credential_id'], {}).get('last_update'),
                 'error': error_msg,
             }
             

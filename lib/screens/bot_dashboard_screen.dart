@@ -12,6 +12,8 @@ import '../services/bot_service.dart';
 import '../services/broker_credentials_service.dart';
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
+import '../widgets/trading_mode_switcher.dart';
+import '../widgets/account_display_widget.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
 
@@ -26,16 +28,29 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   Timer? _refreshTimer;
   String _searchQuery = '';
   String _filterStatus = 'all'; // 'all', 'active', 'inactive'
+  String _tradingMode = 'DEMO'; // Current trading mode: DEMO or LIVE
+  bool _showAccountDetails = false; // Toggle to show account details
 
   @override
   void initState() {
     super.initState();
+    _loadTradingMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<BotService>().fetchActiveBots();
     });
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) context.read<BotService>().fetchActiveBots();
     });
+  }
+
+  Future<void> _loadTradingMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('trading_mode') ?? 'DEMO';
+    setState(() => _tradingMode = mode);
+  }
+
+  void _onModeChanged(String newMode) {
+    setState(() => _tradingMode = newMode);
   }
 
   @override
@@ -140,6 +155,74 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     children: [
+                      // ⭐ TRADING MODE SWITCHER & ACCOUNT DISPLAY
+                      Theme(
+                        data: Theme.of(context).copyWith(
+                          cardColor: Colors.white.withOpacity(0.06),
+                          primaryColor: const Color(0xFF00E5FF),
+                        ),
+                        child: Column(
+                          children: [
+                            // Mode Switcher (Compact pill style)
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Account Mode',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                TradingModeSwitcher(
+                                  currentMode: _tradingMode,
+                                  onModeChanged: _onModeChanged,
+                                  isCompact: true,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Account Details Toggle & Display
+                            if (_showAccountDetails)
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.04),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.08),
+                                  ),
+                                ),
+                                child: AccountDisplayWidget(
+                                  tradingMode: _tradingMode,
+                                  onRefresh: () {
+                                    context.read<BotService>().fetchActiveBots();
+                                  },
+                                ),
+                              )
+                            else
+                              Center(
+                                child: TextButton.icon(
+                                  onPressed: () =>
+                                      setState(() => _showAccountDetails = true),
+                                  icon: const Icon(Icons.account_balance_wallet,
+                                      size: 20, color: Color(0xFF00E5FF)),
+                                  label: const Text(
+                                    'Show Account Details',
+                                    style: TextStyle(
+                                      color: Color(0xFF00E5FF),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
+                      ),
+
                       // Summary row
                       Row(
                         children: [
