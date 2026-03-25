@@ -23,7 +23,12 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from flask_sockets import Sockets
+try:
+    from flask_sock import Sock
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+    print("[WARNING] flask-sock not installed. WebSocket prices disabled. Install with: pip install flask-sock")
 import logging
 from typing import Any, Dict, List, Optional
 from enum import Enum
@@ -249,7 +254,12 @@ logger.info("✅ Global MT5 singleton initialized - will reuse single terminal a
 
 app = Flask(__name__)
 CORS(app)
-sockets = Sockets(app)  # Initialize WebSocket support
+if WEBSOCKET_AVAILABLE:
+    sock = Sock(app)  # Initialize WebSocket support for real-time prices
+    logger.info("✅ WebSocket support initialized (flask-sock)")
+else:
+    sock = None
+    logger.warning("⚠️ WebSocket support disabled - install flask-sock: pip install flask-sock")
 
 # ==================== BOT CLEANUP & REPOPULATION ====================
 def repopulate_active_bots():
@@ -17207,101 +17217,166 @@ def close_advanced_order(broker, order_id):
 
 
 # ==================== WEBSOCKET REAL-TIME PRICES ====================
+# Connected clients for broadcasting price updates
+ws_clients = []
+ws_clients_lock = threading.Lock()
 
-@sockets.route('/ws/prices')
-def websocket_prices(ws):
-    """
-    WebSocket endpoint for real-time price streaming
-    Request: { 'action': 'subscribe', 'symbols': ['EURUSD', 'GBPUSD'], 'broker': 'Exness' }
-    Response: { 'type': 'price', 'symbol': 'EURUSD', 'bid': 1.2345, 'ask': 1.2347, 'time': timestamp }
-    """
+def ws_broadcast_prices():
+    """Background thread that pushes real-time prices to all subscribed WebSocket clients"""
+    logger.info("🔄 WebSocket price broadcaster thread started")
+    while True:
+        try:
+            with ws_clients_lock:
+                active_clients = list(ws_clients)
+            
+            if not active_clients:
+                time.sleep(1)
+                continue
+            
+            for client_info in active_clients:
+                ws = client_info['ws']
+                symbols = client_info.get('symbols', set())
+                broker_name = client_info.get('broker', 'Exness')
+                
+                if not symbols:
+                    continue
+                
+                for symbol in list(symbols):
+                    try:
+                        import MetaTrader5 as mt5
+                        symbol_normalized = f"{symbol}m" if broker_name == 'Exness' and not symbol.endswith('m') else symbol
+                        
+                        if mt5.initialize():
+                            tick = mt5.symbol_info_tick(symbol_normalized)
+                            if tick:
+                                ws.send(json.dumps({
+                                    'type': 'price',
+                                    'symbol': symbol,
+                                    'bid': float(tick.bid),
+                                    'ask': float(tick.ask),
+                                    'spread': round(float(tick.ask - tick.bid), 5),
+                                    'time': tick.time,
+                                    'timestamp': time.time()
+                                }))
+                    except Exception as e:
+                        logger.debug(f"Price fetch error for {symbol}: {e}")
+            
+            time.sleep(0.5)  # Send updates every 500ms
+            
+        except Exception as e:
+            logger.error(f"WebSocket broadcaster error: {e}")
+            time.sleep(2)
+
+
+# REST fallback endpoint for real-time prices (works without WebSocket)
+@app.route('/api/prices/realtime', methods=['GET'])
+def get_realtime_prices():
+    """REST fallback for real-time prices (polling). Use WebSocket /ws/prices for streaming."""
     try:
-        logger.info(f"✅ WebSocket client connected: {ws.environ.get('REMOTE_ADDR')}")
+        symbols = request.args.get('symbols', 'EURUSD').split(',')
+        broker_name = request.args.get('broker', 'Exness')
         
-        subscribed_symbols = set()
-        broker_name = 'Exness'  # Default broker
-        active = True
+        prices = []
+        try:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                for symbol in symbols:
+                    symbol_clean = symbol.strip()
+                    symbol_normalized = f"{symbol_clean}m" if broker_name == 'Exness' and not symbol_clean.endswith('m') else symbol_clean
+                    
+                    tick = mt5.symbol_info_tick(symbol_normalized)
+                    if tick:
+                        prices.append({
+                            'symbol': symbol_clean,
+                            'bid': float(tick.bid),
+                            'ask': float(tick.ask),
+                            'spread': round(float(tick.ask - tick.bid), 5),
+                            'time': tick.time,
+                            'timestamp': time.time()
+                        })
+                    else:
+                        prices.append({'symbol': symbol_clean, 'error': 'Symbol not found'})
+        except ImportError:
+            logger.warning("MT5 not available for real-time prices")
+            for symbol in symbols:
+                prices.append({'symbol': symbol.strip(), 'error': 'MT5 not available'})
         
-        import MetaTrader5 as mt5
+        return jsonify({
+            'success': True,
+            'prices': prices,
+            'count': len(prices),
+            'broker': broker_name,
+            'timestamp': time.time()
+        }), 200
         
-        while active and not ws.closed:
-            try:
-                # Receive client message (subscribe/unsubscribe)
+    except Exception as e:
+        logger.error(f"Error getting real-time prices: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+if WEBSOCKET_AVAILABLE and sock is not None:
+    @sock.route('/ws/prices')
+    def websocket_prices(ws):
+        """
+        WebSocket endpoint for real-time price streaming.
+        Client sends: { 'action': 'subscribe', 'symbols': ['EURUSD', 'GBPUSD'], 'broker': 'Exness' }
+        Server sends: { 'type': 'price', 'symbol': 'EURUSD', 'bid': 1.2345, 'ask': 1.2347, 'timestamp': ... }
+        """
+        client_info = {'ws': ws, 'symbols': set(), 'broker': 'Exness'}
+        
+        with ws_clients_lock:
+            ws_clients.append(client_info)
+        
+        logger.info(f"✅ WebSocket client connected (total: {len(ws_clients)})")
+        
+        try:
+            while True:
                 message = ws.receive()
                 
                 if message is None:
-                    logger.info("WebSocket client disconnected")
-                    active = False
                     break
                 
-                data = json.loads(message)
-                action = data.get('action')
-                
-                if action == 'subscribe':
-                    symbols = data.get('symbols', [])
-                    broker_name = data.get('broker', 'Exness')
-                    subscribed_symbols.update(symbols)
-                    logger.info(f"✅ Subscribed to symbols: {symbols}")
+                try:
+                    data = json.loads(message)
+                    action = data.get('action')
                     
-                    # Send subscription confirmation
-                    ws.send(json.dumps({
-                        'type': 'subscribed',
-                        'symbols': list(symbols),
-                        'broker': broker_name,
-                        'timestamp': time.time()
-                    }))
-                
-                elif action == 'unsubscribe':
-                    symbols = data.get('symbols', [])
-                    subscribed_symbols.difference_update(symbols)
-                    logger.info(f"Unsubscribed from symbols: {symbols}")
-                
-                elif action == 'ping':
-                    # Heartbeat - respond with pong
-                    ws.send(json.dumps({
-                        'type': 'pong',
-                        'timestamp': time.time()
-                    }))
-                
-                # Stream current prices for subscribed symbols
-                if subscribed_symbols:
-                    for symbol in subscribed_symbols:
-                        try:
-                            # Normalize symbol for MT5
-                            symbol_normalized = f"{symbol}m" if broker_name == 'Exness' and not symbol.endswith('m') else symbol
-                            
-                            if mt5.initialize():
-                                tick = mt5.symbol_info_tick(symbol_normalized)
-                                
-                                if tick:
-                                    ws.send(json.dumps({
-                                        'type': 'price',
-                                        'symbol': symbol,
-                                        'bid': float(tick.bid),
-                                        'ask': float(tick.ask),
-                                        'spread': float(tick.ask - tick.bid),
-                                        'time': tick.time,
-                                        'timestamp': time.time()
-                                    }))
-                        except Exception as e:
-                            logger.debug(f"Error fetching price for {symbol}: {e}")
-                            pass
+                    if action == 'subscribe':
+                        symbols = data.get('symbols', [])
+                        broker = data.get('broker', 'Exness')
+                        client_info['symbols'].update(symbols)
+                        client_info['broker'] = broker
+                        logger.info(f"✅ Client subscribed to: {symbols}")
+                        
+                        ws.send(json.dumps({
+                            'type': 'subscribed',
+                            'symbols': list(client_info['symbols']),
+                            'broker': broker,
+                            'timestamp': time.time()
+                        }))
                     
-                    # Small delay between price updates
-                    time.sleep(0.1)
-            
-            except json.JSONDecodeError:
-                # Non-JSON message received
-                pass
-            except Exception as e:
-                logger.error(f"WebSocket error: {e}")
-                if not ws.closed:
-                    active = False
+                    elif action == 'unsubscribe':
+                        symbols = data.get('symbols', [])
+                        client_info['symbols'].difference_update(symbols)
+                        logger.info(f"Client unsubscribed from: {symbols}")
+                    
+                    elif action == 'ping':
+                        ws.send(json.dumps({
+                            'type': 'pong',
+                            'timestamp': time.time()
+                        }))
+                
+                except json.JSONDecodeError:
+                    pass
         
-        logger.info("WebSocket connection closed")
-        
-    except Exception as e:
-        logger.error(f"WebSocket fatal error: {e}")
+        except Exception as e:
+            logger.debug(f"WebSocket connection ended: {e}")
+        finally:
+            with ws_clients_lock:
+                if client_info in ws_clients:
+                    ws_clients.remove(client_info)
+            logger.info(f"WebSocket client disconnected (remaining: {len(ws_clients)})")
+else:
+    logger.warning("⚠️ WebSocket endpoint /ws/prices not registered - flask-sock not available")
 
 
 def shutdown_backup():
@@ -17367,6 +17442,14 @@ if __name__ == '__main__':
     market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
     market_updater_thread.start()
     logger.info("🔄 Live market data updater thread started")
+    
+    # Start WebSocket price broadcaster thread
+    if WEBSOCKET_AVAILABLE:
+        ws_price_thread = threading.Thread(target=ws_broadcast_prices, daemon=True)
+        ws_price_thread.start()
+        logger.info("🔄 WebSocket price broadcaster thread started")
+    else:
+        logger.info("ℹ️ WebSocket disabled - use REST /api/prices/realtime for price polling")
     
     # Start auto-withdrawal monitoring thread
     monitoring_thread = threading.Thread(target=auto_withdrawal_monitor, daemon=True)

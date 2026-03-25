@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as status;
+import '../utils/environment_config.dart';
 
 /// Model for real-time price data
 class PriceUpdate {
@@ -28,14 +30,26 @@ class PriceUpdate {
   });
 
   factory PriceUpdate.fromJson(Map<String, dynamic> json) {
+    DateTime ts;
+    try {
+      final rawTs = json['timestamp'];
+      if (rawTs is String) {
+        ts = DateTime.parse(rawTs);
+      } else if (rawTs is num) {
+        ts = DateTime.fromMillisecondsSinceEpoch((rawTs * 1000).toInt());
+      } else {
+        ts = DateTime.now();
+      }
+    } catch (_) {
+      ts = DateTime.now();
+    }
+    
     return PriceUpdate(
       symbol: json['symbol'] ?? 'UNKNOWN',
       bid: (json['bid'] ?? 0).toDouble(),
       ask: (json['ask'] ?? 0).toDouble(),
-      last: (json['last'] ?? json['price'] ?? 0).toDouble(),
-      timestamp: json['timestamp'] != null
-          ? DateTime.parse(json['timestamp'])
-          : DateTime.now(),
+      last: (json['last'] ?? json['price'] ?? ((json['bid'] ?? 0) + (json['ask'] ?? 0)) / 2).toDouble(),
+      timestamp: ts,
       volume: (json['volume'] ?? 0).toDouble(),
       high24h: (json['high24h'] ?? 0).toDouble(),
       low24h: (json['low24h'] ?? 0).toDouble(),
@@ -53,12 +67,24 @@ typedef PriceUpdateCallback = void Function(PriceUpdate);
 typedef ConnectionStatusCallback = void Function(bool isConnected);
 
 /// WebSocket service for real-time price updates
+/// Falls back to REST polling if WebSocket is unavailable on VPS
 class RealtimePriceWebSocketService {
-  static const String _wsBaseUrl = 'wss://api.zwesta-trader.com/ws'; // Update with your domain
+  // WebSocket URL - uses VPS IP directly (ws:// for non-SSL, wss:// for SSL)
+  static String get _wsBaseUrl {
+    final httpUrl = EnvironmentConfig.apiUrl; // e.g. http://38.247.146.198:9000
+    return httpUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
+  }
+  
+  // REST fallback URL for polling prices
+  static String get _restBaseUrl => EnvironmentConfig.apiUrl;
   
   late WebSocketChannel? _channel;
   String? _connectionId;
   bool _isConnected = false;
+  bool _useRestFallback = false;  // If WebSocket fails, fall back to REST polling
+  Timer? _restPollingTimer;
+  String? _brokerName;
+  String? _sessionToken;
   
   final Map<String, List<PriceUpdateCallback>> _priceCallbacks = {};
   final List<ConnectionStatusCallback> _statusCallbacks = [];
@@ -73,14 +99,18 @@ class RealtimePriceWebSocketService {
   // ==================== CONNECTION ====================
 
   /// Connect to websocket for real-time prices
+  /// Falls back to REST polling if WebSocket connection fails
   Future<bool> connect({
     required String brokerName,
     required String sessionToken,
   }) async {
+    _brokerName = brokerName;
+    _sessionToken = sessionToken;
+    
     try {
       print('🔌 Connecting to real-time price WebSocket...');
       
-      final wsUrl = '$_wsBaseUrl/prices?broker=$brokerName&token=$sessionToken';
+      final wsUrl = '$_wsBaseUrl/ws/prices?broker=$brokerName&token=$sessionToken';
       
       _channel = WebSocketChannel.connect(
         Uri.parse(wsUrl),
@@ -101,18 +131,61 @@ class RealtimePriceWebSocketService {
       _startHeartbeat();
       
       _isConnected = true;
+      _useRestFallback = false;
       _reconnectAttempts = 0;
       _notifyStatusChange(true);
       
       print('✅ Connected to real-time price WebSocket');
       return true;
     } catch (e) {
-      print('❌ WebSocket connection failed: $e');
+      print('⚠️ WebSocket connection failed: $e');
+      print('↪️ Falling back to REST polling for real-time prices...');
       _isConnected = false;
-      _notifyStatusChange(false);
-      _scheduleReconnect();
-      return false;
+      _useRestFallback = true;
+      _startRestPolling();
+      _notifyStatusChange(true);  // Report as connected since REST fallback works
+      return true;  // Return true since REST fallback is active
     }
+  }
+
+  /// Start REST polling as fallback when WebSocket is unavailable
+  void _startRestPolling() {
+    _restPollingTimer?.cancel();
+    _restPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (_priceCallbacks.isEmpty) return;
+      
+      final symbols = _priceCallbacks.keys.join(',');
+      final broker = _brokerName ?? 'Exness';
+      
+      try {
+        final response = await http.get(
+          Uri.parse('$_restBaseUrl/api/prices/realtime?symbols=$symbols&broker=$broker'),
+          headers: {
+            'X-Session-Token': _sessionToken ?? '',
+          },
+        ).timeout(const Duration(seconds: 5));
+        
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true && data['prices'] != null) {
+            for (final priceData in data['prices']) {
+              if (priceData['error'] != null) continue;
+              _handlePriceUpdate({
+                'type': 'price',
+                'symbol': priceData['symbol'],
+                'bid': priceData['bid'],
+                'ask': priceData['ask'],
+                'spread': priceData['spread'],
+                'timestamp': DateTime.now().toIso8601String(),
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Silently handle polling errors
+      }
+    });
+    print('✅ REST price polling started (fallback mode)');
   }
 
   /// Disconnect from WebSocket
@@ -120,9 +193,11 @@ class RealtimePriceWebSocketService {
     try {
       _heartbeatTimer?.cancel();
       _reconnectTimer?.cancel();
+      _restPollingTimer?.cancel();
       await _channel?.sink.close(status.goingAway);
       _channel = null;
       _isConnected = false;
+      _useRestFallback = false;
       _notifyStatusChange(false);
       print('🔌 Disconnected from real-time price WebSocket');
     } catch (e) {
@@ -209,7 +284,7 @@ class RealtimePriceWebSocketService {
           final data = jsonDecode(message) as Map<String, dynamic>;
           
           // Handle different message types
-          if (data['type'] == 'price_update') {
+          if (data['type'] == 'price_update' || data['type'] == 'price') {
             _handlePriceUpdate(data);
           } else if (data['type'] == 'connection_id') {
             _connectionId = data['connection_id'];
