@@ -81,7 +81,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     'FP Markets': 'FPMarkets-Live',
     'Zulu Trade (SA)': 'ZuluTrade ZA',
     'Ovex (SA)': 'Ovex SA',
-    'PXBT': 'PXBT-Demo',
+    'PXBT': 'PXBT-Demo',  // Updated dynamically in _loadSavedCredentials if live
     'Prime XBT': 'PXBT-Demo',
     'Trade Nations': 'TradeNations-MT5',
     'MetaQuotes': 'MetaQuotes-MT5',

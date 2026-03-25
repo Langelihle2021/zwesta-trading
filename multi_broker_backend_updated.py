@@ -4602,12 +4602,14 @@ def list_brokers():
         },
         {
             'type': 'pxbt',
-            'name': 'PXBT MT5',
-            'description': 'PXBT Trading - MetaTrader 5 broker integration',
-            'assets': ['Forex', 'Metals', 'Indices', 'Stocks', 'Cryptos'],
-            'status': pxbt_broker_status,
+            'name': 'PXBT (Prime XBT)',
+            'description': 'PXBT - MetaTrader 5 forex & commodities broker',
+            'assets': ['Forex', 'Metals', 'Indices', 'Cryptos'],
+            'status': 'active',  # Always show PXBT as available for configuration
             'installed': pxbt_status.get('installed', False),
-            'version': pxbt_status.get('version', 'Not installed')
+            'version': pxbt_status.get('version', 'Unknown'),
+            'configurable': True,
+            'note': 'Configure PXBT credentials in .env file'
         },
         {
             'type': 'oanda',
