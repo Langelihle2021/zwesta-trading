@@ -1,0 +1,16 @@
+[DEBUG] Template folder: C:\zwesta-trader\xm_trading_system\templates
+[DEBUG] Static folder: C:\zwesta-trader\xm_trading_system\static
+[DEBUG] Template folder exists: True
+[DEBUG] Files in templates: ['index.html']
+[INFO] Starting Zwesta Trader Dashboard - Minimal Version
+[INFO] Template folder: C:\zwesta-trader\xm_trading_system\templates
+[INFO] Static folder: C:\zwesta-trader\xm_trading_system\static
+[INFO] Template folder exists: True
+[INFO] Files in templates: ['index.html']
+ * Serving Flask app 'dashboard_enhanced'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.137:5000
+Press CTRL+C to quit

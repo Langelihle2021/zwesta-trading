@@ -1,0 +1,12 @@
+2026-03-12 22:27:37,098 - multi_broker_backend_updated - INFO - Found MT5 (64-bit) at: C:\Program Files\MetaTrader 5\terminal64.exe
+2026-03-12 22:27:37,098 - multi_broker_backend_updated - INFO - [INIT] Backend initialized in DEMO mode
+2026-03-12 22:27:37,099 - multi_broker_backend_updated - INFO - [DEMO] DEMO MODE - Account: 104254514
+2026-03-12 22:27:37,115 - multi_broker_backend_updated - INFO - Database initialized
+2026-03-12 22:27:37,116 - multi_broker_backend_updated - INFO - Initializing with MT5 demo account
+2026-03-12 22:27:37,199 - multi_broker_backend_updated - INFO - Connection added: Default MT5 (mt5)
+2026-03-12 22:27:47,274 - multi_broker_backend_updated - INFO - Found MT5 (64-bit) at: C:\Program Files\MetaTrader 5\terminal64.exe
+2026-03-12 22:27:47,274 - multi_broker_backend_updated - INFO - [INIT] Backend initialized in DEMO mode
+2026-03-12 22:27:47,275 - multi_broker_backend_updated - INFO - [DEMO] DEMO MODE - Account: 104254514
+2026-03-12 22:27:47,281 - multi_broker_backend_updated - INFO - Database initialized
+2026-03-12 22:27:47,281 - multi_broker_backend_updated - INFO - Initializing with MT5 demo account
+2026-03-12 22:27:47,379 - multi_broker_backend_updated - INFO - Connection added: Default MT5 (mt5)

@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: zwesta-postgres
+    environment:
+      POSTGRES_USER: zwesta_user
+      POSTGRES_PASSWORD: zwesta_password_change_me
+      POSTGRES_DB: zwesta_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zwesta_user -d zwesta_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zwesta-api
+    environment:
+      DATABASE_URL: postgresql://zwesta_user:zwesta_password_change_me@postgres:5432/zwesta_db
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      MT5_ACCOUNT: ${MT5_ACCOUNT:-103672035}
+      MT5_PASSWORD: ${MT5_PASSWORD}
+      MT5_SERVER: ${MT5_SERVER:-MetaQuotes-Demo}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      BINANCE_API_KEY: ${BINANCE_API_KEY}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "
+      python -c 'from app.database import init_db; init_db()' &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis Cache (Optional - for future session storage)
+  redis:
+    image: redis:7-alpine
+    container_name: zwesta-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: zwesta-network

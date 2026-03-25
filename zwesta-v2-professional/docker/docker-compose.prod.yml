@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: zwesta_postgres_prod
+    environment:
+      POSTGRES_DB: xm_trader
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - zwesta_network
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: zwesta/backend:latest
+    container_name: zwesta_backend_prod
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/xm_trader
+      JWT_SECRET: ${JWT_SECRET}
+      MT5_ACCOUNT: ${MT5_ACCOUNT}
+      MT5_PASSWORD: ${MT5_PASSWORD}
+      MT5_SERVER: ${MT5_SERVER}
+      POSITION_SIZE_PERCENT: 2
+      STOP_LOSS_POINTS: 50
+      TAKE_PROFIT_PERCENT: 1.5
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      TIMEZONE: Africa/Johannesburg
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zwesta_network
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    image: zwesta/frontend:latest
+    container_name: zwesta_frontend_prod
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - zwesta_network
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    container_name: zwesta_nginx_prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - zwesta_network
+    restart: always
+
+volumes:
+  postgres_data:
+
+networks:
+  zwesta_network:
+    driver: bridge

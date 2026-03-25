@@ -1,0 +1,17 @@
+[2026-03-01 14:53:21,245] [INFO] - Trading bot started - scanning markets every 5 seconds
+[2026-03-01 14:53:21,245] [INFO] - Trading bot initialized and running
+[database_init_complete]
+[MT5] Initializing MT5 data provider...
+[MT5] Failed to initialize: (-6, 'Terminal: Authorization failed')
+[MT5] Failed to initialize with defaults: (-6, 'Terminal: Authorization failed')
+[MT5] MT5 provider initialization failed - using fallback demo data
+[WARN] Twilio SDK not installed. Install with: pip install twilio
+[BOT] Starting multi-user trading bot...
+[BOT] Trading bot running in background
+ * Serving Flask app 'dashboard_enhanced'
+ * Debug mode: off
+[2026-03-01 14:53:21,283] [INFO] - WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.137:5000
+[2026-03-01 14:53:21,283] [INFO] - Press CTRL+C to quit

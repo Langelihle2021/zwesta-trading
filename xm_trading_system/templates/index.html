@@ -1,0 +1,2095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zwesta Trading System - Multi-Account Dashboard</title>
+    <!-- Chart.js with proper source maps from unpkg -->
+    <script src="https://unpkg.com/chart.js@latest/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #0096ff;
+            --secondary-color: #ff0066;
+            --dark-bg: #0a0e27;
+            --card-bg: #16213e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b9c1;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #16213e 50%, #0f3460 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            background-attachment: fixed;
+        }
+
+        .loading-splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0a0e27 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .loading-splash.hidden {
+            display: none;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 150, 255, 0.3);
+            border-top: 4px solid #00d4ff;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* LOGIN PAGE */
+        .login-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        .login-box {
+            background: rgba(22, 33, 62, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 200, 255, 0.3);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-logo {
+            width: 100px;
+            height: auto;
+            margin: 0 auto 20px;
+            display: block;
+            filter: drop-shadow(0 0 10px rgba(0, 212, 255, 0.5));
+        }
+
+        .login-box h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .login-box .subtitle {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid rgba(0, 200, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(0, 20, 50, 0.5);
+            color: var(--text-primary);
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background: rgba(0, 50, 100, 0.5);
+            box-shadow: 0 0 10px rgba(0, 150, 255, 0.3);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #0096ff 0%, #0075cc 100%);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 150, 255, 0.4);
+        }
+
+        .toggle-auth {
+            text-align: center;
+            margin-top: 20px;
+            color: var(--text-secondary);
+        }
+
+        .toggle-auth a {
+            color: var(--primary-color);
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        /* NAVBAR */
+        nav {
+            background: rgba(22, 33, 62, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(0, 200, 255, 0.2);
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 70px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .nav-logo {
+            height: 50px;
+            width: auto;
+            cursor: pointer;
+            filter: drop-shadow(0 0 10px rgba(0, 212, 255, 0.5));
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex: 1;
+        }
+
+        .nav-brand-text {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            list-style: none;
+            flex: 1;
+            margin-left: 40px;
+        }
+
+        .nav-menu a {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+            position: relative;
+        }
+
+        .nav-menu a:hover {
+            color: var(--primary-color);
+        }
+
+        .nav-menu a::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--primary-color);
+            transition: width 0.3s ease;
+        }
+
+        .nav-menu a:hover::after {
+            width: 100%;
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            padding: 8px 15px;
+            border-radius: 8px;
+            transition: background 0.3s ease;
+        }
+
+        .user-info:hover {
+            background: rgba(0, 150, 255, 0.1);
+        }
+
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #0096ff, #ff0066);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        /* HAMBURGER MENU */
+        .hamburger {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+        }
+
+        .hamburger span {
+            width: 25px;
+            height: 3px;
+            background: var(--primary-color);
+            border-radius: 2px;
+            transition: all 0.3s ease;
+        }
+
+        .hamburger.active span:nth-child(1) {
+            transform: rotate(45deg) translate(10px, 10px);
+        }
+
+        .hamburger.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .hamburger.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(7px, -7px);
+        }
+
+        .nav-dropdown {
+            position: absolute;
+            top: 70px;
+            right: 0;
+            background: rgba(22, 33, 62, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 200, 255, 0.2);
+            border-radius: 0 0 10px 10px;
+            min-width: 200px;
+            display: none;
+            flex-direction: column;
+            z-index: 900;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .nav-dropdown.show {
+            display: flex;
+        }
+
+        .nav-dropdown a, .nav-dropdown button {
+            padding: 12px 20px;
+            color: var(--text-primary);
+            text-decoration: none;
+            border: none;
+            background: none;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            font-size: 0.95em;
+        }
+
+        .nav-dropdown a:hover, .nav-dropdown button:hover {
+            background: rgba(0, 150, 255, 0.1);
+            color: var(--primary-color);
+        }
+
+        .nav-dropdown hr {
+            border: none;
+            border-top: 1px solid rgba(0, 200, 255, 0.2);
+            margin: 5px 0;
+        }
+
+        /* DASHBOARD LAYOUT */
+        .dashboard {
+            display: none;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .dashboard.active {
+            display: block;
+        }
+
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .dashboard-title {
+            font-size: 2em;
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        .account-selector {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .account-selector select {
+            padding: 10px 15px;
+            background: rgba(22, 33, 62, 0.8);
+            border: 1px solid rgba(0, 200, 255, 0.3);
+            border-radius: 8px;
+            color: var(--text-primary);
+            cursor: pointer;
+            min-width: 200px;
+        }
+
+        /* CARDS */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: rgba(22, 33, 62, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 200, 255, 0.2);
+            border-radius: 15px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(0, 200, 255, 0.5);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-title {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .card-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-bottom: 5px;
+        }
+
+        .card-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+        }
+
+        .card.positive .card-value {
+            color: #00ff88;
+        }
+
+        .card.negative .card-value {
+            color: #ff4444;
+        }
+
+        /* TABLES */
+        .table-container {
+            background: rgba(22, 33, 62, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 200, 255, 0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+
+        .table-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(0, 200, 255, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h3 {
+            color: var(--primary-color);
+            font-size: 1.3em;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: rgba(0, 150, 255, 0.1);
+            border-bottom: 2px solid rgba(0, 200, 255, 0.3);
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            color: var(--primary-color);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(0, 200, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        tbody tr:hover {
+            background: rgba(0, 150, 255, 0.05);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .status-open {
+            background: rgba(0, 200, 255, 0.2);
+            color: #00d4ff;
+        }
+
+        .status-closed {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        .status-pending {
+            background: rgba(255, 200, 0, 0.2);
+            color: #ffc800;
+        }
+
+        .status-approved {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        /* MODALS */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: rgba(22, 33, 62, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 200, 255, 0.3);
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(0, 200, 255, 0.2);
+        }
+
+        .modal-header h2 {
+            color: var(--primary-color);
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5em;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+
+        .close-btn:hover {
+            color: var(--text-primary);
+        }
+
+        /* BUTTONS */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.95em;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #0096ff 0%, #0075cc 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 150, 255, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(0, 200, 255, 0.2);
+            color: var(--primary-color);
+            border: 1px solid rgba(0, 200, 255, 0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 200, 255, 0.3);
+        }
+
+        .btn-danger {
+            background: rgba(255, 0, 0, 0.2);
+            color: #ff4444;
+            border: 1px solid rgba(255, 0, 0, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 0, 0, 0.3);
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 0.85em;
+        }
+
+        /* ACTION BUTTONS */
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        /* TABS */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid rgba(0, 200, 255, 0.2);
+            gap: 0;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 15px 25px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            position: relative;
+            font-size: 0.95em;
+        }
+
+        .tab:hover {
+            color: var(--primary-color);
+        }
+
+        .tab.active {
+            color: var(--primary-color);
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary-color);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* PDF EXPORT */
+        .pdf-options {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .pdf-options select {
+            padding: 10px 15px;
+            background: rgba(22, 33, 62, 0.8);
+            border: 1px solid rgba(0, 200, 255, 0.3);
+            border-radius: 8px;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .export-success {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #00ff88;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .export-success.show {
+            display: block;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            nav {
+                height: auto;
+                flex-wrap: wrap;
+                padding: 15px;
+            }
+
+            .nav-menu {
+                display: none;
+                flex-direction: column;
+                position: absolute;
+                top: 70px;
+                left: 0;
+                right: 0;
+                background: rgba(22, 33, 62, 0.95);
+                border-bottom: 1px solid rgba(0, 200, 255, 0.2);
+                gap: 0;
+                margin-left: 0;
+                width: 100%;
+            }
+
+            .nav-menu.active {
+                display: flex;
+            }
+
+            .nav-menu a {
+                padding: 12px 20px;
+                border-bottom: 1px solid rgba(0, 200, 255, 0.1);
+            }
+
+            .hamburger {
+                display: flex;
+            }
+
+            .dashboard-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .cards-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .modal-content {
+                margin: 20px;
+                max-width: none;
+            }
+
+            table {
+                font-size: 0.9em;
+            }
+
+            th, td {
+                padding: 10px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .login-box {
+                padding: 25px;
+            }
+
+            .dashboard {
+                padding: 15px;
+            }
+
+            .dashboard-title {
+                font-size: 1.5em;
+            }
+
+            .card-value {
+                font-size: 1.5em;
+            }
+
+            .modal-content {
+                padding: 20px;
+            }
+
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- LOADING SPLASH -->
+    <div class="loading-splash" id="loadingSplash">
+        <div class="spinner"></div>
+        <p>Loading Zwesta Trading System...</p>
+    </div>
+
+    <!-- LOGIN PAGE -->
+    <div class="login-container" id="loginContainer">
+        <div class="login-box">
+            <img src="/static/zwesta_logo.jpeg" alt="Zwesta" class="login-logo">
+            <h1>Zwesta Trading</h1>
+            <p class="subtitle">Professional Trading System</p>
+
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="toggleAuthMode('login')" id="loginTabBtn" style="flex: 1;">Login</button>
+                <button class="btn btn-secondary" onclick="toggleAuthMode('register')" id="registerTabBtn" style="flex: 1;">Register</button>
+            </div>
+
+            <!-- LOGIN FORM -->
+            <form id="loginForm" style="display: block;">
+                <div class="form-group">
+                    <label>Username or Email</label>
+                    <input type="text" id="loginUsername" placeholder="demo or your username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="loginPassword" placeholder="demo123" required>
+                </div>
+                <button type="button" onclick="handleLogin()" class="btn btn-primary">Login</button>
+                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary); font-size: 0.9em;">
+                    Demo: username <strong>demo</strong> password <strong>demo123</strong>
+                </p>
+            </form>
+
+            <!-- REGISTER FORM -->
+            <form id="registerForm" style="display: none;">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="regFullName" placeholder="Your full name" required>
+                </div>
+                <div class="form-group">
+                    <label>Company Name</label>
+                    <input type="text" id="regCompanyName" placeholder="Your company" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="regEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label>WhatsApp Phone Number</label>
+                    <input type="tel" id="regPhoneNumber" placeholder="+1234567890 or 1234567890" required>
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="regUsername" placeholder="Choose username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="regPassword" placeholder="Secure password" required>
+                </div>
+                <button type="button" onclick="handleRegister()" class="btn btn-primary">Create Account</button>
+            </form>
+
+            <p id="authError" style="color: #ff4444; text-align: center; margin-top: 15px; display: none;"></p>
+        </div>
+    </div>
+
+    <!-- NAVBAR -->
+    <nav id="navbar" style="display: none;">
+        <div class="nav-brand">
+            <img src="/static/zwesta_logo.jpeg" alt="Zwesta" class="nav-logo" onclick="goToDashboard()">
+            <span class="nav-brand-text">Zwesta</span>
+        </div>
+
+        <ul class="nav-menu" id="navMenu">
+            <li><a href="#" onclick="showDashboard('overview')">Dashboard</a></li>
+            <li><a href="#" onclick="showDashboard('markets')">Markets</a></li>
+            <li><a href="#" onclick="showDashboard('positions')">Positions</a></li>
+            <li><a href="#" onclick="showDashboard('trades')">Trades</a></li>
+            <li><a href="#" onclick="showDashboard('withdrawals')">Withdrawals</a></li>
+            <li><a href="#" onclick="showDashboard('statements')">Statements</a></li>
+            <li><a href="#" onclick="showDashboard('settings')">Settings</a></li>
+        </ul>
+
+        <div class="nav-right">
+            <div class="user-info" onclick="toggleUserMenu()">
+                <div class="user-avatar" id="userAvatar">U</div>
+                <span id="userName">User</span>
+            </div>
+            <div class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+
+        <div class="nav-dropdown" id="userDropdown">
+            <a href="#" onclick="showDashboard('profile')">👤 Profile</a>
+            <a href="#" onclick="showDashboard('settings')">⚙️ Settings</a>
+            <a href="#" onclick="showDashboard('export')">📊 Export Preferences</a>
+            <hr>
+            <button onclick="handleLogout()">🚪 Logout</button>
+        </div>
+    </nav>
+
+    <!-- DASHBOARD MAIN -->
+    <div class="dashboard active" id="overview">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Dashboard Overview</div>
+            <div class="account-selector">
+                <label>Account:</label>
+                <select id="accountSelect" onchange="handleAccountChange()">
+                    <option>Loading accounts...</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="cards-grid">
+            <div class="card positive">
+                <div class="card-title">Current Balance</div>
+                <div class="card-value" id="currentBalance">$0.00</div>
+                <div class="card-subtitle" id="currencyInfo">USD</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Profit/Loss</div>
+                <div class="card-value" id="profitLoss">$0.00</div>
+                <div class="card-subtitle" id="returnPercent">+0.00%</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Win Rate</div>
+                <div class="card-value" id="winRate">0%</div>
+                <div class="card-subtitle">Winning Trades</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Total Trades</div>
+                <div class="card-value" id="totalTrades">0</div>
+                <div class="card-subtitle" id="tradesSubtitle">This Month</div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <div style="position: relative; width: 100%; height: 250px;">
+                <canvas id="profitChart"></canvas>
+            </div>
+            <div style="position: relative; width: 100%; max-width: 300px; aspect-ratio: 1; margin: 0 auto;">
+                <canvas id="winRateChart"></canvas>
+            </div>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <h3 style="color: var(--primary-color); margin-bottom: 15px;">Market Watchlist</h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Instrument</th>
+                            <th>Bid</th>
+                            <th>Ask</th>
+                            <th>Change %</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="watchlistTable">
+                        <tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">Loading markets...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- MARKETS -->
+    <div class="dashboard" id="markets">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Markets & Instruments</div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px;" id="marketGrid">
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">Loading markets...</div>
+        </div>
+    </div>
+
+    <!-- POSITIONS -->
+    <div class="dashboard" id="positions">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Open Positions</div>
+        </div>
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Active Positions</h3>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Entry Price</th>
+                        <th>Quantity</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="positionsTable">
+                    <tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">No open positions</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TRADES -->
+    <div class="dashboard" id="trades">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Closed Trades History</div>
+        </div>
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Trade History</h3>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Entry Price</th>
+                        <th>Exit Price</th>
+                        <th>Quantity</th>
+                        <th>P&L %</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody id="tradesTable">
+                    <tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No trades available</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- WITHDRAWALS -->
+    <div class="dashboard" id="withdrawals">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Withdrawal Management</div>
+            <button class="btn btn-primary" onclick="openWithdrawalModal()">Request Withdrawal</button>
+        </div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Withdrawal History</h3>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Amount</th>
+                        <th>Method</th>
+                        <th>Status</th>
+                        <th>Request Date</th>
+                        <th>Completion Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="withdrawalsTable">
+                    <tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No withdrawals</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- STATEMENTS -->
+    <div class="dashboard" id="statements">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Performance Statements</div>
+        </div>
+
+        <div class="pdf-options">
+            <select id="statementPeriod">
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly" selected>Monthly</option>
+                <option value="yearly">Yearly</option>
+            </select>
+            <button class="btn btn-primary" onclick="generateStatement()">Generate PDF</button>
+        </div>
+
+        <div class="export-success" id="exportSuccess">
+            ✓ PDF generated successfully! <a href="#" id="downloadLink" style="color: #00ff88; margin-left: 10px;">Download</a>
+        </div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Statement History</h3>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Period</th>
+                        <th>Opening Balance</th>
+                        <th>Closing Balance</th>
+                        <th>Profit/Loss</th>
+                        <th>Win Rate</th>
+                        <th>Trades</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="statementsTable">
+                    <tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No statements available</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="dashboard" id="settings">
+        <div class="dashboard-header">
+            <div class="dashboard-title">Account Settings</div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 25px;">
+            <!-- PROFILE SECTION -->
+            <div class="card" style="padding: 25px;">
+                <h3 style="color: var(--primary-color); margin-bottom: 20px;">👤 Profile Information</h3>
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="settingFullName" readonly style="background: rgba(0,200,255,0.1);">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="settingEmail" readonly style="background: rgba(0,200,255,0.1);">
+                </div>
+                <div class="form-group">
+                    <label>WhatsApp Phone Number</label>
+                    <input type="tel" id="settingPhoneNumber" readonly style="background: rgba(0,200,255,0.1);">
+                </div>
+            </div>
+
+            <!-- MT5 CREDENTIALS SECTION -->
+            <div class="card" style="padding: 25px;">
+                <h3 style="color: var(--primary-color); margin-bottom: 20px;">📊 MetaTrader5 Account</h3>
+                <div id="mt5Status" style="background: rgba(255,100,100,0.1); padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #ff6464;">
+                    <strong>Not Configured</strong>
+                </div>
+                <div class="form-group">
+                    <label>MT5 Account Number</label>
+                    <input type="text" id="mt5Account" placeholder="e.g., 103672035">
+                </div>
+                <div class="form-group">
+                    <label>MT5 Password</label>
+                    <input type="password" id="mt5Password" placeholder="Your MT5 account password">
+                </div>
+                <div class="form-group">
+                    <label>MT5 Server</label>
+                    <select id="mt5Server">
+                        <option value="">Select a server...</option>
+                        <option value="MetaQuotes-Demo">MetaQuotes-Demo</option>
+                        <option value="MetaQuotes-Live">MetaQuotes-Live</option>
+                        <option value="XM-Demo">XM-Demo</option>
+                        <option value="XM-Live">XM-Live</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>MT5 Terminal Path (Optional)</label>
+                    <input type="text" id="mt5Path" placeholder="C:\Program Files\MetaTrader5\...">
+                </div>
+                <button type="button" onclick="saveMT5Credentials()" class="btn btn-primary" style="width: 100%; margin-top: 15px;">Save MT5 Account</button>
+            </div>
+
+            <!-- ALERTS SECTION -->
+            <div class="card" style="padding: 25px;">
+                <h3 style="color: var(--primary-color); margin-bottom: 20px;">🔔 WhatsApp Profit Alerts</h3>
+                <div style="background: rgba(0,200,255,0.1); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <strong>Alerts will be sent to:</strong><br>
+                    <span id="alertPhoneDisplay" style="color: var(--primary-color); font-size: 1.2em; margin-top: 8px;">Loading...</span>
+                </div>
+                <div class="form-group">
+                    <label>Profit Alert Threshold (USD)</label>
+                    <input type="number" id="alertThreshold" placeholder="500" step="100" min="0">
+                </div>
+                <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px; padding: 15px; background: rgba(0,200,255,0.1); border-radius: 8px;">
+                    <input type="checkbox" id="alertEnabled" style="width: 20px; height: 20px; cursor: pointer;">
+                    <label for="alertEnabled" style="margin: 0; cursor: pointer; flex: 1;">
+                        <strong>Enable WhatsApp Profit Alerts</strong>
+                    </label>
+                </div>
+                <button type="button" onclick="saveAlertSettings()" class="btn btn-primary" style="width: 100%; margin-top: 15px;">Save Alert Settings</button>
+            </div>
+        </div>
+
+        <div style="margin-top: 30px; padding: 20px; background: rgba(0,200,255,0.1); border-radius: 8px; border-left: 4px solid var(--primary-color);">
+            <p style="color: var(--text-secondary); margin: 0;">
+                <strong>⚠️ Security Notice:</strong> Your MT5 password is encrypted before storage. Never share your credentials with anyone.
+            </p>
+        </div>
+    </div>
+
+    <!-- WITHDRAWAL MODAL -->
+    <div class="modal" id="withdrawalModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Request Withdrawal</h2>
+                <button class="close-btn" onclick="closeWithdrawalModal()">&times;</button>
+            </div>
+            <form>
+                <div class="form-group">
+                    <label>Amount (USD)</label>
+                    <input type="number" id="withdrawAmount" placeholder="Amount" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>Withdrawal Method</label>
+                    <select id="withdrawMethod" required>
+                        <option>Bank Transfer</option>
+                        <option>Wire Transfer</option>
+                        <option>Credit Card</option>
+                        <option>Crypto Wallet</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Account Details</label>
+                    <input type="text" id="withdrawAccount" placeholder="Bank account / Wallet address" required>
+                </div>
+                <button type="button" onclick="submitWithdrawal()" class="btn btn-primary" style="width: 100%;">Submit Request</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // CRITICAL: NUCLEAR FIX - Force VPS IP without relying on hostname detection
+        // Hostname detection fails in some scenarios, so we hardcode the VPS IP directly
+        
+        // ALWAYS use VPS IP for API calls
+        window.API_BASE = 'http://38.247.146.198:5000/api';
+        
+        console.log('🔧 ===== API INITIALIZATION =====');
+        console.log('🔧 Detected hostname:', window.location.hostname);
+        console.log('🔧 Current URL:', window.location.href);
+        console.log('🔧 FORCING API_BASE to:', window.API_BASE);
+        console.log('🔧 =============================');
+        
+        // Use hardcoded VPS API endpoint for ALL calls
+        const API_BASE = window.API_BASE;
+        const CACHE_VERSION = '{{ cache_version | default("0") }}';
+        console.log('✓ API_BASE ready:', API_BASE);
+        
+        let currentToken = localStorage.getItem('token');
+        let currentUserId = localStorage.getItem('user_id');
+        let currentUserName = localStorage.getItem('user_name');
+        let currentAccounts = [];
+        let selectedAccountId = null;
+        let profitChart = null;
+        let winRateChart = null;
+
+        // INITIALIZATION - REMOVED, moved to end of document
+        
+
+        function showLoginPage() {
+            document.getElementById('loginContainer').style.display = 'flex';
+            document.getElementById('navbar').style.display = 'none';
+            hideDashboards();
+            // Hide splash on login page
+            const splash = document.getElementById('loadingSplash');
+            if (splash) splash.classList.add('hidden');
+        }
+
+        function showDashboard(section = 'overview') {
+            if (!currentToken || !currentUserId) {
+                showLoginPage();
+                return;
+            }
+
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('navbar').style.display = 'flex';
+            
+            // Hide loading splash
+            const loadingScreen = document.getElementById('loadingSplash');
+            if (loadingScreen) {
+                loadingScreen.classList.add('hidden');
+                loadingScreen.style.display = 'none';
+            }
+
+            // Update user info
+            if (currentUserName) {
+                document.getElementById('userName').textContent = currentUserName;
+                document.getElementById('userAvatar').textContent = currentUserName[0].toUpperCase();
+            }
+
+            hideDashboards();
+            document.getElementById(section).classList.add('active');
+
+            if (section === 'overview') {
+                loadDashboardData();
+                loadWatchlist();
+            } else if (section === 'markets') {
+                loadMarkets();
+            } else if (section === 'positions') {
+                loadPositions();
+            } else if (section === 'trades') {
+                loadTrades();
+            } else if (section === 'withdrawals') {
+                loadWithdrawals();
+            } else if (section === 'statements') {
+                loadStatements();
+            } else if (section === 'settings') {
+                loadSettings();
+            }
+        }
+
+        function hideDashboards() {
+            document.querySelectorAll('.dashboard').forEach(el => {
+                el.classList.remove('active');
+            });
+        }
+
+        function goToDashboard() {
+            showDashboard('overview');
+        }
+
+        // AUTHENTICATION
+        function toggleAuthMode(mode) {
+            const loginForm = document.getElementById('loginForm');
+            const registerForm = document.getElementById('registerForm');
+            const loginTabBtn = document.getElementById('loginTabBtn');
+            const registerTabBtn = document.getElementById('registerTabBtn');
+
+            if (mode === 'login') {
+                loginForm.style.display = 'block';
+                registerForm.style.display = 'none';
+                loginTabBtn.style.background = 'linear-gradient(135deg, #0096ff 0%, #0075cc 100%)';
+                registerTabBtn.style.background = 'rgba(0, 200, 255, 0.2)';
+            } else {
+                loginForm.style.display = 'none';
+                registerForm.style.display = 'block';
+                loginTabBtn.style.background = 'rgba(0, 200, 255, 0.2)';
+                registerTabBtn.style.background = 'linear-gradient(135deg, #0096ff 0%, #0075cc 100%)';
+            }
+        }
+
+        function handleLogin() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+
+            fetch(`${API_BASE}/auth/login`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('user_id', data.user_id);
+                    localStorage.setItem('user_name', data.full_name);
+                    currentToken = data.token;
+                    currentUserId = data.user_id;
+                    currentUserName = data.full_name;
+                    showDashboard();
+                } else {
+                    showAuthError(data.error);
+                }
+            })
+            .catch(err => showAuthError('Login failed: ' + err));
+        }
+
+        function handleRegister() {
+            const fullName = document.getElementById('regFullName').value;
+            const companyName = document.getElementById('regCompanyName').value;
+            const email = document.getElementById('regEmail').value;
+            const phoneNumber = document.getElementById('regPhoneNumber').value;
+            const username = document.getElementById('regUsername').value;
+            const password = document.getElementById('regPassword').value;
+
+            // Validate phone number format
+            if (!phoneNumber || phoneNumber.trim() === '') {
+                showAuthError('Phone number is required');
+                return;
+            }
+
+            fetch(`${API_BASE}/auth/register`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    username, 
+                    email, 
+                    password, 
+                    full_name: fullName, 
+                    company_name: companyName,
+                    phone_number: phoneNumber
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showAuthError('✓ Account created! Please login.', 'success');
+                    // Clear registration form
+                    document.getElementById('registerForm').reset();
+                    setTimeout(() => toggleAuthMode('login'), 1000);
+                } else {
+                    showAuthError(data.error);
+                }
+            })
+            .catch(err => showAuthError('Registration failed: ' + err));
+        }
+
+        function showAuthError(msg, type = 'error') {
+            const errorEl = document.getElementById('authError');
+            errorEl.textContent = msg;
+            errorEl.style.display = 'block';
+            errorEl.style.color = type === 'success' ? '#00ff88' : '#ff4444';
+        }
+
+        function handleLogout() {
+            localStorage.clear();
+            currentToken = null;
+            currentUserId = null;
+            currentUserName = null;
+            showLoginPage();
+        }
+
+        // NAVBAR
+        function toggleUserMenu() {
+            document.getElementById('userDropdown').classList.toggle('show');
+        }
+
+        function toggleMobileMenu() {
+            document.getElementById('navMenu').classList.toggle('active');
+            document.getElementById('hamburger').classList.toggle('active');
+        }
+
+        // ACCOUNT SELECTION - handles when user changes dropdown without full reload
+        function handleAccountChange() {
+            const accountSelect = document.getElementById('accountSelect');
+            if (!accountSelect || !accountSelect.value) return;
+            
+            selectedAccountId = accountSelect.value;
+            console.log('[ACCOUNT] User selected account ID:', selectedAccountId);
+            loadAccountDashboard();
+        }
+
+        // DASHBOARD DATA
+        function updateAccountSelect() {
+            const accountSelect = document.getElementById('accountSelect');
+            if (!accountSelect) return;
+            
+            // PRESERVE current selection before rebuilding
+            const previousSelection = accountSelect.value;
+            
+            accountSelect.innerHTML = '';
+            
+            if (!currentAccounts || currentAccounts.length === 0) {
+                accountSelect.innerHTML = '<option>No accounts found</option>';
+                return;
+            }
+            
+            currentAccounts.forEach(account => {
+                const option = document.createElement('option');
+                option.value = account.id;
+                option.textContent = `${account.account_name} (${account.account_type}) - $${account.current_balance.toFixed(2)}`;
+                accountSelect.appendChild(option);
+            });
+            
+            // RESTORE user's previous selection if it still exists, else use first
+            const selectionExists = currentAccounts.some(a => a.id == previousSelection);
+            if (selectionExists && previousSelection) {
+                accountSelect.value = previousSelection;
+            } else if (currentAccounts.length > 0) {
+                accountSelect.value = currentAccounts[0].id;
+            }
+        }
+
+        function loadDashboardData() {
+            // Show loading indicator
+            document.getElementById('loadingSplash').classList.remove('hidden');
+            
+            console.log('Loading dashboard data - token:', currentToken ? 'present' : 'missing');
+            
+            fetch(`${API_BASE}/user/accounts`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${currentToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(res => {
+                console.log('Accounts response status:', res.status);
+                if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                return res.json();
+            })
+            .then(data => {
+                console.log('Accounts data received:', data);
+                currentAccounts = (data.data || data) || [];
+                console.log('Parsed accounts:', currentAccounts);
+                
+                // Ensure we have array
+                if (!Array.isArray(currentAccounts)) {
+                    currentAccounts = [];
+                }
+                
+                updateAccountSelect();
+                // Get the selected account from dropdown (user's choice) or default to first
+                const accountSelect = document.getElementById('accountSelect');
+                if (accountSelect && accountSelect.value) {
+                    selectedAccountId = accountSelect.value;
+                } else if (currentAccounts.length > 0) {
+                    selectedAccountId = currentAccounts[0].id;
+                } else {
+                    console.warn('No accounts found');
+                    document.getElementById('loadingSplash').classList.add('hidden');
+                    return;
+                }
+                console.log('Loading dashboard for account:', selectedAccountId);
+                loadAccountDashboard();
+            })
+            .catch(err => {
+                console.error('Failed to load accounts:', err);
+                document.getElementById('loadingSplash').classList.add('hidden');
+                // Show error but don't break - use fallback
+                const errorMsg = 'Warning: Could not load live account data. Using demo mode.';
+                console.warn(errorMsg, err);
+            });
+        }
+
+        function loadAccountDashboard() {
+            if (!selectedAccountId) {
+                console.error('No selectedAccountId');
+                document.getElementById('loadingSplash').classList.add('hidden');
+                return;
+            }
+
+            console.log('Fetching dashboard for account:', selectedAccountId);
+            
+            fetch(`${API_BASE}/accounts/${selectedAccountId}/dashboard`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => {
+                console.log('Dashboard response status:', res.status);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then(data => {
+                console.log('Dashboard data:', data);
+                if (data.error) {
+                    console.error('Dashboard error:', data.error);
+                    document.getElementById('loadingSplash').classList.add('hidden');
+                    return;
+                }
+                
+                const d = data.data;
+                try {
+                    document.getElementById('currentBalance').textContent = `$${d.current_balance.toFixed(2)}`;
+                    document.getElementById('profitLoss').textContent = `$${d.profit_loss.toFixed(2)}`;
+                    document.getElementById('returnPercent').textContent = `${d.return_percent > 0 ? '+' : ''}${d.return_percent.toFixed(2)}%`;
+                    document.getElementById('winRate').textContent = '75%';
+                    document.getElementById('totalTrades').textContent = d.total_trades;
+
+                    // Update charts with error handling
+                    try {
+                        updateCharts(d);
+                    } catch (chartErr) {
+                        console.warn('Chart update failed:', chartErr);
+                    }
+                } catch (err) {
+                    console.error('Error updating dashboard:', err);
+                }
+                // Always hide splash even if there's an error
+                document.getElementById('loadingSplash').classList.add('hidden');
+            })
+            .catch(err => {
+                console.error('Failed to load dashboard:', err);
+                document.getElementById('loadingSplash').classList.add('hidden');
+                // Use demo data as fallback
+                document.getElementById('currentBalance').textContent = '$50,000.00';
+                document.getElementById('profitLoss').textContent = '+$2,150.00';
+                document.getElementById('returnPercent').textContent = '+4.30%';
+                document.getElementById('winRate').textContent = '75%';
+                document.getElementById('totalTrades').textContent = '42';
+            });
+        }
+
+        function updateCharts(data) {
+            try {
+                // Destroy existing charts if they exist
+                if (profitChart) {
+                    profitChart.destroy();
+                    profitChart = null;
+                }
+                if (winRateChart) {
+                    winRateChart.destroy();
+                    winRateChart = null;
+                }
+                
+                // P&L Chart
+                const profitCtx = document.getElementById('profitChart').getContext('2d');
+                if (profitCtx) {
+                    profitChart = new Chart(profitCtx, {
+                        type: 'line',
+                        data: {
+                            labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+                            datasets: [{
+                                label: 'Profit/Loss',
+                                data: [500, 1200, 800, 2100],
+                                borderColor: '#00ff88',
+                                backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                                tension: 0.4,
+                                fill: true
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {legend: {labels: {color: '#ffffff'}}},
+                            scales: {x: {ticks: {color: '#b0b9c1'}}, y: {ticks: {color: '#b0b9c1'}}}
+                        }
+                    });
+                }
+
+            // Win Rate Chart
+            const rateCtx = document.getElementById('winRateChart').getContext('2d');
+            winRateChart = new Chart(rateCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Wins', 'Losses'],
+                    datasets: [{
+                        data: [75, 25],
+                        backgroundColor: ['#00ff88', '#ff4444'],
+                        borderColor: '#1a2a3d',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#ffffff',
+                                font: {size: 12},
+                                padding: 15,
+                                usePointStyle: true
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            padding: 10,
+                            displayColors: true
+                        }
+                    }
+                }
+            });
+            } catch (err) {
+                console.error('Error updating charts:', err);
+            }
+        }
+
+        function loadMarkets() {
+            fetch(`${API_BASE}/markets/symbols`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => res.json())
+            .then(data => {
+                const grid = document.getElementById('marketGrid');
+                if (!data.data || data.data.length === 0) {
+                    grid.innerHTML = '<div style="text-align: center; color: var(--text-secondary);">No market data available</div>';
+                    return;
+                }
+                
+                grid.innerHTML = data.data.map(symbol => {
+                    const changeClass = symbol.change_percent >= 0 ? 'positive' : 'negative';
+                    const changeColor = symbol.change_percent >= 0 ? '#00ff88' : '#ff4444';
+                    
+                    return `
+                        <div class="card">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+                                <div>
+                                    <div class="card-title">${symbol.symbol}</div>
+                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${symbol.description || symbol.symbol}</div>
+                                </div>
+                                <div style="text-align: right; color: ${changeColor}; font-weight: bold;">
+                                    ${symbol.change_percent >= 0 ? '▲' : '▼'} ${Math.abs(symbol.change_percent).toFixed(2)}%
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 15px;">
+                                <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 5px;">Bid/Ask</div>
+                                <div style="color: var(--primary-color); font-weight: bold;">
+                                    ${symbol.bid.toFixed(5)} / ${symbol.ask.toFixed(5)}
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.8em; margin-bottom: 15px;">
+                                <div>
+                                    <div style="color: var(--text-secondary);">High</div>
+                                    <div style="color: #00ff88;">${symbol.high.toFixed(5)}</div>
+                                </div>
+                                <div>
+                                    <div style="color: var(--text-secondary);">Low</div>
+                                    <div style="color: #ff4444;">${symbol.low.toFixed(5)}</div>
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <button class="btn btn-small btn-primary" onclick="showBuyDialog('${symbol.symbol}', ${symbol.ask})">Buy</button>
+                                <button class="btn btn-small btn-danger" onclick="showSellDialog('${symbol.symbol}', ${symbol.bid})">Sell</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            })
+            .catch(err => {
+                console.error('Failed to load markets:', err);
+                document.getElementById('marketGrid').innerHTML = '<div style="color: #ff4444;">Failed to load market data</div>';
+            });
+        }
+
+        function loadWatchlist() {
+            fetch(`${API_BASE}/markets/symbols`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('watchlistTable');
+                if (!data.data || data.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">No market data</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = data.data.map(symbol => {
+                    const changeColor = symbol.change_percent >= 0 ? '#00ff88' : '#ff4444';
+                    const changeArrow = symbol.change_percent >= 0 ? '▲' : '▼';
+                    
+                    return `
+                        <tr>
+                            <td><strong>${symbol.symbol}</strong></td>
+                            <td>${symbol.bid.toFixed(5)}</td>
+                            <td>${symbol.ask.toFixed(5)}</td>
+                            <td style="color: ${changeColor};"><strong>${changeArrow} ${Math.abs(symbol.change_percent).toFixed(2)}%</strong></td>
+                            <td><button class="btn btn-small btn-primary" onclick="showDashboard('markets')">View</button></td>
+                        </tr>
+                    `;
+                }).join('');
+            })
+            .catch(err => console.error('Failed to load watchlist:', err));
+        }
+
+        function showBuyDialog(symbol, price) {
+            alert(`Buy ${symbol} at ${price.toFixed(5)} - Coming soon!`);
+        }
+
+        function showSellDialog(symbol, price) {
+            alert(`Sell ${symbol} at ${price.toFixed(5)} - Coming soon!`);
+        }
+
+        function loadPositions() {
+            if (!selectedAccountId) return;
+            fetch(`${API_BASE}/positions/${selectedAccountId}`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('positionsTable');
+                tbody.innerHTML = data.data.length ? data.data.map(p => `
+                    <tr>
+                        <td>${p.symbol}</td>
+                        <td>$${p.entry_price.toFixed(2)}</td>
+                        <td>${p.quantity}</td>
+                        <td><span class="status-badge status-open">${p.status}</span></td>
+                        <td><button class="btn btn-small btn-danger">Close</button></td>
+                    </tr>
+                `).join('') : '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">No open positions</td></tr>';
+            })
+            .catch(err => console.error('Failed to load positions:', err));
+        }
+
+        function loadTrades() {
+            if (!selectedAccountId) return;
+            fetch(`${API_BASE}/trades/${selectedAccountId}`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('tradesTable');
+                tbody.innerHTML = data.data.length ? data.data.map(t => `
+                    <tr>
+                        <td>${t.symbol}</td>
+                        <td>$${t.entry_price.toFixed(2)}</td>
+                        <td>$${t.exit_price ? t.exit_price.toFixed(2) : 'N/A'}</td>
+                        <td>${t.quantity}</td>
+                        <td style="color: ${t.profit_percent > 0 ? '#00ff88' : '#ff4444'}">${t.profit_percent > 0 ? '+' : ''}${t.profit_percent ?? 0}%</td>
+                        <td><span class="status-badge" style="background: rgba(0, 255, 136, 0.2); color: #00ff88;">${t.status}</span></td>
+                        <td>${t.open_date}</td>
+                    </tr>
+                `).join('') : '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No trades available</td></tr>';
+            })
+            .catch(err => console.error('Failed to load trades:', err));
+        }
+
+        function loadWithdrawals() {
+            if (!selectedAccountId) return;
+            fetch(`${API_BASE}/withdrawals/${selectedAccountId}`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('withdrawalsTable');
+                tbody.innerHTML = data.data.length ? data.data.map(w => `
+                    <tr>
+                        <td>$${w.amount.toFixed(2)}</td>
+                        <td>${w.method}</td>
+                        <td><span class="status-badge status-${w.status}">${w.status}</span></td>
+                        <td>${w.request_date}</td>
+                        <td>${w.completion_date || '-'}</td>
+                        <td><button class="btn btn-small btn-secondary" onclick="viewWithdrawal(${w.id})">View</button></td>
+                    </tr>
+                `).join('') : '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No withdrawals</td></tr>';
+            })
+            .catch(err => console.error('Failed to load withdrawals:', err));
+        }
+
+        function openWithdrawalModal() {
+            document.getElementById('withdrawalModal').classList.add('active');
+        }
+
+        function closeWithdrawalModal() {
+            document.getElementById('withdrawalModal').classList.remove('active');
+        }
+
+        function submitWithdrawal() {
+            const amount = document.getElementById('withdrawAmount').value;
+            const method = document.getElementById('withdrawMethod').value;
+            const account = document.getElementById('withdrawAccount').value;
+
+            fetch(`${API_BASE}/withdrawals/${selectedAccountId}/request`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${currentToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({amount, method, bank_account: account})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    closeWithdrawalModal();
+                    loadWithdrawals();
+                    alert('Withdrawal request submitted! Status: ' + data.status);
+                }
+            })
+            .catch(err => alert('Failed to submit withdrawal: ' + err));
+        }
+
+        function loadStatements() {
+            if (!selectedAccountId) return;
+            fetch(`${API_BASE}/statements/${selectedAccountId}`, {
+                headers: {'Authorization': `Bearer ${currentToken}`}
+            })
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('statementsTable');
+                tbody.innerHTML = data.data.length ? data.data.map(s => `
+                    <tr>
+                        <td>${s.period_type}</td>
+                        <td>$${s.opening_balance.toFixed(2)}</td>
+                        <td>$${s.closing_balance.toFixed(2)}</td>
+                        <td style="color: ${s.profit_loss > 0 ? '#00ff88' : '#ff4444'}">${s.profit_loss > 0 ? '+' : ''}$${s.profit_loss.toFixed(2)}</td>
+                        <td>${s.win_rate.toFixed(2)}%</td>
+                        <td>${s.total_trades}</td>
+                        <td><button class="btn btn-small btn-secondary" onclick="downloadStatement('${s.id}')">Download</button></td>
+                    </tr>
+                `).join('') : '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No statements available</td></tr>';
+            })
+            .catch(err => console.error('Failed to load statements:', err));
+        }
+
+        function generateStatement() {
+            if (!selectedAccountId) return;
+
+            const period = document.getElementById('statementPeriod').value;
+            
+            // Show loading
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+            
+            fetch(`${API_BASE}/statements/generate`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${currentToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    account_id: selectedAccountId,
+                    period_type: period
+                })
+            })
+            .then(res => {
+                if (res.ok) {
+                    return res.blob().then(blob => {
+                        // Create download link
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `statement_${period}_${new Date().getTime()}.pdf`;
+                        document.body.appendChild(link);
+                        link.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(link);
+                        
+                        // Show success message
+                        const successEl = document.getElementById('exportSuccess');
+                        successEl.classList.add('show');
+                        setTimeout(() => successEl.classList.remove('show'), 5000);
+                        
+                        // Reload statements
+                        loadStatements();
+                        return true;
+                    });
+                } else {
+                    return res.json().then(data => {
+                        throw new Error(data.error || 'Failed to generate PDF');
+                    });
+                }
+            })
+            .then(() => {
+                btn.disabled = false;
+                btn.textContent = 'Generate PDF';
+            })
+            .catch(err => {
+                alert('Failed to generate PDF: ' + err.message);
+                btn.disabled = false;
+                btn.textContent = 'Generate PDF';
+            });
+        }
+
+        // SETTINGS & USER PROFILE
+        function loadSettings() {
+            fetch(`${API_BASE}/user/settings?user_id=${currentUserId}`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${currentToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.data) {
+                    const user = data.data;
+                    
+                    // Fill profile info
+                    document.getElementById('settingFullName').value = user.full_name || '';
+                    document.getElementById('settingEmail').value = user.email || '';
+                    document.getElementById('settingPhoneNumber').value = user.phone_number || '';
+                    
+                    // Display phone for alerts
+                    document.getElementById('alertPhoneDisplay').textContent = user.phone_number || 'Not provided';
+                    
+                    // Fill MT5 info if configured
+                    if (user.mt5_account) {
+                        document.getElementById('mt5Account').value = user.mt5_account;
+                        document.getElementById('mt5Server').value = user.mt5_server || '';
+                        document.getElementById('mt5Path').value = user.mt5_path || '';
+                        
+                        const statusEl = document.getElementById('mt5Status');
+                        statusEl.innerHTML = '<strong style="color: #00ff88;">✓ Configured</strong> - Account ' + user.mt5_account;
+                        statusEl.style.background = 'rgba(0,255,136,0.1)';
+                        statusEl.style.color = '#00ff88';
+                    }
+                    
+                    // Fill alert info
+                    document.getElementById('alertThreshold').value = user.alert_threshold || 500;
+                    document.getElementById('alertEnabled').checked = user.alert_enabled ? true : false;
+                }
+            })
+            .catch(err => {
+                console.error('Failed to load settings:', err);
+            });
+        }
+
+        function saveMT5Credentials() {
+            const account = document.getElementById('mt5Account').value;
+            const password = document.getElementById('mt5Password').value;
+            const server = document.getElementById('mt5Server').value;
+            const path = document.getElementById('mt5Path').value;
+
+            if (!account) {
+                alert('Please enter your MT5 account number');
+                return;
+            }
+
+            if (!password) {
+                alert('Please enter your MT5 password');
+                return;
+            }
+
+            if (!server) {
+                alert('Please select your MT5 server');
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            fetch(`${API_BASE}/user/settings/mt5`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${currentToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: currentUserId,
+                    mt5_account: account,
+                    mt5_password: password,
+                    mt5_server: server,
+                    mt5_path: path || null
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✓ MT5 credentials saved successfully!');
+                    document.getElementById('mt5Password').value = ''; // Clear password field
+                    loadSettings(); // Reload to show confirmation
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to save MT5 credentials'));
+                }
+                btn.disabled = false;
+                btn.textContent = 'Save MT5 Account';
+            })
+            .catch(err => {
+                alert('Failed to save MT5 credentials: ' + err);
+                btn.disabled = false;
+                btn.textContent = 'Save MT5 Account';
+            });
+        }
+
+        function saveAlertSettings() {
+            const threshold = document.getElementById('alertThreshold').value;
+            const enabled = document.getElementById('alertEnabled').checked;
+
+            if (!threshold || threshold < 0) {
+                alert('Please enter a valid profit threshold');
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            fetch(`${API_BASE}/user/settings/alerts`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${currentToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: currentUserId,
+                    alert_threshold: parseFloat(threshold),
+                    alert_enabled: enabled ? 1 : 0
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✓ Alert settings saved successfully!');
+                    loadSettings(); // Reload to confirm
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to save alert settings'));
+                }
+                btn.disabled = false;
+                btn.textContent = 'Save Alert Settings';
+            })
+            .catch(err => {
+                alert('Failed to save alert settings: ' + err);
+                btn.disabled = false;
+                btn.textContent = 'Save Alert Settings';
+            });
+        }
+    </script>
+
+    <!-- INITIALIZATION SCRIPT - Runs after everything is loaded -->
+    <script>
+        console.log('[INIT] Page fully loaded, initializing...');
+        console.log('[INIT] Token:', localStorage.getItem('token'));
+        console.log('[INIT] UserID:', localStorage.getItem('user_id'));
+        
+        const splash = document.getElementById('loadingSplash');
+        if (splash) {
+            splash.style.display = 'none';
+        }
+        
+        if (currentToken && currentUserId) {
+            console.log('[INIT] Showing dashboard');
+            showDashboard();
+        } else {
+            console.log('[INIT] Showing login page');
+            showLoginPage();
+        }
+    </script>
+</body>
+</html>

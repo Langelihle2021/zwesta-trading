@@ -1,0 +1,29 @@
+# Mobile App - Zwesta Trading Flutter
+# Built for Android APK release
+
+FROM cirrusci/flutter:stable
+
+WORKDIR /app
+
+# Copy pubspec files
+COPY mobile/pubspec.* ./
+
+# Get dependencies
+RUN flutter pub get
+
+# Copy source code
+COPY mobile ./
+
+# Clean build
+RUN flutter clean
+
+# Build APK release
+RUN flutter build apk --release --no-android-gradle-daemon
+
+# Extract final APK
+RUN ls -la build/app/outputs/flutter-apk/
+
+EXPOSE 8080
+
+# Keep container running
+CMD ["tail", "-f", "/dev/null"]

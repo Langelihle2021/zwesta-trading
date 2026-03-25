@@ -1,0 +1,19 @@
+[2026-03-02 11:15:11,978] [INFO] - ============================================================
+[2026-03-02 11:15:11,979] [INFO] - Zwesta Trading Bot - Multi-User Edition
+[2026-03-02 11:15:11,980] [INFO] - ============================================================
+[2026-03-02 11:15:11,981] [WARNING] - [WARN] Twilio SDK not installed - WhatsApp alerts disabled
+[2026-03-02 11:15:11,982] [INFO] -   Install with: pip install twilio
+[2026-03-02 11:15:11,982] [INFO] - [OK] MetaTrader5 support enabled
+[2026-03-02 11:15:11,983] [INFO] - ============================================================
+[2026-03-02 11:15:11,985] [INFO] - Trading bot started - scanning markets every 5 seconds
+[2026-03-02 11:15:11,985] [INFO] - Trading bot initialized and running
+[2026-03-02 11:54:12,733] [INFO] - [User 1] Starting new trading session (Demo User)
+[2026-03-02 11:54:12,754] [ERROR] - [User 1] Failed to initialize MT5: (-6, 'Terminal: Authorization failed')
+[2026-03-02 11:54:12,755] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:17,758] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:22,761] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:27,763] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:32,766] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:37,768] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:42,771] [INFO] - Active trading sessions: 1 users
+[2026-03-02 11:54:47,774] [INFO] - Active trading sessions: 1 users

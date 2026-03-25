@@ -1,0 +1,7 @@
+ID: 1, Symbol: EURUSD, Entry: 1275.43115, Exit: 1300.64076, Status: closed
+ID: 2, Symbol: GBPUSD, Entry: 222.88051, Exit: 223.6468, Status: closed
+ID: 3, Symbol: USDJPY, Entry: 449.49225, Exit: 458.09218, Status: closed
+ID: 4, Symbol: GOLD, Entry: 722.02623, Exit: 723.09629, Status: closed
+ID: 5, Symbol: XAUUSD, Entry: 759.83472, Exit: 767.67123, Status: closed
+
+Total trades: 5
