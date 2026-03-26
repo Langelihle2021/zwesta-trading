@@ -2662,10 +2662,11 @@ class MT5Connection(BrokerConnection):
                 logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: orders_get() returned {len(orders) if orders else 'None'} orders")
                 
                 # If we got here, terminal is reading data fine
-                # Now test the actual order execution path with a micro test
-                logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: Testing order submission path...")
+                # Now test the order execution path with order_check (NOT order_send — that would place a real trade!)
+                logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: Testing order submission path with order_check()...")
                 
-                # Build a test order request (will fail for invalid reasons, but we can see if SDK responds)
+                # Build a test order request — order_check validates without executing
+                filling_type = self._get_filling_type(test_symbol)
                 test_request = {
                     "action": self.mt5.TRADE_ACTION_DEAL,
                     "symbol": test_symbol,
@@ -2674,14 +2675,14 @@ class MT5Connection(BrokerConnection):
                     "price": tick.ask,
                     "comment": "ZTEST",  # Short comment within MT5's 31-char limit
                     "type_time": self.mt5.ORDER_TIME_GTC,
-                    "type_filling": self.mt5.ORDER_FILLING_FOK,
+                    "type_filling": filling_type,
                 }
                 
-                test_result = self.mt5.order_send(test_request)
+                test_result = self.mt5.order_check(test_request)
                 
-                # Check what order_send returned
+                # Check what order_check returned
                 if test_result is None:
-                    logger.warning(f"  Attempt {attempt} [{elapsed:.0f}s]: ⚠️  order_send() returned None (terminal issue, not account)")
+                    logger.warning(f"  Attempt {attempt} [{elapsed:.0f}s]: ⚠️  order_check() returned None (terminal issue, not account)")
                     logger.warning(f"    This usually means:")
                     logger.warning(f"    - MT5 terminal is still initializing")
                     logger.warning(f"    - Terminal lost sync with SDK")
@@ -2690,10 +2691,10 @@ class MT5Connection(BrokerConnection):
                     time.sleep(check_interval)
                     continue
                 
-                # order_send did not return None - SDK is working
-                # Check if order succeeded or failed for logical reasons
+                # order_check did not return None - SDK is working
+                # Check if order would succeed or fail for logical reasons
                 if hasattr(test_result, 'retcode'):
-                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_send() returned (retcode={test_result.retcode})")
+                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_check() returned (retcode={test_result.retcode})")
                     logger.info(f"✅ MT5 is READY - order execution path is functional")
                     logger.info(f"   Account: {account_info.login}, Balance: ${account_info.balance}")
                     logger.info(f"   Symbol {test_symbol}: bid={tick.bid:.5f}, ask={tick.ask:.5f}")
@@ -2715,7 +2716,7 @@ class MT5Connection(BrokerConnection):
                         logger.error(f"  ❌ Failed to update balance cache: {e}")
                     return True
                 else:
-                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_send() returned object without retcode")
+                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_check() returned object without retcode")
                     logger.info(f"✅ MT5 is READY - SDK responding to order requests")
                     return True
                     
@@ -2983,6 +2984,23 @@ class MT5Connection(BrokerConnection):
                 return symbol
         return "EURUSDm"  # Last resort fallback
 
+    def _get_filling_type(self, symbol: str):
+        """Auto-detect the correct ORDER_FILLING type for the broker/symbol.
+        Exness requires RETURN, other brokers may need IOC or FOK."""
+        try:
+            sym_info = self.mt5.symbol_info(symbol)
+            if sym_info is not None:
+                filling = sym_info.filling_mode
+                # filling_mode is a bitmask: bit0=FOK, bit1=IOC, bit2=RETURN
+                if filling & 2:  # IOC supported
+                    return self.mt5.ORDER_FILLING_IOC
+                elif filling & 1:  # FOK supported
+                    return self.mt5.ORDER_FILLING_FOK
+            # Default to RETURN (works on Exness and most brokers)
+            return self.mt5.ORDER_FILLING_RETURN
+        except Exception:
+            return self.mt5.ORDER_FILLING_RETURN
+
     def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
         """
         Place order on MT5 with enhanced validation and fallback logic
@@ -3044,6 +3062,9 @@ class MT5Connection(BrokerConnection):
             
             price = tick.ask if order_type == 'BUY' else tick.bid
 
+            # Auto-detect correct filling type for broker
+            filling_type = self._get_filling_type(symbol)
+
             request_dict = {
                 "action": self.mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
@@ -3052,7 +3073,7 @@ class MT5Connection(BrokerConnection):
                 "price": price,
                 "comment": (kwargs.get('comment', 'ZTrade')[:31] if kwargs.get('comment') else 'ZTrade'),  # Enforce 31-char limit
                 "type_time": self.mt5.ORDER_TIME_GTC,
-                "type_filling": self.mt5.ORDER_FILLING_FOK,
+                "type_filling": filling_type,
             }
 
             if 'stopLoss' in kwargs:
@@ -3174,6 +3195,9 @@ class MT5Connection(BrokerConnection):
 
             pos = position[0]
             
+            # Auto-detect correct filling type for broker
+            filling_type = self._get_filling_type(pos.symbol)
+
             request_dict = {
                 "action": self.mt5.TRADE_ACTION_DEAL,
                 "symbol": pos.symbol,
@@ -3182,7 +3206,7 @@ class MT5Connection(BrokerConnection):
                 "position": int(position_id),
                 "comment": "ZCLOSE",  # Short comment for close (31-char MT5 limit)
                 "type_time": self.mt5.ORDER_TIME_GTC,
-                "type_filling": self.mt5.ORDER_FILLING_FOK,
+                "type_filling": filling_type,
             }
 
             result = self.mt5.order_send(request_dict)
@@ -10794,7 +10818,8 @@ def create_bot():
                     raise
 
             now = datetime.now()
-            sample_trades, sample_daily_profits, sample_total_profit, sample_winning_trades = _generate_sample_trades_for_bot(symbols, 10)
+            # Start with clean stats — no fake sample trades that pollute analytics
+            # Real trades will be recorded as the bot executes
 
             active_bots[bot_id] = {
                 'botId': bot_id,
@@ -10815,21 +10840,21 @@ def create_bot():
                 'enabled': trading_enabled,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
                 'basePositionSize': data.get('basePositionSize', 1.0),
-                'totalTrades': len(sample_trades),
-                'winningTrades': sample_winning_trades,
-                'totalProfit': sample_total_profit,
-                'totalLosses': abs(sum(1 for t in sample_trades if t['profit'] < 0)),
+                'totalTrades': 0,
+                'winningTrades': 0,
+                'totalProfit': 0,
+                'totalLosses': 0,
                 'totalInvestment': 0,
                 'createdAt': now.isoformat(),
                 'startTime': now.isoformat(),
                 'profitHistory': [],
-                'tradeHistory': sample_trades,
-                'dailyProfits': sample_daily_profits,
-                'dailyProfit': sample_total_profit,
+                'tradeHistory': [],
+                'dailyProfits': {},
+                'dailyProfit': 0,
                 'maxDrawdown': 0,
-                'peakProfit': max(0, sample_total_profit),
+                'peakProfit': 0,
                 'drawdownPauseUntil': None,
-                'profit': sample_total_profit,
+                'profit': 0,
             }
             persist_bot_runtime_state(bot_id)
 
@@ -11713,73 +11738,31 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             break
                                 
                                 if matched_pos:
-                                    # Get the position's current P&L
-                                    trade_profit = matched_pos.get('netProfit', matched_pos.get('pnl', 0))
                                     pos_symbol = matched_pos.get('symbol') or matched_pos.get('instrument') or symbol
                                     pos_type = matched_pos.get('type') or matched_pos.get('direction', order_type)
+                                    pos_ticket = matched_pos.get('ticket') or matched_pos.get('deal_id', order_ticket)
                                     
-                                    # ==================== PROFIT-LOCKING SYSTEM ====================
-                                    # If position has reached 50% of profit target, move stop loss to breakeven
-                                    expected_max_profit = trade_params.get('take_profit', 30)  # In pips
-                                    breakeven_threshold = expected_max_profit * 0.5  # 50% of TP
+                                    # ============ TRACK AS OPEN POSITION — DO NOT RECORD P&L YET ============
+                                    # The position was just opened, P&L is ~$0 (spread only).
+                                    # Real P&L will be recorded when the position closes (via TP/SL or manual close).
+                                    # Store in bot's open_positions tracker for monitoring.
+                                    if 'open_positions' not in bot_config:
+                                        bot_config['open_positions'] = {}
                                     
-                                    if trade_profit > 0 and abs(trade_profit) >= breakeven_threshold:
-                                        logger.info(f"💰 Bot {bot_id}: Position on {symbol} at 50% profit (${trade_profit:.2f}) - MOVING STOP TO BREAKEVEN")
-                                        
-                                        # Update stop loss in MT5/broker
-                                        try:
-                                            if is_mt5 and mt5_conn:
-                                                # Move stop to entry price (breakeven)
-                                                mt5_conn.modify_position_stop_loss(
-                                                    ticket=pos.get('ticket'),
-                                                    new_stop_loss=trade['entryPrice']
-                                                )
-                                        except Exception as e:
-                                            logger.warning(f"Bot {bot_id}: Could not modify stop loss to breakeven: {e}")
-                                    
-                                    # If position has reached 75% of profit target, start trailing stop
-                                    trail_threshold = expected_max_profit * 0.75
-                                    if trade_profit > 0 and abs(trade_profit) >= trail_threshold:
-                                        logger.info(f"🚀 Bot {bot_id}: Position on {symbol} at 75% profit (${trade_profit:.2f}) - ENABLING TRAILING STOP (5 pips)")
-                                        
-                                        try:
-                                            if is_mt5 and mt5_conn:
-                                                # Set trailing stop at 5 pips
-                                                mt5_conn.set_trailing_stop(
-                                                    ticket=pos.get('ticket'),
-                                                    trail_pips=5
-                                                )
-                                        except Exception as e:
-                                            logger.warning(f"Bot {bot_id}: Could not set trailing stop: {e}")
-                                    
-                                    # ==================== END PROFIT-LOCKING ====================
-                                    
-                                    trade = {
-                                            'ticket': pos.get('ticket') or pos.get('deal_id', ''),
-                                            'symbol': pos_symbol,
-                                            'type': pos_type,
-                                            'volume': pos.get('volume') or pos.get('size', 0),
-                                            'baseVolume': trade_params['volume'],
-                                            'positionSize': position_size,
-                                            'entryTime': trade_params.get('entry_time', pos.get('openTime', datetime.now().isoformat())),
-                                            'exitTime': trade_params.get('exit_time', datetime.now().isoformat()),
-                                            'entryPrice': pos.get('openPrice') or pos.get('level', 0),
-                                            'exitPrice': pos.get('currentPrice') or pos.get('level', 0),
-                                            'durationSec': trade_params.get('duration_sec', None),
-                                            'profit': trade_profit,
-                                            'time': datetime.now().isoformat(),
-                                            'timestamp': int(datetime.now().timestamp() * 1000),
-                                            'botId': bot_id,
-                                            'cycle': trade_cycle,
-                                            'strategy': strategy_name,
-                                            'isWinning': trade_profit > 0,
-                                            'riskSettings': bot_config.get('riskSettings', {}),
-                                            'signals': trade_params.get('signals', None),
-                                                'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}",
-                                            'broker': broker_type,
+                                    bot_config['open_positions'][str(pos_ticket)] = {
+                                        'ticket': pos_ticket,
+                                        'symbol': pos_symbol,
+                                        'type': pos_type,
+                                        'volume': matched_pos.get('volume') or matched_pos.get('size', 0),
+                                        'entryPrice': matched_pos.get('openPrice') or matched_pos.get('level', 0),
+                                        'entryTime': matched_pos.get('openTime', datetime.now().isoformat()),
+                                        'botId': bot_id,
+                                        'cycle': trade_cycle,
+                                        'strategy': strategy_name,
+                                        'broker': broker_type,
                                     }
                                     
-                                    # Store in database
+                                    # Store open trade in database
                                     try:
                                         trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
                                         trade_cursor = trade_conn.cursor()
@@ -11791,71 +11774,25 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             trade_id,
                                             bot_id,
                                             user_id,
-                                            trade.get('symbol', symbol),
-                                            trade.get('type', 'UNKNOWN'),
-                                            trade.get('volume', 0),
-                                            trade.get('entryPrice', 0),
-                                            trade.get('profit', 0),
-                                            trade.get('ticket', None),
-                                            trade.get('entryTime', datetime.now().isoformat()),
-                                            trade.get('exitTime', datetime.now().isoformat()),
-                                            'closed',
+                                            pos_symbol,
+                                            pos_type,
+                                            matched_pos.get('volume', 0),
+                                            matched_pos.get('openPrice', 0),
+                                            0,  # Profit is 0 until position closes
+                                            str(pos_ticket),
+                                            matched_pos.get('openTime', datetime.now().isoformat()),
+                                            None,  # No close time yet
+                                            'open',  # Mark as OPEN, not closed
                                             datetime.now().isoformat(),
-                                            json.dumps(trade),
-                                            trade['timestamp']
+                                            json.dumps({'ticket': str(pos_ticket), 'symbol': pos_symbol, 'type': pos_type, 'entryPrice': matched_pos.get('openPrice', 0), 'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}"}),
+                                            int(datetime.now().timestamp() * 1000)
                                         ))
                                         trade_conn.commit()
                                         trade_conn.close()
                                     except Exception as e:
-                                        logger.error(f"Bot {bot_id}: Error storing trade: {e}")
+                                        logger.error(f"Bot {bot_id}: Error storing open trade: {e}")
                                     
-                                    # ✅ ADD TO BOT'S TRADE HISTORY FOR ANALYTICS DASHBOARD
-                                    if 'tradeHistory' not in bot_config:
-                                        bot_config['tradeHistory'] = []
-                                    bot_config['tradeHistory'].append(trade)
-                                    
-                                    # Update bot stats
-                                    bot_config['totalTrades'] += 1
-                                    bot_config['totalInvestment'] += trade['volume'] * trade['entryPrice']
-                                    
-                                    if trade['profit'] > 0:
-                                        bot_config['winningTrades'] += 1
-                                    else:
-                                        bot_config['totalLosses'] += abs(trade['profit'])
-                                    
-                                    bot_config['totalProfit'] += trade['profit']
-                                    
-                                    # Update peak & drawdown
-                                    if bot_config['totalProfit'] > bot_config['peakProfit']:
-                                        bot_config['peakProfit'] = bot_config['totalProfit']
-                                    
-                                    drawdown = bot_config['peakProfit'] - bot_config['totalProfit']
-                                    if drawdown > bot_config['maxDrawdown']:
-                                        bot_config['maxDrawdown'] = drawdown
-                                    
-                                    # Track profit history
-                                    bot_config['profitHistory'].append({
-                                        'timestamp': trade['timestamp'],
-                                        'profit': round(bot_config['totalProfit'], 2),
-                                        'trades': bot_config['totalTrades'],
-                                    })
-                                    
-                                    # Track daily profit
-                                    today = datetime.now().strftime('%Y-%m-%d')
-                                    if today not in bot_config['dailyProfits']:
-                                        bot_config['dailyProfits'][today] = 0
-                                    bot_config['dailyProfits'][today] += trade['profit']
-                                    bot_config['dailyProfit'] = bot_config['dailyProfits'][today]
-                                    bot_config['profit'] = bot_config['totalProfit']
-                                    
-                                    # Distribution commissions
-                                    if trade['profit'] > 0:
-                                        try:
-                                            distribute_trade_commissions(bot_id, user_id, trade['profit'])
-                                        except Exception as e:
-                                            logger.error(f"Bot {bot_id}: Commission error: {e}")
-                                    
-                                    logger.info(f"✅ Bot {bot_id}: Trade executed | {symbol} {order_type} | P&L: ${trade['profit']:.2f}")
+                                    logger.info(f"✅ Bot {bot_id}: Position OPENED | {pos_symbol} {pos_type} @ {matched_pos.get('openPrice', 0)} | Ticket: {pos_ticket}")
                                     trades_placed += 1
                         else:
                             logger.warning(f"Bot {bot_id}: Could not place order on {symbol} or EURUSD fallback")
@@ -11863,6 +11800,139 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     except Exception as e:
                         logger.error(f"Bot {bot_id}: Error in trade cycle for {symbol}: {e}")
                         continue
+                
+                # ==================== CHECK FOR CLOSED POSITIONS (TP/SL HIT) ====================
+                # Compare tracked open_positions against current broker positions.
+                # If a tracked position is no longer open, it was closed by TP/SL — record the real P&L.
+                try:
+                    tracked_positions = bot_config.get('open_positions', {})
+                    if tracked_positions and active_conn:
+                        current_positions = []
+                        if is_mt5 and mt5_conn:
+                            current_positions = mt5_conn.get_positions()
+                        elif active_conn:
+                            current_positions = active_conn.get_positions()
+                        
+                        current_tickets = set()
+                        for cp in current_positions:
+                            current_tickets.add(str(cp.get('ticket') or cp.get('deal_id', '')))
+                        
+                        closed_tickets = []
+                        for ticket_str, tracked in list(tracked_positions.items()):
+                            if ticket_str not in current_tickets:
+                                closed_tickets.append(ticket_str)
+                                
+                                # Position is gone — closed by TP/SL or manually
+                                # Get the actual P&L from MT5 trade history
+                                real_profit = 0
+                                try:
+                                    if is_mt5 and mt5_conn and mt5_conn.mt5:
+                                        from datetime import timedelta
+                                        now_ts = datetime.now()
+                                        deals = mt5_conn.mt5.history_deals_get(
+                                            now_ts - timedelta(days=1), now_ts
+                                        )
+                                        if deals:
+                                            for deal in deals:
+                                                if deal.position_id == int(ticket_str):
+                                                    # OUT deal = closing deal with actual profit
+                                                    if deal.entry == 1:  # DEAL_ENTRY_OUT
+                                                        real_profit = deal.profit + deal.swap + deal.commission
+                                                        break
+                                except Exception as hist_e:
+                                    logger.warning(f"Bot {bot_id}: Could not get history for ticket {ticket_str}: {hist_e}")
+                                
+                                trade = {
+                                    'ticket': tracked.get('ticket', ticket_str),
+                                    'symbol': tracked.get('symbol', ''),
+                                    'type': tracked.get('type', ''),
+                                    'volume': tracked.get('volume', 0),
+                                    'entryPrice': tracked.get('entryPrice', 0),
+                                    'entryTime': tracked.get('entryTime', ''),
+                                    'exitTime': datetime.now().isoformat(),
+                                    'profit': round(real_profit, 2),
+                                    'time': datetime.now().isoformat(),
+                                    'timestamp': int(datetime.now().timestamp() * 1000),
+                                    'botId': bot_id,
+                                    'cycle': tracked.get('cycle', 0),
+                                    'strategy': tracked.get('strategy', ''),
+                                    'isWinning': real_profit > 0,
+                                    'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}",
+                                    'broker': tracked.get('broker', broker_type),
+                                }
+                                
+                                # Update trade in database from open to closed
+                                try:
+                                    trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                                    trade_cursor = trade_conn.cursor()
+                                    trade_cursor.execute('''
+                                        UPDATE trades SET profit = ?, status = 'closed', time_close = ?, trade_data = ?, updated_at = ?
+                                        WHERE ticket = ? AND bot_id = ? AND status = 'open'
+                                    ''', (
+                                        real_profit,
+                                        datetime.now().isoformat(),
+                                        json.dumps(trade),
+                                        datetime.now().isoformat(),
+                                        str(ticket_str),
+                                        bot_id
+                                    ))
+                                    trade_conn.commit()
+                                    trade_conn.close()
+                                except Exception as db_e:
+                                    logger.error(f"Bot {bot_id}: Error updating closed trade: {db_e}")
+                                
+                                # Update bot analytics with REAL P&L
+                                if 'tradeHistory' not in bot_config:
+                                    bot_config['tradeHistory'] = []
+                                bot_config['tradeHistory'].append(trade)
+                                
+                                bot_config['totalTrades'] = bot_config.get('totalTrades', 0) + 1
+                                bot_config['totalInvestment'] = bot_config.get('totalInvestment', 0) + (trade['volume'] * trade['entryPrice'])
+                                
+                                if real_profit > 0:
+                                    bot_config['winningTrades'] = bot_config.get('winningTrades', 0) + 1
+                                else:
+                                    bot_config['totalLosses'] = bot_config.get('totalLosses', 0) + abs(real_profit)
+                                
+                                bot_config['totalProfit'] = bot_config.get('totalProfit', 0) + real_profit
+                                
+                                # Update peak & drawdown
+                                if bot_config['totalProfit'] > bot_config.get('peakProfit', 0):
+                                    bot_config['peakProfit'] = bot_config['totalProfit']
+                                drawdown = bot_config.get('peakProfit', 0) - bot_config['totalProfit']
+                                if drawdown > bot_config.get('maxDrawdown', 0):
+                                    bot_config['maxDrawdown'] = drawdown
+                                
+                                # Track profit history
+                                bot_config.setdefault('profitHistory', []).append({
+                                    'timestamp': trade['timestamp'],
+                                    'profit': round(bot_config['totalProfit'], 2),
+                                    'trades': bot_config['totalTrades'],
+                                })
+                                
+                                # Track daily profit
+                                today = datetime.now().strftime('%Y-%m-%d')
+                                if today not in bot_config.get('dailyProfits', {}):
+                                    bot_config.setdefault('dailyProfits', {})[today] = 0
+                                bot_config['dailyProfits'][today] += real_profit
+                                bot_config['dailyProfit'] = bot_config['dailyProfits'][today]
+                                bot_config['profit'] = bot_config['totalProfit']
+                                
+                                # Commission distribution on real profit
+                                if real_profit > 0:
+                                    try:
+                                        distribute_trade_commissions(bot_id, user_id, real_profit)
+                                    except Exception as comm_e:
+                                        logger.error(f"Bot {bot_id}: Commission error: {comm_e}")
+                                
+                                logger.info(f"💰 Bot {bot_id}: Position CLOSED by TP/SL | {tracked.get('symbol')} | Real P&L: ${real_profit:.2f}")
+                        
+                        # Remove closed positions from tracker
+                        for t in closed_tickets:
+                            del tracked_positions[t]
+                
+                except Exception as close_check_e:
+                    logger.warning(f"Bot {bot_id}: Error checking closed positions: {close_check_e}")
                 
                 # Update account balance (broker-aware)
                 try:
@@ -12264,7 +12334,7 @@ def quick_create_bot():
             conn.commit()
 
             now = datetime.now()
-            sample_trades, sample_daily_profits, sample_total_profit, sample_winning_trades = _generate_sample_trades_for_bot(symbols, 8)
+            # Start with clean stats — no fake sample trades
 
             active_bots[bot_id] = {
                 'botId': bot_id,
@@ -12283,20 +12353,20 @@ def quick_create_bot():
                 'drawdownPauseHours': drawdown_pause_hours,
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
-                'totalTrades': len(sample_trades),
-                'winningTrades': sample_winning_trades,
-                'totalProfit': sample_total_profit,
+                'totalTrades': 0,
+                'winningTrades': 0,
+                'totalProfit': 0,
                 'totalLosses': 0,
                 'totalInvestment': 0,
                 'createdAt': now.isoformat(),
                 'startTime': now.isoformat(),
                 'profitHistory': [],
-                'tradeHistory': sample_trades,
-                'dailyProfits': sample_daily_profits,
-                'dailyProfit': sample_total_profit,
+                'tradeHistory': [],
+                'dailyProfits': {},
+                'dailyProfit': 0,
                 'maxDrawdown': 0,
-                'peakProfit': max(0, sample_total_profit),
-                'profit': sample_total_profit,
+                'peakProfit': 0,
+                'profit': 0,
             }
             persist_bot_runtime_state(bot_id)
 
@@ -16207,7 +16277,15 @@ def exness_place_trade():
             
             price = tick.ask if side == 'BUY' else tick.bid
             
-            # Build order request
+            # Build order request — auto-detect filling type for Exness
+            sym_info = mt5.symbol_info(symbol)
+            if sym_info and sym_info.filling_mode & 2:
+                _filling = mt5.ORDER_FILLING_IOC
+            elif sym_info and sym_info.filling_mode & 1:
+                _filling = mt5.ORDER_FILLING_FOK
+            else:
+                _filling = mt5.ORDER_FILLING_RETURN
+
             request_dict = {
                 'action': mt5.TRADE_ACTION_DEAL,
                 'symbol': symbol,
@@ -16216,7 +16294,7 @@ def exness_place_trade():
                 'price': price,
                 'comment': 'Exness Order',
                 'type_time': mt5.ORDER_TIME_GTC,
-                'type_filling': mt5.ORDER_FILLING_FOK,
+                'type_filling': _filling,
             }
             
             if stop_loss:
@@ -16340,6 +16418,15 @@ def exness_close_order(order_id):
             tick = mt5.symbol_info_tick(pos.symbol)
             price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
             
+            # Auto-detect filling type for close order
+            _sym_info = mt5.symbol_info(pos.symbol)
+            if _sym_info and _sym_info.filling_mode & 2:
+                _close_filling = mt5.ORDER_FILLING_IOC
+            elif _sym_info and _sym_info.filling_mode & 1:
+                _close_filling = mt5.ORDER_FILLING_FOK
+            else:
+                _close_filling = mt5.ORDER_FILLING_RETURN
+
             request_dict = {
                 'action': mt5.TRADE_ACTION_DEAL,
                 'symbol': pos.symbol,
@@ -16349,7 +16436,7 @@ def exness_close_order(order_id):
                 'price': price,
                 'comment': 'Position Closed',
                 'type_time': mt5.ORDER_TIME_GTC,
-                'type_filling': mt5.ORDER_FILLING_FOK,
+                'type_filling': _close_filling,
             }
             
             result = mt5.order_send(request_dict)
@@ -17377,6 +17464,15 @@ def place_advanced_order(broker):
             # Map symbol to Exness format
             symbol_normalized = f"{symbol}m" if not symbol.endswith('m') else symbol
             
+            # Auto-detect filling type
+            _adv_sym = mt5.symbol_info(symbol_normalized)
+            if _adv_sym and _adv_sym.filling_mode & 2:
+                _adv_filling = mt5.ORDER_FILLING_IOC
+            elif _adv_sym and _adv_sym.filling_mode & 1:
+                _adv_filling = mt5.ORDER_FILLING_FOK
+            else:
+                _adv_filling = mt5.ORDER_FILLING_RETURN
+
             request_obj = {
                 "action": mt5.TRADE_ACTION_PENDING,
                 "symbol": symbol_normalized,
@@ -17387,7 +17483,7 @@ def place_advanced_order(broker):
                 "sl": sl_price or 0,
                 "tp": tp_price or 0,
                 "comment": f"Advanced {order_type} order - {symbol}",
-                "type_filling": mt5.ORDER_FILLING_FOK,
+                "type_filling": _adv_filling,
                 "type_time": mt5.ORDER_TIME_GTC,
             }
             
