@@ -32,6 +32,7 @@ MT5_ONLY_BROKERS = {'PXBT', 'PrimeXBT'}
 class ExecutionMode:
     """Enum for trade execution modes."""
     METAAPI = 'metaapi'       # Cloud REST API via MetaAPI
+    SOCKET = 'socket_bridge'  # Self-hosted TCP socket bridge to MT5 EA
     LOCAL_MT5 = 'local_mt5'   # Direct MT5 terminal on this machine
     WORKER = 'worker_pool'    # Worker subprocess with its own MT5
     BINANCE = 'binance_api'   # Binance REST API
@@ -62,11 +63,13 @@ class TradeRouter:
     """Routes trades to the optimal execution path."""
 
     def __init__(self, metaapi_client=None, price_feed=None,
-                 worker_manager=None, broker_manager=None):
+                 worker_manager=None, broker_manager=None,
+                 socket_bridge_manager=None):
         self.metaapi_client = metaapi_client
         self.price_feed = price_feed
         self.worker_manager = worker_manager
         self.broker_manager = broker_manager
+        self.socket_bridge_manager = socket_bridge_manager
 
         # Execution state per account
         self._accounts = {}  # cache_key -> AccountExecution
@@ -75,6 +78,8 @@ class TradeRouter:
         # Configuration
         self.prefer_rest = os.environ.get('PREFER_REST_TRADING', 'true').lower() == 'true'
         self.metaapi_enabled = metaapi_client is not None and metaapi_client.enabled
+        self.socket_enabled = (socket_bridge_manager is not None and
+                               socket_bridge_manager.enabled)
         self.workers_enabled = (worker_manager is not None and
                                 worker_manager.enabled if worker_manager else False)
 
@@ -91,6 +96,11 @@ class TradeRouter:
         # Binance → always REST API
         if broker in CRYPTO_BROKERS or broker_upper == 'BINANCE':
             return ExecutionMode.BINANCE
+
+        # Socket bridge available for this specific account?
+        if self.socket_enabled:
+            if self.socket_bridge_manager.is_account_bridged(broker, str(account_number)):
+                return ExecutionMode.SOCKET
 
         # MetaAPI available and broker supports it?
         if (self.metaapi_enabled and self.prefer_rest and
@@ -121,7 +131,9 @@ class TradeRouter:
 
         acct = AccountExecution(broker, account_number, mode)
 
-        if mode == ExecutionMode.METAAPI:
+        if mode == ExecutionMode.SOCKET:
+            acct = self._setup_socket(acct)
+        elif mode == ExecutionMode.METAAPI:
             acct = self._setup_metaapi(acct, password, server, broker)
         elif mode == ExecutionMode.WORKER:
             # Worker pool handles its own connections
@@ -172,6 +184,36 @@ class TradeRouter:
 
         return acct
 
+    def _setup_socket(self, acct):
+        """Set up socket bridge execution for an account."""
+        if not self.socket_bridge_manager:
+            acct.mode = ExecutionMode.LOCAL_MT5
+            return acct
+
+        try:
+            bridge = self.socket_bridge_manager.get_bridge(
+                acct.broker, str(acct.account_number))
+            if bridge and bridge.connected:
+                acct.connection = bridge
+                logger.info(f"Socket bridge ready for {acct.broker}:{acct.account_number} "
+                            f"on port {bridge.port}")
+            elif bridge:
+                # Try reconnecting
+                if bridge.connect():
+                    acct.connection = bridge
+                    logger.info(f"Socket bridge reconnected for {acct.broker}:{acct.account_number}")
+                else:
+                    logger.warning(f"Socket bridge connect failed, falling back to local MT5")
+                    acct.mode = ExecutionMode.LOCAL_MT5
+            else:
+                logger.warning(f"No socket bridge configured for {acct.broker}:{acct.account_number}")
+                acct.mode = ExecutionMode.LOCAL_MT5
+        except Exception as e:
+            logger.error(f"Socket bridge setup error: {e}")
+            acct.mode = ExecutionMode.LOCAL_MT5
+
+        return acct
+
     # ─── Trade Operations (Unified Interface) ──────────────────────────
 
     def place_trade(self, broker, account_number, symbol, order_type, volume,
@@ -189,7 +231,10 @@ class TradeRouter:
                     'mode': 'none', 'retcode': -1}
 
         try:
-            if acct.mode == ExecutionMode.METAAPI:
+            if acct.mode == ExecutionMode.SOCKET:
+                result = self._trade_socket(acct, symbol, order_type, volume,
+                                            stop_loss, take_profit, comment)
+            elif acct.mode == ExecutionMode.METAAPI:
                 result = self._trade_metaapi(acct, symbol, order_type, volume,
                                              stop_loss, take_profit, comment)
             elif acct.mode == ExecutionMode.WORKER:
@@ -231,7 +276,9 @@ class TradeRouter:
             return False
 
         try:
-            if acct.mode == ExecutionMode.METAAPI and acct.connection:
+            if acct.mode == ExecutionMode.SOCKET and acct.connection:
+                return acct.connection.close_position(position_id)
+            elif acct.mode == ExecutionMode.METAAPI and acct.connection:
                 return acct.connection.close_position(position_id)
             elif acct.mode == ExecutionMode.LOCAL_MT5 and acct.connection:
                 return acct.connection.close_position(position_id)
@@ -301,6 +348,21 @@ class TradeRouter:
         return []
 
     # ─── Private Execution Methods ─────────────────────────────────────
+
+    def _trade_socket(self, acct, symbol, order_type, volume, sl, tp, comment):
+        """Execute trade via socket bridge to MT5 EA."""
+        if not acct.connection:
+            return {'success': False, 'comment': 'No socket bridge', 'retcode': -1}
+
+        result = acct.connection.place_order(
+            symbol=symbol,
+            order_type=order_type,
+            volume=volume,
+            stopLoss=sl,
+            takeProfit=tp,
+            comment=comment,
+        )
+        return result
 
     def _trade_metaapi(self, acct, symbol, order_type, volume, sl, tp, comment):
         """Execute trade via MetaAPI REST."""
@@ -397,6 +459,7 @@ class TradeRouter:
             mode_counts[m] = mode_counts.get(m, 0) + 1
 
         return {
+            'socket_enabled': self.socket_enabled,
             'metaapi_enabled': self.metaapi_enabled,
             'workers_enabled': self.workers_enabled,
             'prefer_rest': self.prefer_rest,
@@ -441,7 +504,8 @@ def get_trade_router():
 
 
 def init_trade_router(metaapi_client=None, price_feed=None,
-                      worker_manager=None, broker_manager=None):
+                      worker_manager=None, broker_manager=None,
+                      socket_bridge_manager=None):
     """Initialize the global trade router with dependencies."""
     global _global_router
     with _router_lock:
@@ -450,5 +514,6 @@ def init_trade_router(metaapi_client=None, price_feed=None,
             price_feed=price_feed,
             worker_manager=worker_manager,
             broker_manager=broker_manager,
+            socket_bridge_manager=socket_bridge_manager,
         )
     return _global_router

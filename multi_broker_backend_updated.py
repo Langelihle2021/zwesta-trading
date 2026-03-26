@@ -39,6 +39,7 @@ from worker_manager import WorkerPoolManager
 from metaapi_client import MetaApiClient, MetaApiTradingBridge, get_metaapi_client, is_metaapi_enabled
 from rest_price_feed import RestPriceFeed, get_price_feed
 from trade_router import TradeRouter, init_trade_router, get_trade_router, ExecutionMode
+from mt5_socket_bridge import SocketBridgeManager, MT5SocketBridge, init_socket_bridges
 
 # Load environment variables from .env file
 try:
@@ -332,6 +333,8 @@ METAAPI_REGION = os.getenv('METAAPI_REGION', 'new-york')  # MetaAPI region
 TWELVE_DATA_KEY = os.getenv('TWELVE_DATA_KEY', '')  # Free price data API (800 calls/day)
 ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY', '')  # Free price data API (25 calls/day)
 PREFER_REST_TRADING = os.getenv('PREFER_REST_TRADING', 'true').lower() == 'true'  # Route Exness via REST when MetaAPI available
+SOCKET_BRIDGES = os.getenv('SOCKET_BRIDGES', '')  # Self-hosted MT5 socket bridges (broker:account:port,...)
+SOCKET_AUTH_TOKEN = os.getenv('SOCKET_AUTH_TOKEN', 'zwesta')  # Auth token for socket bridges
 
 # ==================== ENVIRONMENT MODE ====================
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'DEMO').upper()
@@ -343,6 +346,7 @@ print(f"[WORKERS] Worker Count: {WORKER_COUNT} ({'multi-process' if WORKER_COUNT
 print(f"[REST TRADING] MetaAPI: {'ENABLED' if METAAPI_TOKEN else 'DISABLED (no token)'}")
 print(f"[REST TRADING] Prefer REST: {PREFER_REST_TRADING}")
 print(f"[PRICE FEED] Twelve Data: {'ENABLED' if TWELVE_DATA_KEY else 'DISABLED'} | Alpha Vantage: {'ENABLED' if ALPHA_VANTAGE_KEY else 'DISABLED'}")
+print(f"[SOCKET BRIDGE] {'CONFIGURED: ' + SOCKET_BRIDGES if SOCKET_BRIDGES else 'DISABLED (no SOCKET_BRIDGES)'}")
 print(f"{'='*70}\n")
 
 # ==================== WORKER POOL MANAGER ====================
@@ -358,12 +362,18 @@ rest_price_feed = RestPriceFeed(
     alpha_vantage_key=ALPHA_VANTAGE_KEY,
 )
 
-# Initialize trade router (hybrid execution: REST for Exness, MT5 for PXBT)
+# ==================== SOCKET BRIDGE INFRASTRUCTURE ====================
+# Self-hosted TCP bridge: Python backend → localhost socket → MT5 EA inside terminal
+socket_bridge_manager = SocketBridgeManager(auth_token=SOCKET_AUTH_TOKEN)
+socket_bridge_manager.configure_from_env()
+
+# Initialize trade router (hybrid execution: Socket/REST/MT5)
 trade_router = init_trade_router(
     metaapi_client=metaapi_client,
     price_feed=rest_price_feed,
     worker_manager=worker_pool_manager if WORKER_COUNT > 0 else None,
     broker_manager=None,  # Will be set after broker_manager is created
+    socket_bridge_manager=socket_bridge_manager if socket_bridge_manager.enabled else None,
 )
 
 # MT5 Credentials - DEMO (default)
@@ -1065,15 +1075,29 @@ def get_rest_trading_status():
         'active_symbols': len(rest_price_feed._active_symbols) if rest_price_feed else 0,
     }
 
+    socket_status = socket_bridge_manager.get_all_status() if socket_bridge_manager else {'enabled': False}
+    
+    # Determine current scaling mode
+    if socket_status.get('enabled'):
+        scaling_mode = 'Socket Bridge + MT5 Hybrid'
+        capacity = '200-500 users per VPS'
+    elif metaapi_status['enabled']:
+        scaling_mode = 'MetaAPI REST + MT5 Hybrid'
+        capacity = '500-1000 users'
+    else:
+        scaling_mode = 'MT5 Only'
+        capacity = '50-200 users'
+
     return jsonify({
         'success': True,
+        'socket_bridges': socket_status,
         'metaapi': metaapi_status,
         'price_feed': price_feed_status,
         'trade_router': router_status,
         'scaling_info': {
-            'mode': 'REST + MT5 Hybrid' if metaapi_status['enabled'] else 'MT5 Only',
-            'estimated_capacity': '500-1000 users' if metaapi_status['enabled'] else '50-200 users',
-            'ram_savings': 'MetaAPI eliminates MT5 terminal processes (~200MB each saved)' if metaapi_status['enabled'] else 'N/A',
+            'mode': scaling_mode,
+            'estimated_capacity': capacity,
+            'ram_note': 'Socket bridges use ~50MB/terminal vs MetaAPI ~2MB but free & self-hosted',
         },
     })
 
@@ -11182,13 +11206,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 elif is_mt5:
                     # MT5 broker - connect via terminal SDK or REST API (MetaAPI)
                     try:
-                        # ==================== REST TRADING FAST PATH ====================
-                        # MetaAPI cloud REST trades for supported brokers → saves ~300MB RAM per account
+                        # ==================== REST/SOCKET TRADING FAST PATH ====================
+                        # Socket bridge or MetaAPI cloud for supported brokers → saves ~300MB RAM per account
                         if trade_router and not use_rest_trading:
                             _broker_for_route = bot_config.get('broker_type', 'MT5')
                             _account_for_route = bot_credentials.get('account', '')
                             _exec_mode = trade_router.determine_mode(_broker_for_route, _account_for_route)
-                            if _exec_mode == ExecutionMode.METAAPI:
+                            if _exec_mode in (ExecutionMode.SOCKET, ExecutionMode.METAAPI):
                                 try:
                                     _acct_exec = trade_router.get_or_create_execution(
                                         broker=_broker_for_route,
@@ -11198,13 +11222,14 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         is_live=True,
                                         user_id=user_id,
                                     )
-                                    if _acct_exec.connection and _acct_exec.mode == ExecutionMode.METAAPI:
+                                    if _acct_exec.connection and _acct_exec.mode in (ExecutionMode.SOCKET, ExecutionMode.METAAPI):
                                         mt5_conn = _acct_exec.connection
                                         active_conn = mt5_conn
                                         use_rest_trading = True
-                                        logger.info(f"☁️  Bot {bot_id}: REST trading via MetaAPI ({_broker_for_route}) — no local MT5 needed")
+                                        _mode_label = 'Socket Bridge' if _acct_exec.mode == ExecutionMode.SOCKET else 'MetaAPI'
+                                        logger.info(f"🔌 Bot {bot_id}: {_mode_label} trading ({_broker_for_route}) — no local MT5 needed")
                                 except Exception as _re:
-                                    logger.warning(f"Bot {bot_id}: MetaAPI setup failed ({_re}), falling back to local MT5")
+                                    logger.warning(f"Bot {bot_id}: REST/Socket setup failed ({_re}), falling back to local MT5")
                         
                         if not use_rest_trading:
                                     # LOCAL MT5 TERMINAL PATH (original code)
@@ -17789,6 +17814,9 @@ def shutdown_backup():
         # Shutdown worker pool first
         if worker_pool_manager and worker_pool_manager.enabled:
             worker_pool_manager.shutdown()
+        # Stop socket bridges
+        if socket_bridge_manager and socket_bridge_manager.enabled:
+            socket_bridge_manager.shutdown()
         # Stop REST trading services
         if rest_price_feed:
             rest_price_feed.stop()
@@ -17857,6 +17885,18 @@ if __name__ == '__main__':
     else:
         logger.info("[OK] Worker pool disabled (WORKER_COUNT=0) - using single-process mode")
     
+    # ==================== START SOCKET BRIDGES ====================
+    if socket_bridge_manager and socket_bridge_manager._bridges:
+        logger.info(f"🔌 Connecting socket bridges ({len(socket_bridge_manager._bridges)} configured)...")
+        connected = socket_bridge_manager.connect_all()
+        logger.info(f"[OK] Socket bridges: {connected}/{len(socket_bridge_manager._bridges)} connected")
+        # Update trade router with newly connected bridges
+        if connected > 0 and trade_router:
+            trade_router.socket_bridge_manager = socket_bridge_manager
+            trade_router.socket_enabled = True
+    else:
+        logger.info("[OK] Socket bridges disabled (no SOCKET_BRIDGES configured)")
+    
     # ==================== START REST PRICE FEED ====================
     if rest_price_feed and (TWELVE_DATA_KEY or ALPHA_VANTAGE_KEY):
         logger.info("📡 Starting REST price feed (background refresh)...")
@@ -17866,7 +17906,8 @@ if __name__ == '__main__':
         logger.info("[OK] REST price feed available but no API keys configured — will use MT5 for prices")
     
     if trade_router:
-        logger.info(f"🔀 Trade router active: MetaAPI={'ON' if is_metaapi_enabled() else 'OFF'}, "
+        logger.info(f"🔀 Trade router active: Socket={'ON' if trade_router.socket_enabled else 'OFF'}, "
+                     f"MetaAPI={'ON' if is_metaapi_enabled() else 'OFF'}, "
                      f"REST prices={'ON' if rest_price_feed else 'OFF'}, "
                      f"Workers={'ON' if worker_pool_manager and worker_pool_manager.enabled else 'OFF'}")
     
