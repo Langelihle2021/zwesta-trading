@@ -2351,7 +2351,7 @@ class MT5Connection(BrokerConnection):
     
     def _connect_with_lock(self) -> bool:
         """Internal connection method - always called within mt5_connection_lock"""
-        global balance_cache, balance_cache_lock  # Declare globals at function start (required by Python)
+        global balance_cache, balance_cache_lock, mt5_current_account  # Declare globals at function start (required by Python)
         
         try:
             if not self.mt5:
@@ -2387,7 +2387,6 @@ class MT5Connection(BrokerConnection):
                     self.account_info = existing_info
                     # Track which account is active for multi-user awareness
                     with mt5_account_lock:
-                        global mt5_current_account
                         mt5_current_account = account
                     return True
             except Exception as e:
@@ -2478,7 +2477,6 @@ class MT5Connection(BrokerConnection):
                             logger.info(f"✅ Logged in to MT5 account {account} successfully")
                             # Track which account is active for multi-user awareness
                             with mt5_account_lock:
-                                global mt5_current_account
                                 mt5_current_account = int(account)
                             self.get_account_info()
                             
