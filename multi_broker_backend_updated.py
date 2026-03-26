@@ -36,6 +36,9 @@ import sys
 import atexit
 from system.backup_and_recovery import BackupManager, RecoveryManager
 from worker_manager import WorkerPoolManager
+from metaapi_client import MetaApiClient, MetaApiTradingBridge, get_metaapi_client, is_metaapi_enabled
+from rest_price_feed import RestPriceFeed, get_price_feed
+from trade_router import TradeRouter, init_trade_router, get_trade_router, ExecutionMode
 
 # Load environment variables from .env file
 try:
@@ -323,6 +326,13 @@ API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production
 WORKER_COUNT = max(0, int(os.getenv('WORKER_COUNT', '0')))  # 0 = single-process (legacy), 1+ = multi-process
 MAX_BOTS_PER_WORKER = max(1, int(os.getenv('MAX_BOTS_PER_WORKER', '35')))
 
+# ==================== REST TRADING CONFIG (Phase 2 Scaling) ====================
+METAAPI_TOKEN = os.getenv('METAAPI_TOKEN', '')  # MetaAPI cloud token for REST-based MT5 trading
+METAAPI_REGION = os.getenv('METAAPI_REGION', 'new-york')  # MetaAPI region
+TWELVE_DATA_KEY = os.getenv('TWELVE_DATA_KEY', '')  # Free price data API (800 calls/day)
+ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY', '')  # Free price data API (25 calls/day)
+PREFER_REST_TRADING = os.getenv('PREFER_REST_TRADING', 'true').lower() == 'true'  # Route Exness via REST when MetaAPI available
+
 # ==================== ENVIRONMENT MODE ====================
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'DEMO').upper()
 DEPLOYMENT_MODE = os.getenv('DEPLOYMENT_MODE', 'LOCAL').upper()  # LOCAL or VPS
@@ -330,10 +340,31 @@ print(f"\n{'='*70}")
 print(f"[ENVIRONMENT] Current Mode: {ENVIRONMENT}")
 print(f"[DEPLOYMENT] Mode: {DEPLOYMENT_MODE}")
 print(f"[WORKERS] Worker Count: {WORKER_COUNT} ({'multi-process' if WORKER_COUNT > 0 else 'single-process (legacy)'})")
+print(f"[REST TRADING] MetaAPI: {'ENABLED' if METAAPI_TOKEN else 'DISABLED (no token)'}")
+print(f"[REST TRADING] Prefer REST: {PREFER_REST_TRADING}")
+print(f"[PRICE FEED] Twelve Data: {'ENABLED' if TWELVE_DATA_KEY else 'DISABLED'} | Alpha Vantage: {'ENABLED' if ALPHA_VANTAGE_KEY else 'DISABLED'}")
 print(f"{'='*70}\n")
 
 # ==================== WORKER POOL MANAGER ====================
 worker_pool_manager = WorkerPoolManager(worker_count=WORKER_COUNT, max_bots_per_worker=MAX_BOTS_PER_WORKER)
+
+# ==================== REST TRADING INFRASTRUCTURE ====================
+# Initialize MetaAPI client (cloud-hosted MT5 REST trading)
+metaapi_client = MetaApiClient(token=METAAPI_TOKEN, region=METAAPI_REGION) if METAAPI_TOKEN else None
+
+# Initialize REST price feed (eliminates MT5 dependency for market data)
+rest_price_feed = RestPriceFeed(
+    twelve_data_key=TWELVE_DATA_KEY,
+    alpha_vantage_key=ALPHA_VANTAGE_KEY,
+)
+
+# Initialize trade router (hybrid execution: REST for Exness, MT5 for PXBT)
+trade_router = init_trade_router(
+    metaapi_client=metaapi_client,
+    price_feed=rest_price_feed,
+    worker_manager=worker_pool_manager if WORKER_COUNT > 0 else None,
+    broker_manager=None,  # Will be set after broker_manager is created
+)
 
 # MT5 Credentials - DEMO (default)
 # Exness MT5 Configuration Only (NO standalone MT5 fallback)
@@ -1010,6 +1041,85 @@ def get_worker_pool_status():
         'max_bots_per_worker': worker_pool_manager.max_bots_per_worker,
         'workers': workers,
     })
+
+
+# ==================== REST TRADING ADMIN ENDPOINTS ====================
+@app.route('/api/admin/rest-trading', methods=['GET'])
+def get_rest_trading_status():
+    """Get REST trading infrastructure status"""
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if api_key != API_KEY:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    router_status = trade_router.get_status() if trade_router else {}
+    metaapi_status = {
+        'enabled': bool(metaapi_client and metaapi_client.enabled),
+        'region': METAAPI_REGION,
+        'connected': metaapi_client.ping() if metaapi_client and metaapi_client.enabled else False,
+    }
+    price_feed_status = {
+        'running': rest_price_feed._running if rest_price_feed else False,
+        'twelve_data': bool(TWELVE_DATA_KEY),
+        'alpha_vantage': bool(ALPHA_VANTAGE_KEY),
+        'cached_prices': len(rest_price_feed._prices) if rest_price_feed else 0,
+        'active_symbols': len(rest_price_feed._active_symbols) if rest_price_feed else 0,
+    }
+
+    return jsonify({
+        'success': True,
+        'metaapi': metaapi_status,
+        'price_feed': price_feed_status,
+        'trade_router': router_status,
+        'scaling_info': {
+            'mode': 'REST + MT5 Hybrid' if metaapi_status['enabled'] else 'MT5 Only',
+            'estimated_capacity': '500-1000 users' if metaapi_status['enabled'] else '50-200 users',
+            'ram_savings': 'MetaAPI eliminates MT5 terminal processes (~200MB each saved)' if metaapi_status['enabled'] else 'N/A',
+        },
+    })
+
+
+@app.route('/api/admin/rest-trading/prices', methods=['GET'])
+def get_rest_prices():
+    """Get all cached REST prices"""
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if api_key != API_KEY:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    prices = rest_price_feed.get_all_prices() if rest_price_feed else {}
+    return jsonify({'success': True, 'prices': prices})
+
+
+@app.route('/api/admin/metaapi/provision', methods=['POST'])
+def provision_metaapi_account():
+    """Provision a new MetaAPI cloud account for REST trading"""
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if api_key != API_KEY:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    if not metaapi_client or not metaapi_client.enabled:
+        return jsonify({'success': False, 'error': 'MetaAPI not configured. Set METAAPI_TOKEN in .env'}), 400
+
+    data = request.json or {}
+    login = data.get('login')
+    password = data.get('password')
+    server = data.get('server')
+    broker = data.get('broker', 'Exness')
+
+    if not login or not password or not server:
+        return jsonify({'success': False, 'error': 'login, password, and server are required'}), 400
+
+    try:
+        account_id = metaapi_client.get_or_provision(
+            login=login, password=password, server=server, broker=broker)
+        ready = metaapi_client.wait_for_ready(account_id, timeout_seconds=60)
+        return jsonify({
+            'success': True,
+            'metaapi_account_id': account_id,
+            'ready': ready,
+            'message': f'Account provisioned and {"connected" if ready else "connecting"}',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ==================== CLEANUP ENDPOINT ====================
@@ -11041,6 +11151,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 mt5_conn = None
                 ig_conn = None
                 active_conn = None
+                use_rest_trading = False  # True when MetaAPI REST is used instead of local MT5
                 
                 if is_ig:
                     # IG Markets broker - use REST API via IGConnection
@@ -11069,128 +11180,153 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         time.sleep(trading_interval)
                         continue
                 elif is_mt5:
-                    # MT5 broker - connect via terminal SDK
+                    # MT5 broker - connect via terminal SDK or REST API (MetaAPI)
                     try:
-                        # Check connection cache first (OPTIMIZATION: avoid creating new connection every cycle)
-                        normalized_cache_broker = canonicalize_broker_name(bot_config.get('broker_type', 'MetaTrader 5'))
-                        cache_key = f"{user_id}|{normalized_cache_broker}|{bot_credentials.get('account', 'unknown')}"
-                        with broker_connection_cache_lock:
-                            if cache_key in broker_connection_cache:
-                                mt5_conn = broker_connection_cache[cache_key]
-                                logger.debug(f"♻️  Bot {bot_id}: Using cached MT5 connection (savings: 3-5s)")
+                        # ==================== REST TRADING FAST PATH ====================
+                        # MetaAPI cloud REST trades for supported brokers → saves ~300MB RAM per account
+                        if trade_router and not use_rest_trading:
+                            _broker_for_route = bot_config.get('broker_type', 'MT5')
+                            _account_for_route = bot_credentials.get('account', '')
+                            _exec_mode = trade_router.determine_mode(_broker_for_route, _account_for_route)
+                            if _exec_mode == ExecutionMode.METAAPI:
+                                try:
+                                    _acct_exec = trade_router.get_or_create_execution(
+                                        broker=_broker_for_route,
+                                        account_number=_account_for_route,
+                                        password=bot_credentials.get('password', ''),
+                                        server=bot_credentials.get('server', ''),
+                                        is_live=True,
+                                        user_id=user_id,
+                                    )
+                                    if _acct_exec.connection and _acct_exec.mode == ExecutionMode.METAAPI:
+                                        mt5_conn = _acct_exec.connection
+                                        active_conn = mt5_conn
+                                        use_rest_trading = True
+                                        logger.info(f"☁️  Bot {bot_id}: REST trading via MetaAPI ({_broker_for_route}) — no local MT5 needed")
+                                except Exception as _re:
+                                    logger.warning(f"Bot {bot_id}: MetaAPI setup failed ({_re}), falling back to local MT5")
+                        
+                        if not use_rest_trading:
+                                    # LOCAL MT5 TERMINAL PATH (original code)
+                                normalized_cache_broker = canonicalize_broker_name(bot_config.get('broker_type', 'MetaTrader 5'))
+                                cache_key = f"{user_id}|{normalized_cache_broker}|{bot_credentials.get('account', 'unknown')}"
+                                with broker_connection_cache_lock:
+                                    if cache_key in broker_connection_cache:
+                                        mt5_conn = broker_connection_cache[cache_key]
+                                        logger.debug(f"♻️  Bot {bot_id}: Using cached MT5 connection (savings: 3-5s)")
                                 
-                                # ✨ NEW: Health check for PXBT to detect session loss
-                                if normalized_cache_broker == 'PXBT':
-                                    if not is_pxbt_connection_healthy(mt5_conn):
-                                        logger.warning(f"⚠️  Bot {bot_id}: PXBT connection health check failed - attempting auto-reconnect")
-                                        if ensure_pxbt_connection_active(mt5_conn, bot_credentials):
-                                            logger.info(f"✅ Bot {bot_id}: PXBT reconnected successfully")
-                                        else:
-                                            logger.error(f"❌ Bot {bot_id}: PXBT auto-reconnect failed - will retry next cycle")
-                                            stagger_delay = random.uniform(1, 15)
-                                            actual_wait = trading_interval + stagger_delay
-                                            logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
-                                            time.sleep(actual_wait)
-                                            continue
-                            else:
-                                # Create new connection and cache it
-                                if bot_credentials:
-                                    # CRITICAL FIX: Use global MT5 singleton instead of creating new instances
-                                    # BEFORE: Each bot created MT5Connection → 14 terminal windows
-                                    # NOW: All bots reuse single global connection → 1 terminal window
-                                    mt5_conn = get_global_mt5()
-                                    if not mt5_conn:
-                                        logger.info(f"Bot {bot_id}: Creating global MT5 singleton connection...")
-                                        mt5_conn = MT5Connection(bot_credentials)
-                                        set_global_mt5(mt5_conn)
-                                        # ✨ NEW: Cache PXBT credentials for auto-reconnect
+                                        # ✨ NEW: Health check for PXBT to detect session loss
                                         if normalized_cache_broker == 'PXBT':
-                                            cache_pxbt_credentials(
-                                                bot_credentials.get('credential_id', 'unknown'),
-                                                bot_credentials.get('account', ''),
-                                                bot_credentials.get('password', ''),
-                                                bot_credentials.get('server', '')
-                                            )
+                                            if not is_pxbt_connection_healthy(mt5_conn):
+                                                logger.warning(f"⚠️  Bot {bot_id}: PXBT connection health check failed - attempting auto-reconnect")
+                                                if ensure_pxbt_connection_active(mt5_conn, bot_credentials):
+                                                    logger.info(f"✅ Bot {bot_id}: PXBT reconnected successfully")
+                                                else:
+                                                    logger.error(f"❌ Bot {bot_id}: PXBT auto-reconnect failed - will retry next cycle")
+                                                    stagger_delay = random.uniform(1, 15)
+                                                    actual_wait = trading_interval + stagger_delay
+                                                    logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                                    time.sleep(actual_wait)
+                                                    continue
                                     else:
-                                        logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
-                                else:
-                                    mt5_conn = get_global_mt5()
-                                    if not mt5_conn:
-                                        logger.info(f"Bot {bot_id}: Creating global MT5 singleton (no credentials)...")
-                                        mt5_conn = MT5Connection()
-                                        set_global_mt5(mt5_conn)
-                                    else:
-                                        logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
-                                broker_connection_cache[cache_key] = mt5_conn
-                                logger.debug(f"✨ Bot {bot_id}: MT5 connection cached")
+                                        # Create new connection and cache it
+                                        if bot_credentials:
+                                            # CRITICAL FIX: Use global MT5 singleton instead of creating new instances
+                                            # BEFORE: Each bot created MT5Connection → 14 terminal windows
+                                            # NOW: All bots reuse single global connection → 1 terminal window
+                                            mt5_conn = get_global_mt5()
+                                            if not mt5_conn:
+                                                logger.info(f"Bot {bot_id}: Creating global MT5 singleton connection...")
+                                                mt5_conn = MT5Connection(bot_credentials)
+                                                set_global_mt5(mt5_conn)
+                                                # ✨ NEW: Cache PXBT credentials for auto-reconnect
+                                                if normalized_cache_broker == 'PXBT':
+                                                    cache_pxbt_credentials(
+                                                        bot_credentials.get('credential_id', 'unknown'),
+                                                        bot_credentials.get('account', ''),
+                                                        bot_credentials.get('password', ''),
+                                                        bot_credentials.get('server', '')
+                                                    )
+                                            else:
+                                                logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
+                                        else:
+                                            mt5_conn = get_global_mt5()
+                                            if not mt5_conn:
+                                                logger.info(f"Bot {bot_id}: Creating global MT5 singleton (no credentials)...")
+                                                mt5_conn = MT5Connection()
+                                                set_global_mt5(mt5_conn)
+                                            else:
+                                                logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
+                                        broker_connection_cache[cache_key] = mt5_conn
+                                        logger.debug(f"✨ Bot {bot_id}: MT5 connection cached")
                         
-                        if not mt5_conn.connect():
-                            logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
-                            # STAGGER: Add random delay (1-15s) so bots don't all retry simultaneously
-                            stagger_delay = random.uniform(1, 15)
-                            actual_wait = trading_interval + stagger_delay
-                            logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
-                            time.sleep(actual_wait)
-                            continue
-                        
-                        # ==================== MULTI-USER ACCOUNT VERIFICATION ====================
-                        # Verify MT5 is logged into THIS bot's account before trading.
-                        # If another user's bot switched the account, we must re-login.
-                        # Uses fast mt5_current_account check first to avoid expensive MT5 IPC call.
-                        try:
-                            expected_account = int(bot_credentials.get('account', 0))
-                            needs_switch = False
-                            with mt5_account_lock:
-                                if mt5_current_account and expected_account and mt5_current_account != expected_account:
-                                    needs_switch = True
-                            
-                            if needs_switch:
-                                logger.warning(f"⚠️  Bot {bot_id}: MT5 on account {mt5_current_account} but bot needs {expected_account} - switching...")
-                                # Force re-login with this bot's credentials
-                                mt5_conn.connected = False
                                 if not mt5_conn.connect():
-                                    logger.error(f"Bot {bot_id}: Account switch to {expected_account} failed - will retry")
-                                    time.sleep(trading_interval)
+                                    logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
+                                    # STAGGER: Add random delay (1-15s) so bots don't all retry simultaneously
+                                    stagger_delay = random.uniform(1, 15)
+                                    actual_wait = trading_interval + stagger_delay
+                                    logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                    time.sleep(actual_wait)
                                     continue
-                                logger.info(f"✅ Bot {bot_id}: Switched MT5 to account {expected_account}")
-                            elif expected_account and not mt5_current_account:
-                                # First time — verify via MT5 IPC
-                                import MetaTrader5 as _mt5_check
-                                current_info = _mt5_check.account_info()
-                                if current_info and current_info.login != expected_account:
-                                    mt5_conn.connected = False
-                                    if not mt5_conn.connect():
-                                        logger.error(f"Bot {bot_id}: Initial account login to {expected_account} failed")
-                                        time.sleep(trading_interval)
+                        
+                                # ==================== MULTI-USER ACCOUNT VERIFICATION ====================
+                                # Verify MT5 is logged into THIS bot's account before trading.
+                                # If another user's bot switched the account, we must re-login.
+                                # Uses fast mt5_current_account check first to avoid expensive MT5 IPC call.
+                                try:
+                                    expected_account = int(bot_credentials.get('account', 0))
+                                    needs_switch = False
+                                    with mt5_account_lock:
+                                        if mt5_current_account and expected_account and mt5_current_account != expected_account:
+                                            needs_switch = True
+                            
+                                    if needs_switch:
+                                        logger.warning(f"⚠️  Bot {bot_id}: MT5 on account {mt5_current_account} but bot needs {expected_account} - switching...")
+                                        # Force re-login with this bot's credentials
+                                        mt5_conn.connected = False
+                                        if not mt5_conn.connect():
+                                            logger.error(f"Bot {bot_id}: Account switch to {expected_account} failed - will retry")
+                                            time.sleep(trading_interval)
+                                            continue
+                                        logger.info(f"✅ Bot {bot_id}: Switched MT5 to account {expected_account}")
+                                    elif expected_account and not mt5_current_account:
+                                        # First time — verify via MT5 IPC
+                                        import MetaTrader5 as _mt5_check
+                                        current_info = _mt5_check.account_info()
+                                        if current_info and current_info.login != expected_account:
+                                            mt5_conn.connected = False
+                                            if not mt5_conn.connect():
+                                                logger.error(f"Bot {bot_id}: Initial account login to {expected_account} failed")
+                                                time.sleep(trading_interval)
+                                                continue
+                                except Exception as acct_err:
+                                    logger.debug(f"Bot {bot_id}: Account verification check: {acct_err}")
+                                # ==================== END MULTI-USER VERIFICATION ====================
+                        
+                                if trade_cycle == 1:
+                                    logger.info(f"Bot {bot_id}: First trade cycle - waiting for MT5 readiness (up to {mt5_ready_timeout}s)...")
+                                    timeout_for_this_cycle = mt5_ready_timeout
+                                    # Log progress every 5 seconds to help diagnose hangs
+                                    start_wait = datetime.now()
+                                else:
+                                    timeout_for_this_cycle = 10  # Reduced from 15s
+                                    start_wait = None
+                        
+                                if not mt5_conn.wait_for_mt5_ready(timeout_seconds=timeout_for_this_cycle):
+                                    if trade_cycle == 1:
+                                        elapsed_wait = (datetime.now() - start_wait).total_seconds() if start_wait else timeout_for_this_cycle
+                                        logger.warning(f"Bot {bot_id}: First cycle MT5 readiness timeout after {elapsed_wait:.0f}s (max {timeout_for_this_cycle}s)")
+                                        logger.warning(f"  Will retry with extended wait... (another {timeout_for_this_cycle}s)")
+                                        time.sleep(10)
                                         continue
-                        except Exception as acct_err:
-                            logger.debug(f"Bot {bot_id}: Account verification check: {acct_err}")
-                        # ==================== END MULTI-USER VERIFICATION ====================
-                        
-                        if trade_cycle == 1:
-                            logger.info(f"Bot {bot_id}: First trade cycle - waiting for MT5 readiness (up to {mt5_ready_timeout}s)...")
-                            timeout_for_this_cycle = mt5_ready_timeout
-                            # Log progress every 5 seconds to help diagnose hangs
-                            start_wait = datetime.now()
-                        else:
-                            timeout_for_this_cycle = 10  # Reduced from 15s
-                            start_wait = None
-                        
-                        if not mt5_conn.wait_for_mt5_ready(timeout_seconds=timeout_for_this_cycle):
-                            if trade_cycle == 1:
-                                elapsed_wait = (datetime.now() - start_wait).total_seconds() if start_wait else timeout_for_this_cycle
-                                logger.warning(f"Bot {bot_id}: First cycle MT5 readiness timeout after {elapsed_wait:.0f}s (max {timeout_for_this_cycle}s)")
-                                logger.warning(f"  Will retry with extended wait... (another {timeout_for_this_cycle}s)")
-                                time.sleep(10)
-                                continue
-                            else:
-                                logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
-                                # STAGGER: Add random delay to prevent thundering herd
-                                stagger_delay = random.uniform(2, 12)
-                                actual_wait = trading_interval + stagger_delay
-                                logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
-                                time.sleep(actual_wait)
-                                continue
+                                    else:
+                                        logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
+                                        # STAGGER: Add random delay to prevent thundering herd
+                                        stagger_delay = random.uniform(2, 12)
+                                        actual_wait = trading_interval + stagger_delay
+                                        logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
+                                        time.sleep(actual_wait)
+                                        continue
                         active_conn = mt5_conn
                         
                     except Exception as e:
@@ -11387,25 +11523,49 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             sl_price = None
                             tp_price = None
                             try:
-                                _tick = mt5_conn.mt5.symbol_info_tick(symbol)
-                                _sym_info = mt5_conn.mt5.symbol_info(symbol)
-                                if _tick and _sym_info:
-                                    _point = _sym_info.point
-                                    _spread = _tick.ask - _tick.bid
-                                    _sl_pips = trade_params.get('stop_loss', 50)
-                                    _tp_pips = trade_params.get('take_profit', 100)
-                                    _sl_dist = _sl_pips * _point
-                                    _tp_dist = _tp_pips * _point
-                                    # Ensure SL is at least 3x spread, TP at least 5x spread
-                                    _sl_dist = max(_sl_dist, _spread * 3)
-                                    _tp_dist = max(_tp_dist, _spread * 5)
-                                    if order_type == 'BUY':
-                                        sl_price = round(_tick.ask - _sl_dist, _sym_info.digits)
-                                        tp_price = round(_tick.ask + _tp_dist, _sym_info.digits)
-                                    else:
-                                        sl_price = round(_tick.bid + _sl_dist, _sym_info.digits)
-                                        tp_price = round(_tick.bid - _tp_dist, _sym_info.digits)
-                                    logger.info(f"📐 Bot {bot_id}: SL={sl_price}, TP={tp_price} (spread={_spread:.2f}, sl_dist={_sl_dist:.2f}, tp_dist={_tp_dist:.2f})")
+                                if use_rest_trading:
+                                    # REST path: get price via MetaAPI bridge (no local mt5 module)
+                                    _price_data = mt5_conn.get_symbol_price(symbol)
+                                    if _price_data and _price_data.get('bid', 0) > 0:
+                                        _bid = _price_data['bid']
+                                        _ask = _price_data['ask']
+                                        _spread = _ask - _bid
+                                        from rest_price_feed import get_pip_size
+                                        _point = get_pip_size(symbol)
+                                        _sl_pips = trade_params.get('stop_loss', 50)
+                                        _tp_pips = trade_params.get('take_profit', 100)
+                                        _sl_dist = _sl_pips * _point
+                                        _tp_dist = _tp_pips * _point
+                                        _sl_dist = max(_sl_dist, _spread * 3)
+                                        _tp_dist = max(_tp_dist, _spread * 5)
+                                        _digits = 5 if _point < 0.01 else 2  # forex=5, gold/indices=2
+                                        if order_type == 'BUY':
+                                            sl_price = round(_ask - _sl_dist, _digits)
+                                            tp_price = round(_ask + _tp_dist, _digits)
+                                        else:
+                                            sl_price = round(_bid + _sl_dist, _digits)
+                                            tp_price = round(_bid - _tp_dist, _digits)
+                                        logger.info(f"📐 Bot {bot_id}: REST SL={sl_price}, TP={tp_price} (spread={_spread:.5f})")
+                                else:
+                                    _tick = mt5_conn.mt5.symbol_info_tick(symbol)
+                                    _sym_info = mt5_conn.mt5.symbol_info(symbol)
+                                    if _tick and _sym_info:
+                                        _point = _sym_info.point
+                                        _spread = _tick.ask - _tick.bid
+                                        _sl_pips = trade_params.get('stop_loss', 50)
+                                        _tp_pips = trade_params.get('take_profit', 100)
+                                        _sl_dist = _sl_pips * _point
+                                        _tp_dist = _tp_pips * _point
+                                        # Ensure SL is at least 3x spread, TP at least 5x spread
+                                        _sl_dist = max(_sl_dist, _spread * 3)
+                                        _tp_dist = max(_tp_dist, _spread * 5)
+                                        if order_type == 'BUY':
+                                            sl_price = round(_tick.ask - _sl_dist, _sym_info.digits)
+                                            tp_price = round(_tick.ask + _tp_dist, _sym_info.digits)
+                                        else:
+                                            sl_price = round(_tick.bid + _sl_dist, _sym_info.digits)
+                                            tp_price = round(_tick.bid - _tp_dist, _sym_info.digits)
+                                        logger.info(f"📐 Bot {bot_id}: SL={sl_price}, TP={tp_price} (spread={_spread:.2f}, sl_dist={_sl_dist:.2f}, tp_dist={_tp_dist:.2f})")
                             except Exception as e:
                                 logger.warning(f"Bot {bot_id}: Could not calculate SL/TP: {e}")
                             
@@ -17623,12 +17783,17 @@ else:
 
 
 def shutdown_backup():
-    """Create final backup and stop workers before shutdown"""
+    """Create final backup and stop workers/REST services before shutdown"""
     logger.info("🛑 Creating final backup on shutdown...")
     try:
         # Shutdown worker pool first
         if worker_pool_manager and worker_pool_manager.enabled:
             worker_pool_manager.shutdown()
+        # Stop REST trading services
+        if rest_price_feed:
+            rest_price_feed.stop()
+        if trade_router:
+            trade_router.shutdown()
         backup_manager.create_backup()
         backup_manager.stop_auto_backup()
         logger.info("✅ Final backup complete. System shutdown.")
@@ -17691,6 +17856,19 @@ if __name__ == '__main__':
         logger.info(f"[OK] Worker pool started ({WORKER_COUNT} workers, max {MAX_BOTS_PER_WORKER} bots/worker)")
     else:
         logger.info("[OK] Worker pool disabled (WORKER_COUNT=0) - using single-process mode")
+    
+    # ==================== START REST PRICE FEED ====================
+    if rest_price_feed and (TWELVE_DATA_KEY or ALPHA_VANTAGE_KEY):
+        logger.info("📡 Starting REST price feed (background refresh)...")
+        rest_price_feed.start()
+        logger.info(f"[OK] REST price feed started (sources: {'TwelveData' if TWELVE_DATA_KEY else ''} {'AlphaVantage' if ALPHA_VANTAGE_KEY else ''})")
+    elif rest_price_feed:
+        logger.info("[OK] REST price feed available but no API keys configured — will use MT5 for prices")
+    
+    if trade_router:
+        logger.info(f"🔀 Trade router active: MetaAPI={'ON' if is_metaapi_enabled() else 'OFF'}, "
+                     f"REST prices={'ON' if rest_price_feed else 'OFF'}, "
+                     f"Workers={'ON' if worker_pool_manager and worker_pool_manager.enabled else 'OFF'}")
     
     # Start live market data updater thread (fetches real prices from MT5)
     market_updater_thread = threading.Thread(target=live_market_data_updater, daemon=True)
