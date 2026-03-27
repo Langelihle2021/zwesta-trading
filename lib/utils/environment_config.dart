@@ -11,7 +11,7 @@ class EnvironmentConfig {
   // Change to https:// once cert.pem/key.pem are placed on the VPS
   static const String _devApiUrl = 'http://38.247.146.198:9000';
   static const String _stagingApiUrl = 'http://38.247.146.198:9000';
-  static const String _prodApiUrl = 'https://38.247.146.198:9000';
+  static const String _prodApiUrl = 'http://38.247.146.198:9000';
 
   static const String _devApiKey = 'your_generated_api_key_here_dev';
   static const String _stagingApiKey = 'your_generated_api_key_here_staging';
