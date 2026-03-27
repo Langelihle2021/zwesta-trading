@@ -13920,6 +13920,46 @@ def get_user_profile(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/user/settings', methods=['POST'])
+@require_session
+def update_user_settings():
+    """Update user settings (2FA, notifications, etc.)"""
+    try:
+        data = request.get_json()
+        user_id = request.user_id
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Ensure settings columns exist
+        for col in ['two_factor_enabled', 'notifications_enabled']:
+            try:
+                cursor.execute(f'ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT 0')
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
+        
+        updates = []
+        values = []
+        if 'two_factor_enabled' in data:
+            updates.append('two_factor_enabled = ?')
+            values.append(1 if data['two_factor_enabled'] else 0)
+        if 'notifications_enabled' in data:
+            updates.append('notifications_enabled = ?')
+            values.append(1 if data['notifications_enabled'] else 0)
+        
+        if updates:
+            values.append(user_id)
+            cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?", values)
+            conn.commit()
+        
+        conn.close()
+        return jsonify({'success': True, 'message': 'Settings updated'}), 200
+    except Exception as e:
+        logger.error(f"Error updating user settings: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/user/<user_id>/broker-credentials', methods=['POST'])
 @require_session
 def add_broker_credentials(user_id):

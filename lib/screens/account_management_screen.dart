@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
 import '../services/trading_service.dart';
 import '../utils/constants.dart';
+import '../utils/environment_config.dart';
 import '../widgets/custom_widgets.dart';
 import 'broker_integration_screen.dart';
 import 'commission_dashboard_screen.dart';
@@ -38,10 +41,81 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
     }
   late TabController _tabController;
 
+  // Settings state
+  bool _twoFactorEnabled = false;
+  bool _notificationsEnabled = true;
+  bool _darkModeEnabled = true;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _twoFactorEnabled = prefs.getBool('two_factor_enabled') ?? false;
+      _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+      _darkModeEnabled = prefs.getBool('dark_mode_enabled') ?? true;
+    });
+  }
+
+  Future<void> _toggleTwoFactor(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('two_factor_enabled', value);
+    setState(() => _twoFactorEnabled = value);
+    
+    // Call backend to enable/disable 2FA
+    try {
+      final sessionToken = prefs.getString('auth_token') ?? '';
+      final response = await http.post(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/user/settings'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+        body: jsonEncode({'two_factor_enabled': value}),
+      ).timeout(const Duration(seconds: 10));
+      
+      if (response.statusCode == 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(value ? '2FA enabled' : '2FA disabled'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    } catch (e) {
+      // Setting saved locally even if backend call fails
+      debugPrint('2FA backend update error: $e');
+    }
+  }
+
+  Future<void> _toggleNotifications(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notifications_enabled', value);
+    setState(() => _notificationsEnabled = value);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(value ? 'Notifications enabled' : 'Notifications disabled'),
+      backgroundColor: Colors.green,
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
+  Future<void> _toggleDarkMode(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('dark_mode_enabled', value);
+    setState(() => _darkModeEnabled = value);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(value ? 'Dark mode enabled' : 'Dark mode currently always active'),
+      backgroundColor: Colors.green,
+      duration: const Duration(seconds: 2),
+    ));
   }
 
   @override
@@ -588,9 +662,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             title: 'Two-Factor Authentication',
             subtitle: 'Secure your account',
             trailing: Switch(
-              value: false,
+              value: _twoFactorEnabled,
               activeColor: Colors.purple,
-              onChanged: (_) {},
+              onChanged: _toggleTwoFactor,
             ),
           ),
 
@@ -624,9 +698,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             title: 'Notifications',
             subtitle: 'Manage notification settings',
             trailing: Switch(
-              value: true,
+              value: _notificationsEnabled,
               activeColor: Colors.orange,
-              onChanged: (_) {},
+              onChanged: _toggleNotifications,
             ),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -634,8 +708,12 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             icon: Icons.dark_mode,
             color: Colors.indigo,
             title: 'Dark Mode',
-            subtitle: 'Always enabled',
-            trailing: const Icon(Icons.check_circle, color: Colors.indigo),
+            subtitle: _darkModeEnabled ? 'Enabled' : 'Disabled',
+            trailing: Switch(
+              value: _darkModeEnabled,
+              activeColor: Colors.indigo,
+              onChanged: _toggleDarkMode,
+            ),
           ),
 
           const SizedBox(height: AppSpacing.lg),
