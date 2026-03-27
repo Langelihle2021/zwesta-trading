@@ -6055,13 +6055,26 @@ def get_account_balances():
                 error_msg = str(e)
             
             # Build account entry
+            # Count active bots for this account
+            try:
+                bot_conn = get_db_connection()
+                bot_cursor = bot_conn.cursor()
+                bot_cursor.execute('''
+                    SELECT COUNT(*) as count FROM user_bots
+                    WHERE user_id = ? AND broker_account_id = ? AND status = 'active' AND enabled = 1
+                ''', (user_id, account_num))
+                active_bot_count = bot_cursor.fetchone()['count']
+                bot_conn.close()
+            except Exception:
+                active_bot_count = 0
+            
             account_entry = {
                 'credentialId': cred['credential_id'],
                 'broker': broker_name,
                 'accountNumber': account_num,
                 'mode': mode,
                 'is_live': is_live,  # Include is_live flag for frontend mode filtering
-                'active_bots': 0,  # TODO: Query active bots count from database
+                'active_bots': active_bot_count,
                 'last_update': datetime.now().isoformat() if account_info else cached_data.get(cred['credential_id'], {}).get('last_update'),
                 'error': error_msg,
             }
@@ -6149,6 +6162,221 @@ def get_account_balances():
     
     except Exception as e:
         logger.error(f"Error getting account balance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/accounts/<credential_id>/details', methods=['GET'])
+@require_session
+def get_account_details(credential_id):
+    """Get detailed financial information for a specific broker account.
+    
+    Returns:
+    - Account info (broker, account number, balance, equity)
+    - Trade history with profits/losses
+    - Withdrawal history
+    - Commission/fee summary
+    - Net profit calculation
+    """
+    try:
+        user_id = request.user_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verify credential belongs to this user
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, is_live, server,
+                   cached_balance, cached_equity, cached_margin_free, last_update
+            FROM broker_credentials
+            WHERE credential_id = ? AND user_id = ? AND is_active = 1
+        ''', (credential_id, user_id))
+        
+        cred = cursor.fetchone()
+        if not cred:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Account not found'}), 404
+        
+        cred = dict(cred)
+        broker_name = cred['broker_name']
+        account_number = cred['account_number']
+        
+        # Get live balance if Exness and connected
+        balance = float(cred.get('cached_balance') or 0)
+        equity = float(cred.get('cached_equity') or 0)
+        margin_free = float(cred.get('cached_margin_free') or 0)
+        
+        if broker_name == 'Exness':
+            try:
+                import MetaTrader5 as mt5
+                existing = mt5.account_info()
+                if existing and existing.login == int(account_number):
+                    balance = existing.balance
+                    equity = existing.equity
+                    margin_free = existing.margin_free
+            except Exception:
+                pass
+        
+        # Get all trades for bots linked to this account
+        cursor.execute('''
+            SELECT t.trade_id, t.bot_id, t.symbol, t.order_type, t.volume,
+                   t.price, t.profit, t.commission, t.swap, t.ticket,
+                   t.time_open, t.time_close, t.status, t.created_at,
+                   b.name as bot_name
+            FROM trades t
+            LEFT JOIN user_bots b ON t.bot_id = b.bot_id
+            WHERE t.user_id = ? AND (
+                b.broker_account_id = ? OR
+                t.bot_id IN (
+                    SELECT bc.bot_id FROM bot_credentials bc
+                    WHERE bc.credential_id = ?
+                )
+            )
+            ORDER BY t.created_at DESC
+            LIMIT 200
+        ''', (user_id, account_number, credential_id))
+        
+        trades = [dict(row) for row in cursor.fetchall()]
+        
+        # If no trades found via bot linkage, try broader match by user
+        if not trades:
+            cursor.execute('''
+                SELECT t.trade_id, t.bot_id, t.symbol, t.order_type, t.volume,
+                       t.price, t.profit, t.commission, t.swap, t.ticket,
+                       t.time_open, t.time_close, t.status, t.created_at,
+                       b.name as bot_name
+                FROM trades t
+                LEFT JOIN user_bots b ON t.bot_id = b.bot_id
+                WHERE t.user_id = ?
+                ORDER BY t.created_at DESC
+                LIMIT 200
+            ''', (user_id,))
+            trades = [dict(row) for row in cursor.fetchall()]
+        
+        # Calculate trade stats
+        total_profit = 0
+        total_loss = 0
+        total_commission = 0
+        total_swap = 0
+        open_trades = 0
+        closed_trades = 0
+        winning_trades = 0
+        losing_trades = 0
+        
+        for trade in trades:
+            profit = float(trade.get('profit') or 0)
+            commission = float(trade.get('commission') or 0)
+            swap = float(trade.get('swap') or 0)
+            status = trade.get('status', 'open')
+            
+            total_commission += commission
+            total_swap += swap
+            
+            if status == 'closed':
+                closed_trades += 1
+                if profit >= 0:
+                    total_profit += profit
+                    winning_trades += 1
+                else:
+                    total_loss += profit
+                    losing_trades += 1
+            else:
+                open_trades += 1
+                if profit >= 0:
+                    total_profit += profit
+                else:
+                    total_loss += profit
+        
+        # Get withdrawal history for this account
+        cursor.execute('''
+            SELECT withdrawal_id, withdrawal_type, source_type,
+                   profit_from_trades, commission_earned, total_amount,
+                   fee, net_amount, status, withdrawal_method,
+                   created_at, completed_at
+            FROM exness_withdrawals
+            WHERE user_id = ? AND broker_account_id = ?
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (user_id, account_number))
+        
+        withdrawals = [dict(row) for row in cursor.fetchall()]
+        total_withdrawn = sum(float(w.get('net_amount') or w.get('total_amount') or 0) for w in withdrawals if w.get('status') == 'completed')
+        
+        # Get commission ledger entries
+        cursor.execute('''
+            SELECT entry_id, type, amount, payout_status, payout_date,
+                   bot_id, trading_profit, created_at
+            FROM commission_ledger
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (user_id,))
+        
+        commissions = [dict(row) for row in cursor.fetchall()]
+        total_commission_earned = sum(float(c.get('amount') or 0) for c in commissions)
+        
+        # Get active bots count for this account
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM user_bots
+            WHERE user_id = ? AND broker_account_id = ? AND status = 'active' AND enabled = 1
+        ''', (user_id, account_number))
+        active_bots = cursor.fetchone()['count']
+        
+        # Get total bots count
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM user_bots
+            WHERE user_id = ? AND broker_account_id = ?
+        ''', (user_id, account_number))
+        total_bots = cursor.fetchone()['count']
+        
+        conn.close()
+        
+        # Calculate net profit
+        gross_profit = total_profit + total_loss  # total_loss is negative
+        net_profit = gross_profit + total_commission + total_swap  # commission and swap are usually negative
+        win_rate = (winning_trades / max(winning_trades + losing_trades, 1)) * 100
+        
+        return jsonify({
+            'success': True,
+            'account': {
+                'credentialId': credential_id,
+                'broker': broker_name,
+                'accountNumber': account_number,
+                'isLive': bool(cred['is_live']),
+                'server': cred.get('server'),
+                'balance': balance,
+                'equity': equity,
+                'marginFree': margin_free,
+                'activeBots': active_bots,
+                'totalBots': total_bots,
+            },
+            'tradeStats': {
+                'totalTrades': len(trades),
+                'openTrades': open_trades,
+                'closedTrades': closed_trades,
+                'winningTrades': winning_trades,
+                'losingTrades': losing_trades,
+                'winRate': round(win_rate, 1),
+                'totalProfit': round(total_profit, 2),
+                'totalLoss': round(total_loss, 2),
+                'grossProfit': round(gross_profit, 2),
+                'totalCommission': round(total_commission, 2),
+                'totalSwap': round(total_swap, 2),
+                'netProfit': round(net_profit, 2),
+            },
+            'recentTrades': trades[:20],
+            'withdrawals': {
+                'history': withdrawals[:10],
+                'totalWithdrawn': round(total_withdrawn, 2),
+                'count': len(withdrawals),
+            },
+            'commissions': {
+                'history': commissions[:10],
+                'totalEarned': round(total_commission_earned, 2),
+                'count': len(commissions),
+            },
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting account details: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

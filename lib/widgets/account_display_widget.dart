@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../utils/environment_config.dart';
+import '../screens/account_detail_screen.dart';
 
 class AccountDisplayWidget extends StatefulWidget {
   final String tradingMode; // 'DEMO' or 'LIVE'
@@ -228,163 +229,214 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
 
   Widget _buildAccountCard(Map<String, dynamic> account) {
     final broker = account['broker'] ?? 'Unknown';
-    final accountNum = account['account_number'] ?? 'N/A';
-    final balance = account['balance'] ?? 0.0;
-    final equity = account['equity'] ?? 0.0;
+    final accountNum = account['account_number'] ?? account['accountNumber'] ?? 'N/A';
+    final balance = (account['balance'] is num) ? account['balance'].toDouble() : 0.0;
+    final equity = (account['equity'] is num) ? account['equity'].toDouble() : 0.0;
+    final marginFree = (account['marginFree'] is num) ? account['marginFree'].toDouble() : 0.0;
     final activeBots = account['active_bots'] ?? 0;
-    final lastUpdate = account['last_update'];
+    final connected = account['connected'] ?? false;
+    final dataSource = account['dataSource'] ?? 'unknown';
+    final warning = account['warning'];
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AccountDetailScreen(account: account),
+          ),
+        );
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        color: const Color(0xFF1A1E33),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: connected
+                ? Colors.green.withOpacity(0.3)
+                : Colors.orange.withOpacity(0.2),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Broker header row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: connected ? Colors.green : Colors.orange,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            broker,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Account #$accountNum',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: widget.tradingMode == 'LIVE'
+                              ? Colors.red.withOpacity(0.15)
+                              : Colors.green.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          widget.tradingMode,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: widget.tradingMode == 'LIVE'
+                                ? Colors.red.shade300
+                                : Colors.green.shade300,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(Icons.chevron_right,
+                          color: Colors.white24, size: 20),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+
+              // Balance / Equity / Margin row
+              Row(
+                children: [
+                  _statBox('Balance', _formatAmount(balance), Colors.blue),
+                  const SizedBox(width: 8),
+                  _statBox('Equity', _formatAmount(equity), Colors.purple),
+                  const SizedBox(width: 8),
+                  _statBox('Free Margin', _formatAmount(marginFree), Colors.teal),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Bots + data source row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.smart_toy, size: 14, color: Colors.orange.shade300),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$activeBots active bot${activeBots == 1 ? '' : 's'}',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.orange.shade300),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      if (dataSource == 'live')
+                        Icon(Icons.wifi, size: 12, color: Colors.green.shade400)
+                      else if (dataSource == 'cache_fresh')
+                        Icon(Icons.cached, size: 12, color: Colors.blue.shade300)
+                      else
+                        Icon(Icons.wifi_off, size: 12, color: Colors.orange.shade300),
+                      const SizedBox(width: 4),
+                      Text(
+                        dataSource == 'live'
+                            ? 'Live data'
+                            : dataSource.toString().contains('cache')
+                                ? 'Cached'
+                                : 'Offline',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white30),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              if (warning != null) ...[
+                const SizedBox(height: 6),
+                Text(warning,
+                    style: TextStyle(fontSize: 10, color: Colors.orange.shade300)),
+              ],
+
+              // Tap hint
+              const SizedBox(height: 6),
+              Center(
+                child: Text(
+                  'Tap for detailed financials',
+                  style: TextStyle(fontSize: 10, color: Colors.white24),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statBox(String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Broker and account info
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      broker,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Account #$accountNum',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: widget.tradingMode == 'LIVE'
-                        ? Colors.red.shade100
-                        : Colors.green.shade100,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    widget.tradingMode,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: widget.tradingMode == 'LIVE'
-                          ? Colors.red.shade700
-                          : Colors.green.shade700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Balance and Equity
-            Grid(
-              children: [
-                GridItem(
-                  label: 'Balance',
-                  value: _formatAmount(balance),
-                  color: Colors.blue,
-                ),
-                GridItem(
-                  label: 'Equity',
-                  value: _formatAmount(equity),
-                  color: Colors.purple,
-                ),
-                GridItem(
-                  label: 'Active Bots',
-                  value: activeBots.toString(),
-                  color: Colors.orange,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Last update info
-            if (lastUpdate != null)
-              Text(
-                'Updated: $lastUpdate',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: color.withOpacity(0.7),
+                fontWeight: FontWeight.w600,
               ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),
     );
   }
-}
-
-class Grid extends StatelessWidget {
-  final List<GridItem> children;
-
-  const Grid({Key? key, required this.children}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: List.generate(
-        children.length,
-        (index) => Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(right: index < children.length - 1 ? 12 : 0),
-            child: _buildStatBox(children[index]),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatBox(GridItem item) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: item.color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: item.color.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            item.label,
-            style: TextStyle(
-              fontSize: 11,
-              color: item.color,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            item.value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: item.color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class GridItem {
-  final String label;
-  final String value;
-  final Color color;
-
-  GridItem({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
 }
