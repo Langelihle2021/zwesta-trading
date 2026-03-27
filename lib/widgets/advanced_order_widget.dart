@@ -406,7 +406,7 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        prefixIcon: const Icon(Icons.distance),
+                        prefixIcon: const Icon(Icons.straighten),
                       ),
                     ),
                   ],

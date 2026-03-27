@@ -23,6 +23,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
 try:
     from flask_sock import Sock
     WEBSOCKET_AVAILABLE = True
@@ -1235,6 +1236,7 @@ def init_database():
             user_id TEXT PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
+            password_hash TEXT,
             referrer_id TEXT,
             referral_code TEXT UNIQUE,
             created_at TEXT,
@@ -1242,6 +1244,13 @@ def init_database():
             FOREIGN KEY (referrer_id) REFERENCES users(user_id)
         )
     ''')
+    
+    # Add password_hash column if missing (migration for existing DBs)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN password_hash TEXT')
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     
     # Commission tracking table
     cursor.execute('''
@@ -13896,10 +13905,11 @@ def disable_auto_withdrawal(bot_id):
 
 @app.route('/api/user/login', methods=['POST'])
 def login_user():
-    """Login user by email - creates session"""
+    """Login user by email with password verification and optional 2FA"""
     try:
         data = request.get_json()
-        email = data.get('email')
+        email = data.get('email', '').lower().strip()
+        password = data.get('password', '')
         
         if not email:
             return jsonify({'success': False, 'error': 'Email required'}), 400
@@ -13908,7 +13918,7 @@ def login_user():
         cursor = conn.cursor()
         
         # Find user by email
-        cursor.execute('SELECT user_id, name, email, referral_code FROM users WHERE email = ?', (email,))
+        cursor.execute('SELECT user_id, name, email, referral_code, password_hash FROM users WHERE email = ?', (email,))
         user = cursor.fetchone()
         
         if not user:
@@ -13918,7 +13928,63 @@ def login_user():
         user_dict = dict(user)
         user_id = user_dict['user_id']
         
-        # Create session token
+        # Verify password if user has one set
+        stored_hash = user_dict.get('password_hash')
+        if stored_hash:
+            if not password or not check_password_hash(stored_hash, password):
+                conn.close()
+                return jsonify({'success': False, 'error': 'Invalid password'}), 401
+        
+        # Check if 2FA is enabled
+        two_fa_enabled = False
+        try:
+            cursor.execute('SELECT two_factor_enabled FROM users WHERE user_id = ?', (user_id,))
+            row = cursor.fetchone()
+            if row and row['two_factor_enabled']:
+                two_fa_enabled = True
+        except Exception:
+            pass  # Column may not exist yet
+        
+        if two_fa_enabled:
+            # Generate 6-digit OTP code
+            otp_code = ''.join(random.choices(string.digits, k=6))
+            expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+            
+            # Store OTP in a pending_2fa table
+            try:
+                cursor.execute('''CREATE TABLE IF NOT EXISTS pending_2fa (
+                    user_id TEXT PRIMARY KEY,
+                    otp_code TEXT NOT NULL,
+                    temp_token TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )''')
+            except Exception:
+                pass
+            
+            temp_token = hashlib.sha256(f"{user_id}{datetime.now().isoformat()}2fa".encode()).hexdigest()
+            
+            cursor.execute('DELETE FROM pending_2fa WHERE user_id = ?', (user_id,))
+            cursor.execute('''INSERT INTO pending_2fa (user_id, otp_code, temp_token, expires_at) 
+                              VALUES (?, ?, ?, ?)''', (user_id, otp_code, temp_token, expires_at))
+            conn.commit()
+            conn.close()
+            
+            # Send OTP via email (best-effort)
+            try:
+                _send_2fa_email(email, otp_code)
+            except Exception as e:
+                logger.warning(f"Could not send 2FA email to {email}: {e}")
+            
+            logger.info(f"2FA required for {email}, OTP generated")
+            
+            return jsonify({
+                'success': True,
+                'requires_2fa': True,
+                'temp_token': temp_token,
+                'message': '2FA code sent to your email'
+            }), 200
+        
+        # No 2FA — create full session
         session_id = str(uuid.uuid4())
         token = hashlib.sha256(f"{user_id}{datetime.now().isoformat()}".encode()).hexdigest()
         expires_at = (datetime.now() + timedelta(days=30)).isoformat()
@@ -13935,6 +14001,7 @@ def login_user():
         
         return jsonify({
             'success': True,
+            'requires_2fa': False,
             'user_id': user_id,
             'name': user_dict['name'],
             'email': user_dict['email'],
@@ -13945,6 +14012,153 @@ def login_user():
     
     except Exception as e:
         logger.error(f"Error in login_user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _send_2fa_email(to_email, otp_code):
+    """Send 2FA OTP code via email (best-effort)"""
+    smtp_server = os.environ.get('SMTP_SERVER', '')
+    smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+    smtp_user = os.environ.get('SMTP_USER', '')
+    smtp_pass = os.environ.get('SMTP_PASS', '')
+    
+    if not smtp_server or not smtp_user:
+        logger.info(f"SMTP not configured. 2FA code for {to_email}: {otp_code}")
+        return
+    
+    msg = MIMEMultipart()
+    msg['From'] = smtp_user
+    msg['To'] = to_email
+    msg['Subject'] = 'Zwesta Trading - Your Login Verification Code'
+    body = f'Your 2FA verification code is: {otp_code}\n\nThis code expires in 10 minutes.'
+    msg.attach(MIMEText(body, 'plain'))
+    
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+
+
+@app.route('/api/user/verify-2fa', methods=['POST'])
+def verify_2fa():
+    """Verify 2FA OTP code and create full session"""
+    try:
+        data = request.get_json()
+        temp_token = data.get('temp_token', '')
+        code = data.get('code', '')
+        
+        if not temp_token or not code:
+            return jsonify({'success': False, 'error': 'Temp token and code required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT user_id, otp_code, expires_at FROM pending_2fa WHERE temp_token = ?', (temp_token,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Invalid or expired 2FA session'}), 401
+        
+        row_dict = dict(row)
+        
+        # Check expiration
+        if datetime.fromisoformat(row_dict['expires_at']) < datetime.now():
+            cursor.execute('DELETE FROM pending_2fa WHERE temp_token = ?', (temp_token,))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': False, 'error': '2FA code expired'}), 401
+        
+        # Verify code
+        if row_dict['otp_code'] != code:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Invalid 2FA code'}), 401
+        
+        user_id = row_dict['user_id']
+        
+        # Clean up pending 2FA
+        cursor.execute('DELETE FROM pending_2fa WHERE temp_token = ?', (temp_token,))
+        
+        # Get user info
+        cursor.execute('SELECT name, email, referral_code FROM users WHERE user_id = ?', (user_id,))
+        user = cursor.fetchone()
+        user_dict = dict(user)
+        
+        # Create full session
+        session_id = str(uuid.uuid4())
+        token = hashlib.sha256(f"{user_id}{datetime.now().isoformat()}".encode()).hexdigest()
+        expires_at = (datetime.now() + timedelta(days=30)).isoformat()
+        
+        cursor.execute('''
+            INSERT INTO user_sessions (session_id, user_id, token, created_at, expires_at, is_active)
+            VALUES (?, ?, ?, ?, ?, 1)
+        ''', (session_id, user_id, token, datetime.now().isoformat(), expires_at))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"2FA verified for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'name': user_dict['name'],
+            'email': user_dict['email'],
+            'referral_code': user_dict['referral_code'],
+            'session_token': token,
+            'message': '2FA verification successful'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error in verify_2fa: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/resend-2fa', methods=['POST'])
+def resend_2fa():
+    """Resend 2FA OTP code"""
+    try:
+        data = request.get_json()
+        temp_token = data.get('temp_token', '')
+        
+        if not temp_token:
+            return jsonify({'success': False, 'error': 'Temp token required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT user_id FROM pending_2fa WHERE temp_token = ?', (temp_token,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Invalid 2FA session'}), 401
+        
+        user_id = row['user_id']
+        
+        # Generate new code
+        otp_code = ''.join(random.choices(string.digits, k=6))
+        expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+        
+        cursor.execute('UPDATE pending_2fa SET otp_code = ?, expires_at = ? WHERE temp_token = ?',
+                       (otp_code, expires_at, temp_token))
+        conn.commit()
+        
+        # Get user email
+        cursor.execute('SELECT email FROM users WHERE user_id = ?', (user_id,))
+        email_row = cursor.fetchone()
+        conn.close()
+        
+        if email_row:
+            try:
+                _send_2fa_email(email_row['email'], otp_code)
+            except Exception as e:
+                logger.warning(f"Could not resend 2FA email: {e}")
+        
+        return jsonify({'success': True, 'message': '2FA code resent'}), 200
+    
+    except Exception as e:
+        logger.error(f"Error in resend_2fa: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -14041,6 +14255,107 @@ def update_user_settings():
         return jsonify({'success': True, 'message': 'Settings updated'}), 200
     except Exception as e:
         logger.error(f"Error updating user settings: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/change-password', methods=['POST'])
+@require_session
+def change_password():
+    """Change user password (requires current password)"""
+    try:
+        data = request.get_json()
+        user_id = request.user_id
+        old_password = data.get('old_password', '')
+        new_password = data.get('new_password', '')
+        
+        if not new_password or len(new_password) < 6:
+            return jsonify({'success': False, 'error': 'New password must be at least 6 characters'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT password_hash FROM users WHERE user_id = ?', (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        stored_hash = user['password_hash']
+        
+        # If user has an existing password, verify old password
+        if stored_hash:
+            if not old_password or not check_password_hash(stored_hash, old_password):
+                conn.close()
+                return jsonify({'success': False, 'error': 'Current password is incorrect'}), 401
+        
+        # Set new password
+        new_hash = generate_password_hash(new_password)
+        cursor.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', (new_hash, user_id))
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Password changed for user {user_id}")
+        return jsonify({'success': True, 'message': 'Password changed successfully'}), 200
+    
+    except Exception as e:
+        logger.error(f"Error changing password: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/update-profile', methods=['PUT'])
+@require_session
+def update_user_profile():
+    """Update user profile (name, email)"""
+    try:
+        data = request.get_json()
+        user_id = request.user_id
+        
+        name = data.get('name', '').strip()
+        email = data.get('email', '').lower().strip()
+        
+        if not name and not email:
+            return jsonify({'success': False, 'error': 'Name or email required'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check email uniqueness if changing email
+        if email:
+            cursor.execute('SELECT user_id FROM users WHERE email = ? AND user_id != ?', (email, user_id))
+            if cursor.fetchone():
+                conn.close()
+                return jsonify({'success': False, 'error': 'Email already taken by another user'}), 409
+        
+        updates = []
+        values = []
+        if name:
+            updates.append('name = ?')
+            values.append(name)
+        if email:
+            updates.append('email = ?')
+            values.append(email)
+        
+        values.append(user_id)
+        cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?", values)
+        
+        # Fetch updated user
+        cursor.execute('SELECT user_id, name, email, referral_code FROM users WHERE user_id = ?', (user_id,))
+        updated = cursor.fetchone()
+        updated_dict = dict(updated)
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Profile updated for user {user_id}")
+        return jsonify({
+            'success': True,
+            'message': 'Profile updated successfully',
+            'user': updated_dict
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error updating profile: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -15250,10 +15565,17 @@ def register_user():
         data = request.get_json()
         email = data.get('email', '').lower().strip()
         name = data.get('name', '').strip()
+        password = data.get('password', '').strip()
         referrer_code = data.get('referrer_code', '').strip()
         
         if not email or not name:
             return jsonify({'success': False, 'error': 'Email and name required'}), 400
+        
+        if not password or len(password) < 6:
+            return jsonify({'success': False, 'error': 'Password must be at least 6 characters'}), 400
+        
+        # Hash the password
+        password_hash = generate_password_hash(password)
         
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -15276,9 +15598,9 @@ def register_user():
                 referrer_id = referrer[0]
         
         cursor.execute('''
-            INSERT INTO users (user_id, email, name, referrer_id, referral_code, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, email, name, referrer_id, referral_code, datetime.now().isoformat()))
+            INSERT INTO users (user_id, email, name, password_hash, referrer_id, referral_code, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, email, name, password_hash, referrer_id, referral_code, datetime.now().isoformat()))
         
         if referrer_id:
             referral_id = str(uuid.uuid4())
@@ -18152,13 +18474,38 @@ if __name__ == '__main__':
     logger.info("Auto-withdrawal monitoring thread started")
     
     try:
+        # SSL/TLS Configuration
+        ssl_context = None
+        ssl_cert = os.environ.get('SSL_CERT_PATH', '')
+        ssl_key = os.environ.get('SSL_KEY_PATH', '')
+        
+        if ssl_cert and ssl_key and os.path.isfile(ssl_cert) and os.path.isfile(ssl_key):
+            import ssl
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(ssl_cert, ssl_key)
+            logger.info(f"🔒 SSL enabled with cert: {ssl_cert}")
+        else:
+            # Try default self-signed cert location
+            default_cert = os.path.join(os.path.dirname(__file__), 'cert.pem')
+            default_key = os.path.join(os.path.dirname(__file__), 'key.pem')
+            if os.path.isfile(default_cert) and os.path.isfile(default_key):
+                import ssl
+                ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ssl_context.load_cert_chain(default_cert, default_key)
+                logger.info(f"🔒 SSL enabled with default certs: {default_cert}")
+            else:
+                logger.warning("⚠️ No SSL certificates found. Running HTTP (insecure). "
+                             "Set SSL_CERT_PATH and SSL_KEY_PATH env vars, or place cert.pem/key.pem next to this script.")
+        
         # Try ports in order: 9000, 5000, 3000
         ports = [9000, 5000, 3000]
         started = False
         for port in ports:
             try:
-                logger.info(f"Attempting to start on http://0.0.0.0:{port}")
-                app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+                protocol = "https" if ssl_context else "http"
+                logger.info(f"Attempting to start on {protocol}://0.0.0.0:{port}")
+                app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True,
+                        ssl_context=ssl_context)
                 started = True
                 break
             except OSError as e:

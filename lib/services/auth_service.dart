@@ -65,9 +65,14 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Pending 2FA temp token (set during login when 2FA required)
+  String? _pending2faToken;
+  String? get pending2faToken => _pending2faToken;
+
   Future<bool> login(String username, String password) async {
     _isLoading = true;
     _errorMessage = null;
+    _pending2faToken = null;
     notifyListeners();
 
     try {
@@ -85,6 +90,14 @@ class AuthService extends ChangeNotifier {
         final data = jsonDecode(response.body);
         
         if (data['success'] == true) {
+          // Check if 2FA is required
+          if (data['requires_2fa'] == true) {
+            _pending2faToken = data['temp_token'];
+            _isLoading = false;
+            notifyListeners();
+            return true; // Caller checks pending2faToken to know 2FA is needed
+          }
+
           _token = data['session_token'];
           _currentUser = User(
             id: data['user_id'] ?? '0',
@@ -118,7 +131,7 @@ class AuthService extends ChangeNotifier {
   }
 
   // 2FA/MFA verification
-  Future<bool> verifyMfaCode(String? sessionToken, String code) async {
+  Future<bool> verifyMfaCode(String? tempToken, String code) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -127,9 +140,8 @@ class AuthService extends ChangeNotifier {
         Uri.parse('${EnvironmentConfig.apiUrl}/api/user/verify-2fa'),
         headers: {
           'Content-Type': 'application/json',
-          if (sessionToken != null) 'X-Session-Token': sessionToken,
         },
-        body: jsonEncode({'code': code}),
+        body: jsonEncode({'temp_token': tempToken, 'code': code}),
       ).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -164,14 +176,14 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<void> resendMfaCode(String? sessionToken) async {
+  Future<void> resendMfaCode(String? tempToken) async {
     try {
       await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/user/resend-2fa'),
         headers: {
           'Content-Type': 'application/json',
-          if (sessionToken != null) 'X-Session-Token': sessionToken,
         },
+        body: jsonEncode({'temp_token': tempToken}),
       ).timeout(const Duration(seconds: 10));
     } catch (_) {}
   }
@@ -262,25 +274,39 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      if (_currentUser == null) throw Exception('User not logged in');
+      if (_currentUser == null || _token == null) throw Exception('User not logged in');
 
-      await Future.delayed(const Duration(seconds: 1));
+      final response = await http.put(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/user/update-profile'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': _token!,
+        },
+        body: jsonEncode({
+          'name': '$firstName $lastName',
+          'email': email,
+        }),
+      ).timeout(const Duration(seconds: 10));
 
-      _currentUser = User(
-        id: _currentUser!.id,
-        username: _currentUser!.username,
-        email: email,
-        firstName: firstName,
-        lastName: lastName,
-        profileImage: _currentUser!.profileImage,
-        accountType: _currentUser!.accountType,
-      );
+      final data = jsonDecode(response.body);
 
-      await _prefs.setString('current_user', jsonEncode(_currentUser!.toJson()));
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
+      if (response.statusCode == 200 && data['success'] == true) {
+        _currentUser = User(
+          id: _currentUser!.id,
+          username: _currentUser!.username,
+          email: email,
+          firstName: firstName,
+          lastName: lastName,
+          profileImage: _currentUser!.profileImage,
+          accountType: _currentUser!.accountType,
+        );
+        await _prefs.setString('current_user', jsonEncode(_currentUser!.toJson()));
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        throw Exception(data['error'] ?? 'Profile update failed');
+      }
     } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;
@@ -296,15 +322,35 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     try {
+      if (_token == null) throw Exception('User not logged in');
       if (oldPassword.isEmpty || newPassword.isEmpty) {
         throw Exception('Both passwords are required');
       }
+      if (newPassword.length < 6) {
+        throw Exception('New password must be at least 6 characters');
+      }
 
-      await Future.delayed(const Duration(seconds: 2));
+      final response = await http.post(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/user/change-password'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': _token!,
+        },
+        body: jsonEncode({
+          'old_password': oldPassword,
+          'new_password': newPassword,
+        }),
+      ).timeout(const Duration(seconds: 10));
 
-      _isLoading = false;
-      notifyListeners();
-      return true;
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        throw Exception(data['error'] ?? 'Password change failed');
+      }
     } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;

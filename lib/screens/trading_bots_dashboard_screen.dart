@@ -3,7 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
 
 class TradingBotsDashboardScreen extends StatefulWidget {
@@ -30,9 +31,11 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     setState(() { _loading = true; _error = null; });
     
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
       final response = await http.get(
-        Uri.parse('${ApiService.baseUrl}/dashboard/bots-summary'),
-        headers: {'Authorization': 'Bearer ${ApiService.token}'},
+        Uri.parse('${EnvironmentConfig.apiUrl}/dashboard/bots-summary'),
+        headers: {'Authorization': 'Bearer $token'},
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -187,8 +190,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
             Expanded(
               child: _buildStatsCard(
                 'Active Trades',
-                '${_botsSummary.fold<int>(0, (sum, bot) => sum + (bot['trades'] ?? 0))}',
-                Icons.showcase,
+                '${_botsSummary.fold<int>(0, (int sum, bot) => sum + ((bot['trades'] ?? 0) as int))}',
+                Icons.swap_horiz,
                 Colors.orangeAccent,
               ),
             ),

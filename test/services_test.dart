@@ -10,8 +10,7 @@ void main() {
     setUp(() async {
       // Setup shared preferences for testing
       SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
-      authService = AuthService(prefs);
+      authService = AuthService();
     });
 
     test('Initial state should be unauthenticated', () {

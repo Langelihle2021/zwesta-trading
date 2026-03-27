@@ -31,7 +31,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
       appBar: AppBar(
         title: const Text('Trading Statements'),
         elevation: 0,
-        backgroundColor: AppColors.primary,
+        backgroundColor: AppColors.primaryColor,
       ),
       body: Consumer2<TradingService, StatementService>(
         builder: (context, tradingService, statementService, _) {
@@ -191,7 +191,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Generate New Statement'),
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
+          backgroundColor: AppColors.primaryColor,
           padding: const EdgeInsets.symmetric(vertical: 14),
         ),
       ),

@@ -123,53 +123,7 @@ class BrokerRegistryService extends ChangeNotifier {
   }
 
   /// Fetch broker list from backend (dynamic configuration)
-        try {
-          final context = navigatorKey.currentContext;
-          if (context != null) {
-            final fallback = context.read<FallbackStatusProvider>();
-            fallback.setFallback(reason: 'Broker list loaded from default (offline) data.');
-          }
-        } catch (_) {}
-        _brokers = [
-          BrokerConfig(
-            id: 'xm',
-            name: 'XM',
-            displayName: 'XM Global',
-            logo: '🏦',
-            accountTypes: ['DEMO', 'LIVE'],
-            isActive: true,
-            description: 'Global regulated forex and commodities broker',
-          ),
-          BrokerConfig(
-            id: 'pepperstone',
-            name: 'Pepperstone',
-            displayName: 'Pepperstone Global',
-            logo: '🐘',
-            accountTypes: ['DEMO', 'LIVE'],
-            isActive: true,
-            description: 'Low-cost forex and CFD trading',
-          ),
-          BrokerConfig(
-            id: 'fxopen',
-            name: 'FxOpen',
-            displayName: 'FxOpen',
-            logo: '📊',
-            accountTypes: ['DEMO', 'LIVE'],
-            isActive: true,
-            description: 'Forex, metals, and energies broker',
-          ),
-          BrokerConfig(
-            id: 'exness',
-            name: 'Exness',
-            displayName: 'Exness',
-            logo: '⚡',
-            accountTypes: ['DEMO', 'LIVE'],
-            isActive: true,
-            description: 'High leverage forex trading',
-          ),
-          // ... more default brokers ...
-        ];
-      }
+  Future<void> fetchBrokersFromBackend() async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();

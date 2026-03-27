@@ -277,9 +277,11 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
                         decoration: BoxDecoration(
                           color: Colors.grey[800],
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.left(
-                            color: isWin ? AppColors.successColor : AppColors.dangerColor,
-                            width: 3,
+                          border: Border(
+                            left: BorderSide(
+                              color: isWin ? AppColors.successColor : AppColors.dangerColor,
+                              width: 3,
+                            ),
                           ),
                         ),
                         child: Row(

@@ -24,7 +24,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   Future<void> _fetchLogs() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final logs = await ActivityLogService.fetchLogs();
+      final logs = await ActivityLogService.fetchLogs(context);
       setState(() { _logs = logs; });
     } catch (e) {
       setState(() { _error = 'Failed to load logs.'; });

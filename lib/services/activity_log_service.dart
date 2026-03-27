@@ -41,10 +41,6 @@ class ActivityLogService {
         // fallback to cache
         final cached = prefs.getString(_cacheKey);
         if (cached != null) {
-          try {
-            final fallback = context.read<FallbackStatusProvider>();
-            fallback.setFallback(reason: 'Activity log is loaded from cache.');
-          } catch (_) {}
           final logs = (jsonDecode(cached) as List).map((e) => ActivityLogEntry.fromJson(e)).toList();
           return logs;
         }
@@ -55,10 +51,6 @@ class ActivityLogService {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString(_cacheKey);
       if (cached != null) {
-        try {
-          final fallback = context.read<FallbackStatusProvider>();
-          fallback.setFallback(reason: 'Activity log is loaded from cache.');
-        } catch (_) {}
         final logs = (jsonDecode(cached) as List).map((e) => ActivityLogEntry.fromJson(e)).toList();
         return logs;
       }

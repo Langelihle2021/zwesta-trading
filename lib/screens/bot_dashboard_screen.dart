@@ -822,7 +822,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: () async {
-                        final botService = BotService();
+                        final botService = context.read<BotService>();
                         final result = isEnabled
                           ? await botService.stopBotTrading(botId)
                           : await botService.startBotTrading(botId);

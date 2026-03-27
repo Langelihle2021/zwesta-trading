@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/environment_config.dart';
 
 class WithdrawalService {
-  static const String _baseUrl = '${EnvironmentConfig.apiUrl}';
+  static String get _baseUrl => EnvironmentConfig.apiUrl;
 
   /// Get user's wallet balance
   static Future<Map<String, dynamic>> getWalletBalance(String userId) async {

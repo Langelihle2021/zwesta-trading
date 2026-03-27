@@ -625,9 +625,14 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       if (success && mounted) {
         // Check if 2FA is required
-        if (_showMfaPrompt) {
-          setState(() => _showMfaPrompt = true);
+        if (authService.pending2faToken != null) {
+          setState(() {
+            _pendingSessionToken = authService.pending2faToken;
+            _showMfaPrompt = true;
+          });
         }
+        // If no 2FA, auth service already set the token — 
+        // the Consumer/listener navigates automatically
       }
     } else {
       final success = await authService.register(

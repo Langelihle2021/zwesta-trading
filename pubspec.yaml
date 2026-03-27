@@ -51,6 +51,9 @@ dependencies:
   
   # Google Fonts
   google_fonts: ^6.0.0
+
+  # WebSocket
+  web_socket_channel: ^3.0.0
   
   # Notifications
   flutter_local_notifications: ^17.0.0
