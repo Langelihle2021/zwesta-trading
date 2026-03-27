@@ -516,6 +516,9 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final avgTrade = double.tryParse(bot['avgProfitPerTrade']?.toString() ?? '0') ?? 0;
     final maxDrawdown = double.tryParse(bot['maxDrawdown']?.toString() ?? '0') ?? 0;
     final todaysProfit = double.tryParse(bot['dailyProfit']?.toString() ?? '0') ?? 0;
+    final accountBalance = double.tryParse(bot['accountBalance']?.toString() ?? '0') ?? 0;
+    final accountEquity = double.tryParse(bot['accountEquity']?.toString() ?? '0') ?? 0;
+    final openPositions = (bot['openPositions'] as List?) ?? [];
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
     final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
@@ -678,6 +681,121 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               _botStat('Max Drawdown', _formatAmount(currencyProvider, maxDrawdown, decimals: 0), const Color(0xFFFF8A80)),
             ],
           ),
+          // Account Balance & Equity
+          if (accountBalance > 0) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00E5FF).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.2)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF), size: 16),
+                      const SizedBox(width: 8),
+                      Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                    ],
+                  ),
+                  Text(
+                    _formatAmount(currencyProvider, accountBalance),
+                    style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontWeight: FontWeight.w700, fontSize: 14),
+                  ),
+                  if (accountEquity > 0 && accountEquity != accountBalance) ...[
+                    Text(' | ', style: GoogleFonts.poppins(color: Colors.white24, fontSize: 12)),
+                    Text('Equity ', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                    Text(
+                      _formatAmount(currencyProvider, accountEquity),
+                      style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          // Open Positions
+          if (openPositions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.candlestick_chart, color: Color(0xFFFFA726), size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'Open Positions (${openPositions.length})',
+                  style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ...openPositions.take(5).map((pos) {
+              final posSymbol = pos['symbol']?.toString() ?? '';
+              final posType = pos['type']?.toString() ?? '';
+              final posVolume = double.tryParse(pos['volume']?.toString() ?? '0') ?? 0;
+              final posEntry = double.tryParse(pos['entryPrice']?.toString() ?? '0') ?? 0;
+              final isBuy = posType.toUpperCase().contains('BUY');
+              return Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.06)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isBuy ? Icons.arrow_upward : Icons.arrow_downward,
+                      color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      posSymbol,
+                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: (isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        isBuy ? 'BUY' : 'SELL',
+                        style: GoogleFonts.poppins(
+                          color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${posVolume.toStringAsFixed(2)} lots',
+                      style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '@ ${posEntry.toStringAsFixed(posEntry > 100 ? 2 : 5)}',
+                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            if (openPositions.length > 5)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '+${openPositions.length - 5} more positions',
+                  style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
+                ),
+              ),
+          ],
           const SizedBox(height: 14),
           Row(
             children: [

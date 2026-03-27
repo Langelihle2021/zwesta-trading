@@ -11940,6 +11940,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         account_info = active_conn.get_account_info()
                         if account_info:
                             bot_config['accountBalance'] = account_info.get('balance', account_info.get('equity', 0))
+                            bot_config['accountEquity'] = account_info.get('equity', account_info.get('balance', 0))
                 except Exception as e:
                     logger.warning(f"Bot {bot_id}: Could not update account balance: {e}")
 
@@ -12772,6 +12773,9 @@ def bot_status():
                 'profitField': round(total_profit, 2),
                 'tradeHistory': trade_history,  # Include full trade history for analytics
                 'dailyProfits': daily_profits,  # Include daily profits map for charts
+                'openPositions': list(bot.get('open_positions', {}).values()),  # Currently open positions
+                'accountBalance': round(bot.get('accountBalance', 0), 2),  # Latest known balance
+                'accountEquity': round(bot.get('accountEquity', 0), 2),  # Latest known equity
             }
             bots_list.append(enhanced_bot)
         

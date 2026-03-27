@@ -10,6 +10,7 @@ class AuthService extends ChangeNotifier {
     // Clear error message and notify listeners
     void clearError() {
       _errorMessage = null;
+      _successMessage = null;
       notifyListeners();
     }
   late SharedPreferences _prefs;
@@ -18,6 +19,7 @@ class AuthService extends ChangeNotifier {
   String? _token;
   bool _isLoading = false;
   String? _errorMessage;
+  String? _successMessage;
   bool _isInitialized = false;
 
   AuthService() {
@@ -43,6 +45,7 @@ class AuthService extends ChangeNotifier {
   String? get token => _token;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  String? get successMessage => _successMessage;
   bool get isAuthenticated => _token != null && _currentUser != null;
 
   void _loadFromStorage() {
@@ -196,10 +199,10 @@ class AuthService extends ChangeNotifier {
         }),
       ).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
         
-        _token = 'session_token_${DateTime.now().millisecondsSinceEpoch}';
+        _token = data['session_token'] ?? 'session_token_${DateTime.now().millisecondsSinceEpoch}';
         _currentUser = User(
           id: data['user_id'] ?? '${DateTime.now().millisecondsSinceEpoch}',
           username: username,
@@ -216,7 +219,8 @@ class AuthService extends ChangeNotifier {
         await _prefs.setString('current_user', jsonEncode(_currentUser!.toJson()));
 
         _isLoading = false;
-        _errorMessage = 'Registration successful! Your referral code: $referralCode';
+        _errorMessage = null;
+        _successMessage = 'Registration successful! Your referral code: $referralCode';
         notifyListeners();
         return true;
       } else {

@@ -225,6 +225,14 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                 status: botStatus,
                 dailyProfit: dailyProfit,
               ),
+              const SizedBox(height: 16),
+
+              // Account Balance Card
+              _buildBalanceCard(),
+              const SizedBox(height: 16),
+
+              // Open Positions Section
+              _buildOpenPositionsSection(),
               const SizedBox(height: 24),
 
               // Key Metrics Grid
@@ -1610,6 +1618,172 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ),
         );
       }).toList(),
+    );
+  }
+
+  Widget _buildBalanceCard() {
+    final balance = (_botData['accountBalance'] ?? 0).toDouble();
+    final equity = (_botData['accountEquity'] ?? 0).toDouble();
+
+    if (balance <= 0 && equity <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.blue.withOpacity(0.15), Colors.cyan.withOpacity(0.08)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.cyan.withOpacity(0.1),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance_wallet, color: Colors.cyan, size: 22),
+              const SizedBox(width: 10),
+              const Text(
+                'Account',
+                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Column(
+                children: [
+                  const Text('Balance', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  Text(
+                    '\$${balance.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.cyan, fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              Container(width: 1, height: 40, color: Colors.white12),
+              Column(
+                children: [
+                  const Text('Equity', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  Text(
+                    '\$${equity.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOpenPositionsSection() {
+    final openPositions = (_botData['openPositions'] as List?) ?? [];
+
+    if (openPositions.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.grey[900],
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: const [
+            Icon(Icons.candlestick_chart, color: Colors.white38, size: 18),
+            SizedBox(width: 10),
+            Text('No open positions', style: TextStyle(color: Colors.white54, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.candlestick_chart, color: Color(0xFFFFA726), size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'Open Positions (${openPositions.length})',
+              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...openPositions.map((pos) {
+          final symbol = pos['symbol']?.toString() ?? '';
+          final type = pos['type']?.toString() ?? '';
+          final volume = (pos['volume'] ?? 0).toDouble();
+          final entryPrice = (pos['entryPrice'] ?? 0).toDouble();
+          final entryTime = pos['entryTime']?.toString() ?? '';
+          final isBuy = type.toUpperCase().contains('BUY');
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              border: Border.all(
+                color: (isBuy ? Colors.green : Colors.red).withOpacity(0.3),
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: (isBuy ? Colors.green : Colors.red).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    isBuy ? Icons.arrow_upward : Icons.arrow_downward,
+                    color: isBuy ? Colors.green : Colors.red,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        symbol,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${isBuy ? "BUY" : "SELL"} • ${volume.toStringAsFixed(2)} lots • @ ${entryPrice.toStringAsFixed(entryPrice > 100 ? 2 : 5)}',
+                        style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                if (entryTime.isNotEmpty)
+                  Text(
+                    entryTime.length > 16 ? entryTime.substring(11, 16) : entryTime,
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+              ],
+            ),
+          );
+        }),
+      ],
     );
   }
 }

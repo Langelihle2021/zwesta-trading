@@ -157,6 +157,42 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   const SizedBox(height: 36),
 
+                  // Success Message Display
+                  Consumer<AuthService>(
+                    builder: (context, authService, _) {
+                      if (authService.successMessage != null && authService.successMessage!.isNotEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.green.withOpacity(0.5)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    authService.successMessage!,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () => authService.clearError(),
+                                  child: const Icon(Icons.close, color: Colors.white70, size: 18),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
+
                   // Error Message Display
                   Consumer<AuthService>(
                     builder: (context, authService, _) {
