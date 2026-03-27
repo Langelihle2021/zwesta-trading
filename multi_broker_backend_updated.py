@@ -110,23 +110,10 @@ _failed_auth_lock = threading.Lock()
 _FAILED_AUTH_COOLDOWN = 300  # 5 minutes before retrying a failed account
 logger.info("✅ Failed auth cooldown initialized - prevents repeated bad credential retries")
 
-# EMERGENCY FIX: Load demo balances directly into cache
-# Hardcode the demo balances to ensure they're always available
-try:
-    with balance_cache_lock:
-        # Load Exness demo account with placeholder balance (will be updated on first MT5 connect)
-        balance_cache['Exness:298997455'] = {
-            'balance': 190000.00,
-            'equity': 190000.00,
-            'marginFree': 190000.00,
-            'timestamp': time.time()
-        }
-        # NOTE: Account 295619855 removed - dead account with auth failure
-        logger.info(f"✅ EMERGENCY: Loaded startup balance cache")
-        logger.info(f"   Cache keys: {list(balance_cache.keys())}")
-        logger.info(f"   Exness:298997455 → ${balance_cache['Exness:298997455']['balance']:,.2f}")
-except Exception as e:
-    logger.error(f"❌ Failed to load emergency demo balances: {e}")
+# NOTE: Removed hardcoded emergency demo balances — each account's real balance
+# is populated into balance_cache by the bot trading loop when it connects to MT5.
+# This ensures live and demo accounts always show their own real balances.
+logger.info("✅ Balance cache clean — real balances populated by trading loops")
 
 # ==================== GLOBAL MT5 SINGLETON CONNECTION ====================
 # CRITICAL FIX: Reuse single MT5 instance across ALL bots
@@ -2384,12 +2371,13 @@ class MT5Connection(BrokerConnection):
             account = self.credentials.get('account') or broker_cfg.get('account')
             password = self.credentials.get('password') or broker_cfg.get('password')
             server = self.credentials.get('server') or broker_cfg.get('server')
+            is_live = self.credentials.get('is_live', False)
             
-            # Broker-specific server normalization for MT5 providers
+            # Broker-specific server normalization — use per-credential is_live, NOT global ENVIRONMENT
             if broker_name == 'Exness':
-                server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
+                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
             elif broker_name in ['XM', 'XM Global'] and (not server or 'xm' not in str(server).lower()):
-                server = 'XMGlobal-Real' if ENVIRONMENT == 'LIVE' else 'XMGlobal-MT5Demo'
+                server = 'XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'
             elif broker_name == 'PXBT':
                 server = 'PXBTTrading-1'
             
@@ -5920,70 +5908,13 @@ def get_account_balances():
             
             try:
                 if broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
-                    # CRITICAL FIX: Balance checks must NEVER call mt5.initialize()
-                    # The MT5 terminal singleton is Exness - only Exness accounts can read from it.
-                    # XM/XM Global/PXBT use DIFFERENT MT5 terminals, so they must use cache only.
-                    # PXBT added here because its MT5 init causes IPC conflicts that hold the
-                    # global MT5 lock for 60+ seconds, blocking all trading bots.
-                    try:
-                        import MetaTrader5 as mt5
-                        account_int = int(account_num) if account_num else 0
-                        
-                        # Step 1: Skip accounts in auth failure cooldown immediately
-                        skip_account = False
-                        with _failed_auth_lock:
-                            if account_int in _failed_auth_accounts:
-                                fail_info = _failed_auth_accounts[account_int]
-                                elapsed = time.time() - fail_info['timestamp']
-                                if elapsed < _FAILED_AUTH_COOLDOWN:
-                                    logger.info(f"⏭️ Balance: Skipping {broker_name} account {account_int} - auth cooldown ({elapsed:.0f}s / {_FAILED_AUTH_COOLDOWN}s)")
-                                    error_msg = "Account auth failed - using cached balance"
-                                    skip_account = True
-                                else:
-                                    del _failed_auth_accounts[account_int]
-                        
-                        if not skip_account:
-                            # Step 2: Only Exness accounts can read from the MT5 session
-                            # (the MT5 terminal is Exness - XM would need its own terminal)
-                            if broker_name == 'Exness':
-                                try:
-                                    existing = mt5.account_info()
-                                    if existing and existing.login == account_int:
-                                        account_info = {
-                                            'balance': existing.balance,
-                                            'equity': existing.equity,
-                                            'marginFree': existing.margin_free,
-                                            'currency': existing.currency,
-                                            'accountNumber': account_num,
-                                            'broker': broker_name,
-                                            'leverage': existing.leverage,
-                                        }
-                                        logger.info(f"✅ Balance: Read directly from MT5 session for {broker_name} {account_int}: ${existing.balance:.2f}")
-                                        
-                                        # Update balance cache with fresh data
-                                        with balance_cache_lock:
-                                            cache_key = get_balance_cache_key(broker_name, account_num)
-                                            balance_cache[cache_key] = {
-                                                'balance': existing.balance,
-                                                'equity': existing.equity,
-                                                'marginFree': existing.margin_free,
-                                                'timestamp': time.time()
-                                            }
-                                    else:
-                                        # Different account or MT5 not connected - use cache
-                                        current_login = existing.login if existing else 'none'
-                                        logger.info(f"ℹ️ Balance: Exness {account_int} not active MT5 session (current: {current_login}) - using cache")
-                                        error_msg = "Account not currently connected - using cached balance"
-                                except Exception as e:
-                                    logger.info(f"ℹ️ Balance: MT5 not available for Exness {account_int}: {e} - using cache")
-                                    error_msg = "MT5 session not available - using cached balance"
-                            else:
-                                # XM / XM Global: Cannot read from Exness MT5 terminal - use cache
-                                logger.info(f"ℹ️ Balance: {broker_name} {account_int} uses different MT5 terminal - using cache")
-                                error_msg = "Broker uses separate MT5 terminal - using cached balance"
-                    except Exception as e:
-                        logger.warning(f"{broker_name} balance error: {e}")
-                        error_msg = str(e)
+                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint.
+                    # Live and demo accounts have separate MT5 credentials — each account's
+                    # balance is populated into balance_cache by the bot trading loop when
+                    # that account is actively connected.  This prevents cross-contamination
+                    # between live and demo balances and avoids MT5 lock contention.
+                    logger.info(f"ℹ️ Balance: {broker_name} {account_num} — using cache only (MT5 disconnected in balance endpoint)")
+                    error_msg = "Using cached balance — MT5 reads handled by trading loop"
                 
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
@@ -6027,39 +5958,9 @@ def get_account_balances():
                         error_msg = str(e)
                 
                 else:
-                    # Generic MT5 fallback with timeout
-                    # CRITICAL: Use is_balance_check=True to prevent holding lock during retries
-                    try:
-                        mt5_conn = MT5Connection({
-                            'broker': broker_name,
-                            'account': int(account_num) if account_num else 0,
-                            'password': cred['password'],
-                            'server': cred['server'] or 'MetaQuotes-Demo',
-                            'path': find_mt5_terminal_path(broker_name, get_mt5_config_for_broker(broker_name).get('path')),
-                            'is_balance_check': True,
-                            'lock_timeout': 0.1,
-                        })
-                        result = [None]
-                        def connect_mt5():
-                            if mt5_conn.connect():
-                                result[0] = mt5_conn.get_account_info()
-                            mt5_conn.disconnect()
-                        
-                        thread = threading.Thread(target=connect_mt5, daemon=True)
-                        thread.start()
-                        thread.join(timeout=5)  # 5-second timeout
-                        
-                        if thread.is_alive():
-                            logger.warning(f"MT5 balance fetch timed out for {account_num}")
-                            timed_out = True
-                            error_msg = "Connection timeout"
-                        else:
-                            account_info = result[0]
-                            if not account_info:
-                                error_msg = "Failed to connect to MT5"
-                    except Exception as e:
-                        logger.warning(f"MT5 balance error: {e}")
-                        error_msg = str(e)
+                    # Generic MT5 fallback — also disconnected, use cache only
+                    logger.info(f"ℹ️ Balance: {broker_name} {account_num} — using cache only (MT5 disconnected in balance endpoint)")
+                    error_msg = "Using cached balance — MT5 reads handled by trading loop"
                 
             except Exception as e:
                 logger.warning(f"Error fetching balance from {broker_name} account {account_num}: {e}")
@@ -6109,42 +6010,34 @@ def get_account_balances():
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
             else:
-                # CRITICAL FIX: Connection failed (timeout or error) - check cache first before demo default
-                # Use SAME cache key format that bot uses (ensures consistent lookup)
+                # No live broker connection — use cached balance from
+                # balance_cache (populated by bot trading loops) or DB cache.
                 cache_key = get_balance_cache_key(broker_name, account_num)
                 cached_balance = 0
                 cached_equity = 0
                 cached_margin = 0
                 
-                # Try to get from NEW in-memory cache (populated when bots successfully connect or on startup)
+                # Check in-memory cache (populated by bot trading loops)
                 with balance_cache_lock:
-                    logger.info(f"  🔍 [ENDPOINT CACHE CHECK] broker={broker_name} account={account_num}")
-                    logger.info(f"      Generated key='{cache_key}' (type: {type(account_num).__name__})")
-                    logger.info(f"      Cache contents: {list(balance_cache.keys())}")
                     if cache_key in balance_cache:
                         cached_info = balance_cache[cache_key]
                         cached_balance = cached_info.get('balance', 0)
                         cached_equity = cached_info.get('equity', cached_balance)
                         cached_margin = cached_info.get('marginFree', 0)
-                        logger.info(f"      ✅ FOUND in balance_cache: ${cached_balance:.2f}")
-                    else:
-                        logger.info(f"      ❌ NOT FOUND in balance_cache (available keys: {list(balance_cache.keys())})")
+                        logger.info(f"✅ Balance cache hit for {cache_key}: ${cached_balance:.2f}")
                 
-                # If not in fresh cache, try SQLite cache
+                # Fallback: try SQLite cached_balance column
                 if cached_balance == 0 and cred['credential_id'] in cached_data:
                     cache = dict(cached_data[cred['credential_id']])
                     cached_balance = cache.get('cached_balance', 0) or 0
                     cached_equity = cache.get('cached_equity', cached_balance) or 0
                     cached_margin = cache.get('cached_margin_free', 0) or 0
-                    logger.info(f"✅ Using SQLite cached balance for {cache_key}: ${cached_balance:.2f}")
+                    if cached_balance > 0:
+                        logger.info(f"✅ SQLite cache hit for {cache_key}: ${cached_balance:.2f}")
                 
-                # In DEMO mode, if still no cached value, show $0 (not connected)
-                # Previously used $10K default which inflated portfolio totals
-                if ENVIRONMENT == 'DEMO' and cached_balance == 0:
-                    cached_balance = 0
-                    cached_equity = 0
-                    cached_margin = 0
-                    logger.info(f"ℹ️  No cached balance for {cache_key} - broker not connected")
+                # If still $0 — account genuinely not connected / not funded
+                if cached_balance == 0:
+                    logger.info(f"ℹ️  {cache_key}: No cached balance — showing $0")
                 
                 account_entry.update({
                     'balance': float(cached_balance),
@@ -6152,8 +6045,8 @@ def get_account_balances():
                     'marginFree': float(cached_margin),
                     'currency': 'USD',
                     'connected': False,
-                    'dataSource': 'cache_fresh' if cached_balance > 10001 else ('cache_old' if cached_balance > 0 else 'not_connected'),
-                    'warning': 'Using last known balance (connection timeout)' if cached_balance > 0 else 'Broker not connected - balance unavailable',
+                    'dataSource': 'cache' if cached_balance > 0 else 'not_connected',
+                    'warning': 'Using last known balance' if cached_balance > 0 else 'Account not connected — balance will update when bot runs',
                 })
                 
                 # Add to broker group
@@ -10151,21 +10044,21 @@ def test_broker_connection():
                     'error': 'Missing required fields for MT5: broker, account_number, password, server'
                 }), 400
             
-            # Fix server name for MT5 brokers
+            # Fix server name for MT5 brokers — use per-account is_live, NOT global ENVIRONMENT
             broker_l = broker.lower()
             if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness', 'pxbt', 'prime xbt', 'primexbt']:
                 if broker_l in ['xm', 'xm global']:
-                    expected_server = 'XMGlobal-Demo' if not ENVIRONMENT == 'LIVE' else 'XMGlobal-Real'
+                    expected_server = 'XMGlobal-Real' if is_live else 'XMGlobal-Demo'
                 elif broker_l == 'exness':
-                    expected_server = 'Exness-Real' if ENVIRONMENT == 'LIVE' else 'Exness-MT5Trial9'
+                    expected_server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
                 elif broker_l in ['pxbt', 'prime xbt', 'primexbt']:
                     expected_server = 'PXBTTrading-1'
                 else:
-                    expected_server = 'MetaQuotes-Demo' if not ENVIRONMENT == 'LIVE' else 'MetaQuotes-Live'
+                    expected_server = 'MetaQuotes-Live' if is_live else 'MetaQuotes-Demo'
 
                 if not server or server != expected_server:
                     server = expected_server
-                    logger.info(f"   Corrected server to: {server} (ENVIRONMENT={ENVIRONMENT})")
+                    logger.info(f"   Corrected server to: {server} (is_live={is_live})")
             
             # Try to get real balance - first from global cache, then from cached MT5 connection, then via quick MT5 login
             actual_balance = 10000.00  # Default fallback
@@ -14218,15 +14111,14 @@ def login_user():
                 return jsonify({'success': False, 'error': 'Invalid password'}), 401
         
         # Check if 2FA is enabled
-        # TEMPORARILY DISABLED: 2FA bypass until SMTP is configured
         two_fa_enabled = False
-        # try:
-        #     cursor.execute('SELECT two_factor_enabled FROM users WHERE user_id = ?', (user_id,))
-        #     row = cursor.fetchone()
-        #     if row and row['two_factor_enabled']:
-        #         two_fa_enabled = True
-        # except Exception:
-        #     pass  # Column may not exist yet
+        try:
+            cursor.execute('SELECT two_factor_enabled FROM users WHERE user_id = ?', (user_id,))
+            row = cursor.fetchone()
+            if row and row['two_factor_enabled']:
+                two_fa_enabled = True
+        except Exception:
+            pass  # Column may not exist yet
         
         if two_fa_enabled:
             # Generate 6-digit OTP code

@@ -1072,8 +1072,26 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                 runSpacing: 8,
                                 children: _brokerService.credentials.map((cred) {
                                   final isActive = cred.credentialId == _brokerService.activeCredential?.credentialId;
+                                  final modeLabel = cred.isLive ? 'LIVE' : 'DEMO';
+                                  final modeColor = cred.isLive ? Colors.red : Colors.green;
                                   return FilterChip(
-                                    label: Text('${cred.broker} #${cred.accountNumber}'),
+                                    label: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text('${cred.broker} #${cred.accountNumber} '),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: modeColor.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            modeLabel,
+                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: modeColor),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                     selected: isActive,
                                     onSelected: (selected) {
                                       if (selected) {

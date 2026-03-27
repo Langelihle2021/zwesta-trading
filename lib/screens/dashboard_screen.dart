@@ -252,7 +252,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Build the connected broker account card showing balance and withdrawals
   Widget _buildConnectedBrokerCard() {
     final connectedAccounts = _brokerAccounts
-        .where((account) => account['connected'] == true)
+        .where((account) {
+          if (account['connected'] != true) return false;
+          if (_balanceMode == 'all') return true;
+          final mode = (account['mode'] ?? '').toString().toLowerCase();
+          if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
+          return mode == 'demo' || mode == 'trial';
+        })
         .cast<Map<String, dynamic>>()
         .toList();
 
@@ -1005,6 +1011,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return const SizedBox.shrink();
     }
 
+    // Filter accounts by current balance mode (live/demo/all)
+    final filteredAccounts = _brokerAccounts.where((a) {
+      if (_balanceMode == 'all') return true;
+      final mode = (a['mode'] ?? '').toString().toLowerCase();
+      if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
+      return mode == 'demo' || mode == 'trial';
+    }).toList();
+    final filteredTotal = filteredAccounts.fold<double>(
+      0, (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
+    );
+
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1013,13 +1030,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
-              Text('\$${_totalBrokerBalance.toStringAsFixed(2)}',
+              Text('\$${filteredTotal.toStringAsFixed(2)}',
                 style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          ..._brokerAccounts.map((account) {
+          ...filteredAccounts.map((account) {
             final broker = account['broker']?.toString() ?? 'Unknown';
             final accountNum = account['accountNumber']?.toString() ?? '';
             final balance = (account['balance'] as num?)?.toDouble() ?? 0;
