@@ -334,28 +334,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  // Grid of account metrics (2x3)
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.4,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-                          Text(
-                            '$currency ${balance.toStringAsFixed(2)}',
-                            style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                        ],
+                      _buildMetricCard('Balance', '$currency ${balance.toStringAsFixed(2)}', Colors.white, const Color(0xFF00E5FF)),
+                      _buildMetricCard('Equity', '$currency ${equity.toStringAsFixed(2)}', Colors.white, const Color(0xFF69F0AE)),
+                      _buildMetricCard(
+                        'Free Margin',
+                        '$currency ${((connected['free_margin'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                        Colors.white,
+                        const Color(0xFF81C784),
                       ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('Equity', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-                          Text(
-                            '$currency ${equity.toStringAsFixed(2)}',
-                            style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                        ],
+                      _buildMetricCard(
+                        'Margin Used',
+                        '$currency ${((connected['margin'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                        Colors.white,
+                        const Color(0xFFFFB74D),
+                      ),
+                      _buildMetricCard(
+                        'Margin Level',
+                        '${((connected['margin_level'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}%',
+                        Colors.white,
+                        const Color(0xFF64B5F6),
+                      ),
+                      _buildMetricCard(
+                        'Total P/L',
+                        '$currency ${((connected['total_pl'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                        ((connected['total_pl'] as num?)?.toDouble() ?? 0.0) >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                        ((connected['total_pl'] as num?)?.toDouble() ?? 0.0) >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                       ),
                     ],
                   ),
@@ -1434,6 +1446,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const SizedBox(width: 8),
         Text('$label ($count)', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
       ],
+    );
+  }
+
+  /// Build individual metric card for account dashboard
+  Widget _buildMetricCard(String label, String value, Color valueColor, Color accentColor) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: accentColor.withOpacity(0.3), width: 1.5),
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accentColor.withOpacity(0.08),
+            accentColor.withOpacity(0.02),
+          ],
+        ),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              color: Colors.white60,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: GoogleFonts.poppins(
+              color: valueColor,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 
