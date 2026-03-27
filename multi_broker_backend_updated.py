@@ -14218,14 +14218,15 @@ def login_user():
                 return jsonify({'success': False, 'error': 'Invalid password'}), 401
         
         # Check if 2FA is enabled
+        # TEMPORARILY DISABLED: 2FA bypass until SMTP is configured
         two_fa_enabled = False
-        try:
-            cursor.execute('SELECT two_factor_enabled FROM users WHERE user_id = ?', (user_id,))
-            row = cursor.fetchone()
-            if row and row['two_factor_enabled']:
-                two_fa_enabled = True
-        except Exception:
-            pass  # Column may not exist yet
+        # try:
+        #     cursor.execute('SELECT two_factor_enabled FROM users WHERE user_id = ?', (user_id,))
+        #     row = cursor.fetchone()
+        #     if row and row['two_factor_enabled']:
+        #         two_fa_enabled = True
+        # except Exception:
+        #     pass  # Column may not exist yet
         
         if two_fa_enabled:
             # Generate 6-digit OTP code
