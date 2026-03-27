@@ -58,6 +58,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _brokerBalancesLoading = false;
   double _totalBrokerBalance = 0;
 
+  // Demo/Live balance toggle
+  String _balanceMode = 'all'; // 'all', 'live', 'demo'
+
   // Balance tracking for increases/decreases
   // _sessionStartBalances is set ONCE on first fetch and never updated,
   // so balanceChange = currentBalance - sessionStart = total change this session.
@@ -888,47 +891,99 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              // ── Total Portfolio Balance ──
+              // ── Demo / Live Toggle ──
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(14),
+                  color: Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Text(
-                      'TOTAL PORTFOLIO BALANCE',
-                      style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 1.2),
-                    ),
-                    const SizedBox(height: 4),
-                    _brokerBalancesLoading && _totalBrokerBalance == 0
-                        ? Row(
-                            children: [
-                              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF00E5FF))),
-                              const SizedBox(width: 10),
-                              Text('Loading...', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 14)),
-                            ],
-                          )
-                        : Text(
-                            '\$${_totalBrokerBalance.toStringAsFixed(2)}',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
+                    for (final mode in [{'key': 'all', 'label': 'All'}, {'key': 'live', 'label': 'Live'}, {'key': 'demo', 'label': 'Demo'}])
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _balanceMode = mode['key']!),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _balanceMode == mode['key'] ? const Color(0xFF0066FF) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(
+                                mode['label']!,
+                                style: GoogleFonts.poppins(
+                                  color: _balanceMode == mode['key'] ? Colors.white : Colors.white54,
+                                  fontSize: 12,
+                                  fontWeight: _balanceMode == mode['key'] ? FontWeight.w600 : FontWeight.w400,
+                                ),
+                              ),
                             ),
                           ),
-                    if (_brokerAccounts.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          '${_brokerAccounts.where((a) => a['connected'] == true).length} connected account${_brokerAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
-                          style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
                         ),
                       ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 12),
+              // ── Total Portfolio Balance ──
+              Builder(
+                builder: (context) {
+                  final filtered = _brokerAccounts.where((a) {
+                    if (_balanceMode == 'all') return true;
+                    final mode = (a['mode'] ?? '').toString().toLowerCase();
+                    if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
+                    return mode == 'demo' || mode == 'trial';
+                  }).toList();
+                  final filteredTotal = filtered.fold<double>(
+                    0, (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
+                  );
+                  final connectedCount = filtered.where((a) => a['connected'] == true).length;
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _balanceMode == 'all' ? 'TOTAL PORTFOLIO BALANCE' :
+                          _balanceMode == 'live' ? 'LIVE BALANCE' : 'DEMO BALANCE',
+                          style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 1.2),
+                        ),
+                        const SizedBox(height: 4),
+                        _brokerBalancesLoading && _totalBrokerBalance == 0
+                            ? Row(
+                                children: [
+                                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF00E5FF))),
+                                  const SizedBox(width: 10),
+                                  Text('Loading...', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 14)),
+                                ],
+                              )
+                            : Text(
+                                '\$${filteredTotal.toStringAsFixed(2)}',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                        if (connectedCount > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              '$connectedCount ${_balanceMode == 'all' ? 'connected' : _balanceMode} account${connectedCount == 1 ? '' : 's'}',
+                              style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
           ),

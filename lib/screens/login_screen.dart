@@ -29,6 +29,7 @@ class _LoginScreenState extends State<LoginScreen> {
   late TextEditingController _emailController;
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
+  late TextEditingController _referralCodeController;
 
   @override
   void initState() {
@@ -39,6 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController = TextEditingController();
     _firstNameController = TextEditingController();
     _lastNameController = TextEditingController();
+    _referralCodeController = TextEditingController();
   }
 
   @override
@@ -49,6 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _referralCodeController.dispose();
     super.dispose();
   }
 
@@ -425,6 +428,34 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          // Referral Code (optional)
+          TextField(
+            controller: _referralCodeController,
+            style: GoogleFonts.poppins(color: Colors.white, fontSize: 15),
+            cursorColor: Colors.white,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              hintText: 'Referral Code (optional)',
+              hintStyle: GoogleFonts.poppins(color: Colors.white54, fontSize: 15),
+              prefixIcon: const Icon(Icons.card_giftcard, color: Colors.white70, size: 20),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.08),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: Colors.white.withOpacity(0.2), width: 1.5),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: Colors.white.withOpacity(0.2), width: 1.5),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Colors.white, width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
 
         // Username field
@@ -605,6 +636,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text,
         _firstNameController.text.trim(),
         _lastNameController.text.trim(),
+        referralCode: _referralCodeController.text.trim(),
       );
       if (success && mounted) {
         setState(() => _isLogin = true);

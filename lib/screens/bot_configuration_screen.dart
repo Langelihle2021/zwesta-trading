@@ -432,6 +432,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         _selectedSymbols = _selectedSymbols
             .where((symbol) => _binanceSymbols.any((item) => item['symbol'] == symbol))
             .toList();
+        // Auto-select recommended Binance pairs if none selected
+        if (_selectedSymbols.isEmpty) {
+          _selectedSymbols = _rankedBinancePairs
+              .where((p) => p['risk'] == 'Low' || p['risk'] == 'Medium')
+              .take(5)
+              .map((p) => p['symbol'] as String)
+              .toList();
+        }
         _isLoadingData = false;
       });
       return;
@@ -458,6 +466,19 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           // Get commodities list for symbol selection (nested by category)
           final commoditiesList = data['commodities'] as Map? ?? {};
           tradingSymbols = _buildSymbolsFromApiData(commoditiesList);
+          // Auto-select recommended symbols if none selected
+          if (_selectedSymbols.isEmpty && tradingSymbols.isNotEmpty) {
+            final recommended = ['EURUSDm', 'GBPUSDm', 'USDJPYm', 'XAUUSDm', 'EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'];
+            _selectedSymbols = tradingSymbols
+                .where((s) => recommended.contains(s['symbol']))
+                .take(4)
+                .map((s) => s['symbol']!)
+                .toList();
+            // Fallback: pick first 3 if no recommended match
+            if (_selectedSymbols.isEmpty) {
+              _selectedSymbols = tradingSymbols.take(3).map((s) => s['symbol']!).toList();
+            }
+          }
           _isLoadingData = false;
         });
       }
@@ -886,6 +907,29 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                 ),
               ),
             const SizedBox(height: 12),
+
+          // Recommended Settings Info
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0066FF).withOpacity(0.12),
+              border: Border.all(color: const Color(0xFF0066FF).withOpacity(0.4)),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome, color: Color(0xFF64B5F6), size: 20),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Recommended settings pre-applied: 2% risk, 3 max trades, 20% max drawdown, Trend Following strategy.',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
 
           // Bot Rental Agreement Image
           Container(

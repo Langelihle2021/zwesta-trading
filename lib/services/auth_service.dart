@@ -178,7 +178,7 @@ class AuthService extends ChangeNotifier {
 
   // Register function
   Future<bool> register(String username, String email, String password, 
-      String firstName, String lastName) async {
+      String firstName, String lastName, {String referralCode = ''}) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -188,15 +188,20 @@ class AuthService extends ChangeNotifier {
         throw Exception('All fields are required');
       }
 
+      final body = {
+        'name': '$firstName $lastName',
+        'email': email,
+        'username': username,
+        'password': password,
+      };
+      if (referralCode.isNotEmpty) {
+        body['referrer_code'] = referralCode;
+      }
+
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/user/register'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': '$firstName $lastName',
-          'email': email,
-          'username': username,
-          'password': password,
-        }),
+        body: jsonEncode(body),
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200 || response.statusCode == 201) {

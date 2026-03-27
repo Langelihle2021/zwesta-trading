@@ -898,84 +898,64 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFFF7043), Color(0xFFE64A19)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFFF7043).withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () async {
-                        final confirmed = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: Text('Delete $botId?', style: const TextStyle(color: Colors.white)),
-                            backgroundColor: const Color(0xFF0A0E21),
-                            content: const Text(
-                              'This action cannot be undone.',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx, false),
-                                child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx, true),
-                                child: Text('Delete', style: GoogleFonts.poppins(color: Colors.red)),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirmed != true) return;
-                        final botService = context.read<BotService>();
-                        botService.removeBotLocally(botId);
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('✓ $botId deleted'),
-                            backgroundColor: Colors.red,
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                        setState(() {});
-                      },
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.delete_outline, size: 18),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Delete',
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 13),
-                            ),
-                          ],
+              const SizedBox(width: 6),
+              // Overflow menu for less-used actions (Delete)
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: Colors.white54, size: 22),
+                color: const Color(0xFF1A1F3A),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                onSelected: (value) async {
+                  if (value == 'delete') {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: Text('Delete $botId?', style: const TextStyle(color: Colors.white)),
+                        backgroundColor: const Color(0xFF0A0E21),
+                        content: const Text(
+                          'This action cannot be undone.',
+                          style: TextStyle(color: Colors.white70),
                         ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.red)),
+                          ),
+                        ],
                       ),
+                    );
+                    if (confirmed != true) return;
+                    final botService = context.read<BotService>();
+                    botService.removeBotLocally(botId);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('$botId deleted'),
+                        backgroundColor: Colors.red,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                    setState(() {});
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                        const SizedBox(width: 8),
+                        Text('Delete Bot', style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 13)),
+                      ],
                     ),
                   ),
-                ),
+                ],
               ),
             ],
           ),
-          // IG Markets integration removed
         ],
       ),
     );
