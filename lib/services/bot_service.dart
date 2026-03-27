@@ -88,7 +88,7 @@ class BotService extends ChangeNotifier {
   }
 
   /// Fetch active bots from backend
-  Future<void> fetchActiveBots() async {
+  Future<void> fetchActiveBots({String? tradingMode}) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -102,10 +102,11 @@ class BotService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('user_id');
       final sessionToken = prefs.getString('auth_token');
+      final mode = tradingMode ?? prefs.getString('trading_mode') ?? 'DEMO';
 
-      String url = '$_apiUrl/api/bot/status';
+      String url = '$_apiUrl/api/bot/status?mode=$mode';
       if (userId != null && userId.isNotEmpty) {
-        url += '?user_id=$userId';
+        url += '&user_id=$userId';
       }
 
       final response = await http.get(

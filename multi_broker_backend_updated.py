@@ -1380,6 +1380,17 @@ def init_database():
     user_bots_columns = {row[1] for row in cursor.fetchall()}
     if 'runtime_state' not in user_bots_columns:
         cursor.execute("ALTER TABLE user_bots ADD COLUMN runtime_state TEXT")
+    if 'is_live' not in user_bots_columns:
+        cursor.execute("ALTER TABLE user_bots ADD COLUMN is_live BOOLEAN DEFAULT 0")
+        # Backfill is_live from linked broker_credentials for existing bots
+        cursor.execute('''
+            UPDATE user_bots SET is_live = (
+                SELECT bcr.is_live FROM bot_credentials bc
+                JOIN broker_credentials bcr ON bcr.credential_id = bc.credential_id
+                WHERE bc.bot_id = user_bots.bot_id
+                LIMIT 1
+            ) WHERE is_live IS NULL OR is_live = 0
+        ''')
     
     # Transactions table - tracks all financial transactions
     cursor.execute('''
@@ -11023,9 +11034,9 @@ def create_bot():
 
                 logger.info(f"🔧 [BOT INSERT] Inserting bot {bot_id} for user {user_id} into user_bots table...")
                 cursor.execute('''
-                    INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, ','.join(symbols), created_at, created_at))
+                    INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, is_live, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, ','.join(symbols), 1 if is_live else 0, created_at, created_at))
                 logger.info(f"✅ [BOT INSERT SUCCESS] user_bots row inserted")
 
                 logger.info(f"🔧 [CREDENTIALS INSERT] Inserting bot credentials...")
@@ -11045,9 +11056,9 @@ def create_bot():
                     bot_id = f"bot_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:6]}"
                     try:
                         cursor.execute('''
-                            INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, ','.join(symbols), created_at, created_at))
+                            INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, is_live, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (bot_id, user_id, data.get('name', strategy), strategy, 'active', trading_enabled, account_id, ','.join(symbols), 1 if is_live else 0, created_at, created_at))
                         cursor.execute('''
                             INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
                             VALUES (?, ?, ?, ?)
@@ -12641,9 +12652,9 @@ def quick_create_bot():
 
             # Store bot in database
             cursor.execute('''
-                INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (bot_id, user_id, f'Quick {preset}', strategy, 'active', trading_enabled, account_id, ','.join(symbols), created_at, created_at))
+                INSERT INTO user_bots (bot_id, user_id, name, strategy, status, enabled, broker_account_id, symbols, is_live, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (bot_id, user_id, f'Quick {preset}', strategy, 'active', trading_enabled, account_id, ','.join(symbols), 1 if is_live else 0, created_at, created_at))
 
             # Link bot to credential
             cursor.execute('''
@@ -13012,15 +13023,24 @@ def get_commodity_market_data():
 @app.route('/api/bot/status', methods=['GET'])
 @require_session
 def bot_status():
-    """Get status of authenticated user's bots only"""
+    """Get status of authenticated user's bots only.
+    Optional query param: ?mode=LIVE or ?mode=DEMO to filter by trading mode.
+    """
     try:
         user_id = request.user_id  # From session token
+        mode_filter = request.args.get('mode', '').upper()  # LIVE, DEMO, or '' (all)
         
         bots_list = []
         for bot in active_bots.values():
             # Only return bots for authenticated user
             if bot.get('user_id') != user_id:
                 continue
+            
+            # Filter by trading mode if specified
+            if mode_filter in ('LIVE', 'DEMO'):
+                bot_mode = (bot.get('mode') or 'demo').upper()
+                if bot_mode != mode_filter:
+                    continue
             
             # Calculate runtime (safely access createdAt)
             created = datetime.fromisoformat(bot.get('createdAt', datetime.now().isoformat()))
@@ -13091,6 +13111,8 @@ def bot_status():
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
                 'broker_type': bot.get('broker_type', 'MT5'),
+                'mode': (bot.get('mode') or 'demo').upper(),
+                'is_live': (bot.get('mode') or 'demo').lower() == 'live',
                 'profitField': round(total_profit, 2),
                 'tradeHistory': trade_history,  # Include full trade history for analytics
                 'dailyProfits': daily_profits,  # Include daily profits map for charts

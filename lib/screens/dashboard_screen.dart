@@ -172,25 +172,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// Fetch real bots from BotService and filter out demo bots
+  /// Fetch real bots from BotService (already filtered by mode on backend)
   Future<void> _fetchRealBots() async {
     try {
       final botService = context.read<BotService>();
       
-      // Fetch bots from backend via BotService
+      // Fetch bots from backend via BotService (mode filter applied server-side)
       await botService.fetchActiveBots();
       
       if (mounted) {
         setState(() {
-          // Filter out demo bots (botId starts with 'DemoBot_' or 'demo')
-          _realBotsList = botService.activeBots
-              .where((bot) {
-                final botId = (bot['botId'] ?? '').toString().toLowerCase();
-                return !botId.startsWith('demobot_') && !botId.startsWith('demo_');
-              })
-              .toList();
+          _realBotsList = List<Map<String, dynamic>>.from(botService.activeBots);
           
-          print('✅ Loaded ${_realBotsList.length} real bots (filtered demo bots)');
+          print('✅ Loaded ${_realBotsList.length} bots from backend');
         });
       }
     } catch (e) {

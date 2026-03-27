@@ -21,7 +21,8 @@
         "pdf",
         "provider",
         "shared_preferences",
-        "shimmer"
+        "shimmer",
+        "web_socket_channel"
       ],
       "devDependencies": [
         "flutter_test"
@@ -64,6 +65,17 @@
         "flutter_local_notifications_linux",
         "flutter_local_notifications_platform_interface",
         "timezone"
+      ]
+    },
+    {
+      "name": "web_socket_channel",
+      "version": "3.0.3",
+      "dependencies": [
+        "async",
+        "crypto",
+        "stream_channel",
+        "web",
+        "web_socket"
       ]
     },
     {
@@ -387,6 +399,18 @@
       ]
     },
     {
+      "name": "web_socket",
+      "version": "1.0.1",
+      "dependencies": [
+        "web"
+      ]
+    },
+    {
+      "name": "web",
+      "version": "1.1.1",
+      "dependencies": []
+    },
+    {
       "name": "crypto",
       "version": "3.0.7",
       "dependencies": [
@@ -568,11 +592,6 @@
         "flutter",
         "shared_preferences_platform_interface"
       ]
-    },
-    {
-      "name": "web",
-      "version": "1.1.1",
-      "dependencies": []
     },
     {
       "name": "http_parser",

@@ -37,10 +37,10 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     super.initState();
     _loadTradingMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<BotService>().fetchActiveBots();
+      context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
     });
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted) context.read<BotService>().fetchActiveBots();
+      if (mounted) context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
     });
   }
 
@@ -48,10 +48,16 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final prefs = await SharedPreferences.getInstance();
     final mode = prefs.getString('trading_mode') ?? 'DEMO';
     setState(() => _tradingMode = mode);
+    // Re-fetch bots with the correct mode
+    if (mounted) {
+      context.read<BotService>().fetchActiveBots(tradingMode: mode);
+    }
   }
 
   void _onModeChanged(String newMode) {
     setState(() => _tradingMode = newMode);
+    // Re-fetch bots filtered by the new mode
+    context.read<BotService>().fetchActiveBots(tradingMode: newMode);
   }
 
   @override
@@ -101,11 +107,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   Widget build(BuildContext context) {
     return Consumer2<BotService, CurrencyProvider>(
       builder: (context, botService, currencyProvider, _) {
-        // Filter out demo bots
-        final allBots = botService.activeBots.where((bot) {
-          final id = (bot['botId'] ?? '').toString().toLowerCase();
-          return !id.startsWith('demobot_') && !id.startsWith('demo_');
-        }).toList();
+        // Bots are already filtered by trading mode from the backend
+        final allBots = List<Map<String, dynamic>>.from(botService.activeBots);
 
         // Apply search + status filter
         final bots = allBots.where((bot) {
@@ -150,7 +153,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
           child: allBots.isEmpty && botService.isLoading
               ? const Center(child: CircularProgressIndicator(color: Color(0xFF00E5FF)))
               : RefreshIndicator(
-                  onRefresh: () => botService.fetchActiveBots(),
+                  onRefresh: () => botService.fetchActiveBots(tradingMode: _tradingMode),
                   color: const Color(0xFF00E5FF),
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -199,7 +202,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                                 child: AccountDisplayWidget(
                                   tradingMode: _tradingMode,
                                   onRefresh: () {
-                                    context.read<BotService>().fetchActiveBots();
+                                    context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
                                   },
                                 ),
                               )
@@ -228,7 +231,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       PxbtSessionManager(
                         onStatusChanged: () {
                           // Refresh bot list when PXBT status changes
-                          context.read<BotService>().fetchActiveBots();
+                          context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
                         },
                       ),
 
@@ -493,7 +496,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
           Text(error, style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 13), textAlign: TextAlign.center),
           const SizedBox(height: 12),
           TextButton(
-            onPressed: () => context.read<BotService>().fetchActiveBots(),
+            onPressed: () => context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode),
             child: Text('Retry', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF))),
           ),
         ],
@@ -1251,7 +1254,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   Navigator.pop(ctx);
                   // Refresh bot list
                   final botService = Provider.of<BotService>(context, listen: false);
-                  botService.fetchActiveBots();
+                  botService.fetchActiveBots(tradingMode: _tradingMode);
                   setState(() {});
                 },
                 child: Text('Done', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF))),
