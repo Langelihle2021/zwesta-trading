@@ -10593,15 +10593,47 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
 def send_activation_pin_email(user_email: str, user_name: str, bot_id: str, pin: str):
     """Send activation PIN to user email"""
     try:
-        # For development/demo, just log it
-        logger.info(f"\n{'='*60}")
-        logger.info(f"🔐 BOT ACTIVATION PIN SENT")
-        logger.info(f"{'-'*60}")
-        logger.info(f"User: {user_name} ({user_email})")
-        logger.info(f"Bot ID: {bot_id}")
-        logger.info(f"PIN: {pin}")
-        logger.info(f"Valid for: 10 minutes")
-        logger.info(f"{'='*60}\n")
+        smtp_server = os.environ.get('SMTP_SERVER', '')
+        smtp_user = os.environ.get('SMTP_USER', '')
+        smtp_pass = os.environ.get('SMTP_PASS', '')
+        smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+        
+        logger.info(f"🔐 BOT ACTIVATION PIN: User={user_name}, Bot={bot_id}, PIN={pin}")
+        
+        if not smtp_server or not smtp_user:
+            logger.warning(f"⚠️ SMTP not configured — PIN for {user_email}: {pin}")
+            return True
+        
+        msg = MIMEMultipart('alternative')
+        msg['From'] = f'Zwesta Trading <{smtp_user}>'
+        msg['To'] = user_email
+        msg['Subject'] = f'Zwesta Trading - Bot Activation PIN'
+        
+        plain = f'Hi {user_name},\n\nYour bot activation PIN is: {pin}\nBot ID: {bot_id}\n\nThis PIN expires in 10 minutes.'
+        
+        html = f"""\
+        <html><body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:20px;">
+        <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+          <h2 style="color:#0A0E21;margin-top:0;">🤖 Bot Activation PIN</h2>
+          <p style="color:#555;font-size:15px;">Hi <b>{user_name}</b>, use this PIN to activate your bot:</p>
+          <div style="background:#0A0E21;color:#00E5FF;font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;padding:18px;border-radius:8px;margin:24px 0;">
+            {pin}
+          </div>
+          <p style="color:#888;font-size:13px;">Bot ID: <code>{bot_id}</code></p>
+          <p style="color:#888;font-size:13px;">This PIN expires in <b>10 minutes</b>.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+          <p style="color:#aaa;font-size:11px;text-align:center;">Zwesta Trading Platform</p>
+        </div>
+        </body></html>"""
+        
+        msg.attach(MIMEText(plain, 'plain'))
+        msg.attach(MIMEText(html, 'html'))
+        
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        logger.info(f"✅ Activation PIN email sent to {user_email}")
         return True
     except Exception as e:
         logger.error(f"Error sending email: {e}")
@@ -14273,20 +14305,40 @@ def _send_2fa_email(to_email, otp_code):
     smtp_pass = os.environ.get('SMTP_PASS', '')
     
     if not smtp_server or not smtp_user:
-        logger.info(f"SMTP not configured. 2FA code for {to_email}: {otp_code}")
+        logger.warning(f"⚠️ SMTP not configured — 2FA code for {to_email}: {otp_code}")
+        logger.warning("Set SMTP_SERVER, SMTP_USER, SMTP_PASS in .env to enable email delivery")
         return
     
-    msg = MIMEMultipart()
-    msg['From'] = smtp_user
+    msg = MIMEMultipart('alternative')
+    msg['From'] = f'Zwesta Trading <{smtp_user}>'
     msg['To'] = to_email
     msg['Subject'] = 'Zwesta Trading - Your Login Verification Code'
-    body = f'Your 2FA verification code is: {otp_code}\n\nThis code expires in 10 minutes.'
-    msg.attach(MIMEText(body, 'plain'))
+    
+    plain = f'Your Zwesta Trading verification code is: {otp_code}\n\nThis code expires in 10 minutes.\nIf you did not request this code, please ignore this email.'
+    
+    html = f"""\
+    <html><body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:20px;">
+    <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+      <h2 style="color:#0A0E21;margin-top:0;">🔐 Verification Code</h2>
+      <p style="color:#555;font-size:15px;">Use the code below to complete your login to <b>Zwesta Trading</b>:</p>
+      <div style="background:#0A0E21;color:#00E5FF;font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;padding:18px;border-radius:8px;margin:24px 0;">
+        {otp_code}
+      </div>
+      <p style="color:#888;font-size:13px;">This code expires in <b>10 minutes</b>.</p>
+      <p style="color:#888;font-size:12px;">If you did not request this code, you can safely ignore this email.</p>
+      <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+      <p style="color:#aaa;font-size:11px;text-align:center;">Zwesta Trading Platform</p>
+    </div>
+    </body></html>"""
+    
+    msg.attach(MIMEText(plain, 'plain'))
+    msg.attach(MIMEText(html, 'html'))
     
     with smtplib.SMTP(smtp_server, smtp_port) as server:
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
+    logger.info(f"✅ 2FA email sent to {to_email}")
 
 
 @app.route('/api/user/verify-2fa', methods=['POST'])
