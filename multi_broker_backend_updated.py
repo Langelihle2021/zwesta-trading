@@ -2847,11 +2847,14 @@ class MT5Connection(BrokerConnection):
 
             positions = self.mt5.positions_get()
             result = []
+            if not positions:
+                return result
             for pos in positions:
                 # Calculate additional metrics per position
                 pnl_percentage = ((pos.price_current - pos.price_open) / pos.price_open * 100) if pos.price_open != 0 else 0
                 swap = pos.swap if hasattr(pos, 'swap') else 0
                 commission = pos.commission if hasattr(pos, 'commission') else 0
+                comment = pos.comment if hasattr(pos, 'comment') else ''
                 
                 result.append({
                     'ticket': pos.ticket,
@@ -2866,6 +2869,9 @@ class MT5Connection(BrokerConnection):
                     'swap': round(swap, 2),
                     'commission': round(commission, 2),
                     'netProfit': round(pos.profit + swap + commission, 2),
+                    'comment': comment,
+                    'sl': pos.sl if hasattr(pos, 'sl') else 0,
+                    'tp': pos.tp if hasattr(pos, 'tp') else 0,
                     'broker': 'MT5',
                 })
             return result
@@ -10839,6 +10845,7 @@ def create_bot():
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
+                'maxOpenPositions': data.get('maxOpenPositions', 5),  # Max concurrent positions (prevents unlimited trades)
                 'basePositionSize': data.get('basePositionSize', 1.0),
                 'totalTrades': 0,
                 'winningTrades': 0,
@@ -10855,6 +10862,7 @@ def create_bot():
                 'peakProfit': 0,
                 'drawdownPauseUntil': None,
                 'profit': 0,
+                'open_positions': {},  # Track open positions for closure detection
             }
             persist_bot_runtime_state(bot_id)
 
@@ -11552,19 +11560,37 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             else:
                                 symbols_to_try = [symbol, 'EURUSDm']  # Fallback only if primary fails
                             
-                            # ✅ CHECK: Skip if bot already has an open position on this symbol
+                            # ✅ POSITION LIMIT CHECK: Enforce maxOpenPositions to prevent unlimited trades
+                            max_open = bot_config.get('maxOpenPositions', 5)  # Default: max 5 concurrent positions
                             existing_positions = mt5_conn.get_positions()
                             bot_id_short = bot_id.split('_')[-1][:8]
                             comment_short = f'ZBot{bot_id_short}'
-                            has_open_position = False
+                            
+                            # Count positions belonging to THIS bot (by comment) and also by tracked open_positions
+                            bot_position_count = 0
+                            bot_positions_on_symbol = 0
+                            tracked_open = bot_config.get('open_positions', {})
+                            tracked_tickets = set(tracked_open.keys())
+                            
                             for ep in existing_positions:
                                 ep_comment = ep.get('comment', '') or ''
+                                ep_ticket = str(ep.get('ticket', ''))
                                 ep_symbol = ep.get('symbol', '')
-                                if comment_short in ep_comment and ep_symbol == symbol:
-                                    has_open_position = True
-                                    logger.info(f"📌 Bot {bot_id}: Already has open position on {symbol} (ticket={ep.get('ticket')}) - skipping new order")
-                                    break
-                            if has_open_position:
+                                # Match by comment OR by tracked ticket
+                                is_this_bot = comment_short in ep_comment or ep_ticket in tracked_tickets
+                                if is_this_bot:
+                                    bot_position_count += 1
+                                    if ep_symbol == symbol:
+                                        bot_positions_on_symbol += 1
+                            
+                            # Skip if bot already has an open position on this specific symbol
+                            if bot_positions_on_symbol > 0:
+                                logger.info(f"📌 Bot {bot_id}: Already has {bot_positions_on_symbol} open position(s) on {symbol} - skipping")
+                                continue
+                            
+                            # Skip if bot has reached max open positions overall
+                            if bot_position_count >= max_open:
+                                logger.info(f"📌 Bot {bot_id}: At max open positions ({bot_position_count}/{max_open}) - skipping new trade on {symbol}")
                                 continue
                             
                             # ✅ Calculate SL/TP price levels for MT5
@@ -11616,6 +11642,26 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         logger.info(f"📐 Bot {bot_id}: SL={sl_price}, TP={tp_price} (spread={_spread:.2f}, sl_dist={_sl_dist:.2f}, tp_dist={_tp_dist:.2f})")
                             except Exception as e:
                                 logger.warning(f"Bot {bot_id}: Could not calculate SL/TP: {e}")
+                            
+                            # ✅ CRITICAL: Ensure SL/TP are ALWAYS set - positions without SL/TP never close
+                            if sl_price is None or tp_price is None:
+                                try:
+                                    _tick_fb = mt5_conn.mt5.symbol_info_tick(symbol) if not use_rest_trading else None
+                                    if _tick_fb:
+                                        _price_fb = _tick_fb.ask if order_type == 'BUY' else _tick_fb.bid
+                                        _sym_fb = mt5_conn.mt5.symbol_info(symbol)
+                                        _point_fb = _sym_fb.point if _sym_fb else 0.00001
+                                        _digits_fb = _sym_fb.digits if _sym_fb else 5
+                                        # Default SL: 50 pips, TP: 100 pips
+                                        if order_type == 'BUY':
+                                            sl_price = sl_price or round(_price_fb - 50 * _point_fb, _digits_fb)
+                                            tp_price = tp_price or round(_price_fb + 100 * _point_fb, _digits_fb)
+                                        else:
+                                            sl_price = sl_price or round(_price_fb + 50 * _point_fb, _digits_fb)
+                                            tp_price = tp_price or round(_price_fb - 100 * _point_fb, _digits_fb)
+                                        logger.info(f"📐 Bot {bot_id}: Fallback SL={sl_price}, TP={tp_price} (default 50/100 pips)")
+                                except Exception as fb_e:
+                                    logger.warning(f"Bot {bot_id}: Fallback SL/TP calculation also failed: {fb_e}")
                             
                             for index, attempt_symbol in enumerate(symbols_to_try):
                                 try:
@@ -11930,6 +11976,40 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         # Remove closed positions from tracker
                         for t in closed_tickets:
                             del tracked_positions[t]
+                        
+                        # ==================== AUTO-STOP: ALL POSITIONS CLOSED EXTERNALLY ====================
+                        # If bot HAD open positions but now ALL are gone (user closed them in Exness/MT5),
+                        # automatically stop the bot so it doesn't open new unwanted trades.
+                        if closed_tickets and len(tracked_positions) == 0:
+                            # All tracked positions were closed - check if this was external
+                            # (If bot_stop_flags is already set, this is a normal stop)
+                            if not bot_stop_flags.get(bot_id, False):
+                                logger.warning(f"🛑 Bot {bot_id}: ALL {len(closed_tickets)} positions closed externally (manual close in Exness/MT5)")
+                                logger.warning(f"   Auto-stopping bot to prevent opening new unwanted trades")
+                                logger.warning(f"   User can restart the bot from the app when ready")
+                                
+                                bot_config['status'] = 'STOPPED'
+                                bot_config['stopReason'] = f'All positions closed externally ({len(closed_tickets)} trades)'
+                                bot_config['stoppedAt'] = datetime.now().isoformat()
+                                bot_stop_flags[bot_id] = True
+                                running_bots[bot_id] = False
+                                bot_config['enabled'] = False
+                                
+                                # Update database
+                                try:
+                                    _stop_conn = get_db_connection()
+                                    _stop_cursor = _stop_conn.cursor()
+                                    _stop_cursor.execute('''
+                                        UPDATE user_bots SET status = 'stopped', enabled = 0, updated_at = ?
+                                        WHERE bot_id = ?
+                                    ''', (datetime.now().isoformat(), bot_id))
+                                    _stop_conn.commit()
+                                    _stop_conn.close()
+                                except Exception as _stop_e:
+                                    logger.error(f"Bot {bot_id}: Error updating stopped status in DB: {_stop_e}")
+                                
+                                persist_bot_runtime_state(bot_id)
+                                break  # Exit the trading loop
                 
                 except Exception as close_check_e:
                     logger.warning(f"Bot {bot_id}: Error checking closed positions: {close_check_e}")
@@ -11946,7 +12026,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
 
                 persist_bot_runtime_state(bot_id)
                 
-                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Total P&L: ${bot_config['totalProfit']:.2f}")
+                # Log cycle summary with position status for debugging
+                open_pos_count = len(bot_config.get('open_positions', {}))
+                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Open positions: {open_pos_count} | Total P&L: ${bot_config.get('totalProfit', 0):.2f}")
                 
                 # DUAL MODE: TIME-BASED vs SIGNAL-DRIVEN waiting
                 if trading_mode == 'signal-driven':
@@ -12765,8 +12847,10 @@ def bot_status():
                 'enabled': bot.get('enabled', True),
                 'status': 'Active' if bot.get('enabled', True) else 'Inactive',
                 'pauseReason': bot.get('pauseReason'),
+                'stopReason': bot.get('stopReason'),  # Why bot was auto-stopped (e.g., external close)
                 'lastPauseEvent': bot.get('lastPauseEvent'),  # Include last market pause event
                 'displayCurrency': bot.get('displayCurrency', 'USD'),
+                'maxOpenPositions': bot.get('maxOpenPositions', 5),
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
                 'broker_type': bot.get('broker_type', 'MT5'),
