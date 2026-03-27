@@ -10099,6 +10099,11 @@ def test_broker_connection():
             
             # Try to get real balance - first from global cache, then from cached MT5 connection, then via quick MT5 login
             actual_balance = 10000.00  # Default fallback
+            actual_equity = 10000.00
+            actual_margin_free = 10000.00
+            actual_margin_used = 0.00
+            actual_margin_level = 0.00
+            actual_profit = 0.00
             got_real_balance = False
             
             # FIRST: Check global balance_cache (populated on startup with hardcoded demo balances)
@@ -10161,11 +10166,11 @@ def test_broker_connection():
                                 info = mt5_mod.account_info()
                                 if info:
                                     actual_balance = info.balance
-                                    actual_equity = info.equity
-                                    actual_margin_free = info.free_margin
-                                    actual_margin_used = info.margin
-                                    actual_margin_level = info.margin_level
-                                    actual_profit = info.profit
+                                    actual_equity = getattr(info, 'equity', actual_balance)
+                                    actual_margin_free = getattr(info, 'margin_free', 0)
+                                    actual_margin_used = getattr(info, 'margin', 0)
+                                    actual_margin_level = getattr(info, 'margin_level', 0)
+                                    actual_profit = getattr(info, 'profit', 0)
                                     got_real_balance = True
                                     logger.info(f"💰 Got real balance via quick MT5 login: ${actual_balance} | Equity: ${actual_equity} | Free Margin: ${actual_margin_free} | P/L: ${actual_profit}")
                             else:
@@ -10196,7 +10201,7 @@ def test_broker_connection():
                     UPDATE broker_credentials
                     SET password = ?, server = ?, is_live = ?, is_active = 1, updated_at = ?,
                         cached_balance = ?, cached_equity = ?, cached_margin_free = ?, 
-                        cached_margin = ?, cached_margin_level = ?, cached_profit = ?, last_balance_update = ?
+                        cached_margin = ?, cached_margin_level = ?, cached_profit = ?
                     WHERE credential_id = ?
                 ''', (password, server, int(is_live), datetime.now().isoformat(),
                       actual_balance if got_real_balance else None,
@@ -10205,7 +10210,6 @@ def test_broker_connection():
                       actual_margin_used if got_real_balance else None,
                       actual_margin_level if got_real_balance else None,
                       actual_profit if got_real_balance else None,
-                      datetime.now().isoformat() if got_real_balance else None,
                       credential_id))
                 logger.info(f"ℹ️  Updated broker credential: {broker} | Account: {account}")
             else:
@@ -10213,9 +10217,9 @@ def test_broker_connection():
                 cursor.execute('''
                     INSERT INTO broker_credentials 
                     (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at, updated_at,
-                     cached_balance, cached_equity, cached_margin_free, cached_margin, cached_margin_level, cached_profit, last_balance_update)
+                     cached_balance, cached_equity, cached_margin_free, cached_margin, cached_margin_level, cached_profit)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?, ?)
                 ''', (credential_id, user_id, broker, account, password, server, int(is_live), 
                       datetime.now().isoformat(), datetime.now().isoformat(),
                       actual_balance if got_real_balance else None,
@@ -10223,8 +10227,7 @@ def test_broker_connection():
                       actual_margin_free if got_real_balance else None,
                       actual_margin_used if got_real_balance else None,
                       actual_margin_level if got_real_balance else None,
-                      actual_profit if got_real_balance else None,
-                      datetime.now().isoformat() if got_real_balance else None))
+                      actual_profit if got_real_balance else None))
                 logger.info(f"✅ Created broker credential: {broker} | Account: {account}")
             
             conn.commit()
