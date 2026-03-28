@@ -76,6 +76,7 @@ class TradingService extends ChangeNotifier {
   double get accountBalance => primaryAccount?.balance ?? 0.0;
   double get accountEquity => (primaryAccount?.balance ?? 0.0) - (primaryAccount?.usedMargin ?? 0.0);
   double get freeMargin => primaryAccount?.availableMargin ?? 0.0;
+  double get accountProfit => primaryAccount?.profit ?? 0.0;
 
   Account? get primaryAccount => _accounts.isNotEmpty ? _accounts[0] : null;
 
@@ -305,9 +306,9 @@ class TradingService extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         final sessionToken = prefs.getString('auth_token');
         
-        // Use public endpoint for account info
+        // Use detailed endpoint to get all account metrics including profit
         final response = await http.get(
-          Uri.parse('$_apiUrl/api/account/info'),
+          Uri.parse('$_apiUrl/api/account/detailed'),
           headers: {
             'Content-Type': 'application/json',
             if (sessionToken != null && sessionToken.isNotEmpty)
@@ -324,13 +325,14 @@ class TradingService extends ChangeNotifier {
               id: '1',
               accountNumber: accData['accountNumber'].toString(),
               balance: (accData['balance'] as num).toDouble(),
-              usedMargin: ((accData['marginUsed'] ?? 0) as num).toDouble(),
+              usedMargin: ((accData['margin'] ?? 0) as num).toDouble(),
               availableMargin: ((accData['marginFree'] ?? 0) as num).toDouble(),
+              profit: (accData['profit'] ?? 0.0).toDouble(),
               currency: accData['currency'] ?? 'USD',
               status: 'active',
               createdAt: DateTime.now().subtract(const Duration(days: 365)),
               leverage: '1:${accData['leverage'] ?? 100}',
-              broker: accData['broker'] ?? 'MetaTrader 5',
+              broker: accData['broker'] ?? 'Exness',
             )
           ];
 
