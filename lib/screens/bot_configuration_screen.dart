@@ -395,27 +395,25 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     setState(() {
       _managementProfile = profile;
       if (profile == 'beginner') {
-        if (_maxOpenTrades > 2) {
-          _maxOpenTrades = 2;
-        }
-        if (_riskPercent > 2.0) {
-          _riskPercent = 2.0;
-        }
-        if (_maxDrawdownPercent > 12.0) {
-          _maxDrawdownPercent = 12.0;
-        }
+        if (_maxOpenTrades > 2) _maxOpenTrades = 2;
+        if (_riskPercent > 2.0) _riskPercent = 2.0;
+        if (_maxDrawdownPercent > 12.0) _maxDrawdownPercent = 12.0;
         _allowedVolatility = ['Low'];
       } else if (profile == 'balanced') {
-        if (_maxOpenTrades > 3) {
-          _maxOpenTrades = 3;
-        }
-        if (_riskPercent > 3.0) {
-          _riskPercent = 3.0;
-        }
-        if (_maxDrawdownPercent > 18.0) {
-          _maxDrawdownPercent = 18.0;
-        }
+        if (_maxOpenTrades > 3) _maxOpenTrades = 3;
+        if (_riskPercent > 3.0) _riskPercent = 3.0;
+        if (_maxDrawdownPercent > 18.0) _maxDrawdownPercent = 18.0;
         _allowedVolatility = ['Low', 'Medium'];
+      } else if (profile == 'fast_growth') {
+        // Fast Growth: for small accounts, aggressive but capped
+        _maxOpenTrades = 6;
+        _riskPercent = 4.0;
+        _maxDrawdownPercent = 25.0;
+        _allowedVolatility = ['Medium', 'High'];
+        _targetProfit = 20; // Lower target for quick compounding
+        _minProfit = 5;
+        _maxProfit = 50;
+        _winRateMin = 50;
       } else {
         _allowedVolatility = ['Low', 'Medium'];
       }
@@ -1533,6 +1531,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   selected: _managementProfile == 'advanced',
                                   onSelected: (_) => _applyManagementProfile('advanced'),
                                 ),
+                                ChoiceChip(
+                                  label: const Text('Fast Growth'),
+                                  selected: _managementProfile == 'fast_growth',
+                                  onSelected: (_) => _applyManagementProfile('fast_growth'),
+                                  backgroundColor: Colors.orange.withOpacity(0.15),
+                                  labelStyle: const TextStyle(color: Colors.orange),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -1541,7 +1546,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   ? 'Recommended for inexperienced clients: fewer trades, stricter signals, and low-volatility execution only.'
                                   : _managementProfile == 'balanced'
                                       ? 'Moderate automation: controlled stacking with medium-volatility access.'
-                                      : 'Keeps intelligent protections on while allowing broader execution settings.',
+                                      : _managementProfile == 'fast_growth'
+                                          ? 'Fast Growth: For small accounts. Aggressive but capped risk, more trades, tighter SL/TP, and quick compounding.'
+                                          : 'Keeps intelligent protections on while allowing broader execution settings.',
                               style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                             ),
                           ],

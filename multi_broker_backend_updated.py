@@ -9200,14 +9200,47 @@ def get_best_trading_assets(limit=5):
                     return
                 symbol = tradable_symbols[0]  # Or use your asset selection logic
 
-                # ...existing trade logic...
-                # Only place trade if should_trade_today passed
-                # (Insert your trade execution code here)
-
-                # Example: Place trade (pseudo-code)
-                # result = place_trade(symbol, ...)
-                # if result['success']:
-                #     update bot metrics, etc.
+                # --- Small Account & Fast Growth Profile Logic ---
+                profile = bot.get('managementProfile') or bot.get('profile')
+                balance = float(bot.get('accountBalance', 0))
+                min_lot = 0.01
+                # If Fast Growth profile or balance is small, apply special logic
+                if profile == 'fast_growth' or balance <= 200:
+                    risk_percent = min(float(bot.get('riskPercent', 4.0)), 5.0)
+                    sl = float(bot.get('stopLoss', 0))
+                    tp = float(bot.get('takeProfit', 0))
+                    if not sl or sl > balance * 0.01:
+                        sl = round(balance * 0.005, 2)  # 0.5% of balance
+                    if not tp or tp > balance * 0.02:
+                        tp = round(balance * 0.01, 2)   # 1% of balance
+                    max_trades = max(int(bot.get('maxOpenTrades', 6)), 4)
+                    lot_size = max(min_lot, round((balance * risk_percent / 100) / (sl if sl else 1), 2))
+                    trade_params = {
+                        'symbol': symbol,
+                        'order_type': 'BUY',  # or use bot logic
+                        'volume': lot_size,
+                        'stopLoss': sl,
+                        'takeProfit': tp,
+                        'maxOpenTrades': max_trades,
+                        'autoCompound': True
+                    }
+                else:
+                    # Default logic for other profiles
+                    trade_params = {
+                        'symbol': symbol,
+                        'order_type': 'BUY',  # or use bot logic
+                        'volume': bot.get('lotSize', 0.01),
+                        'stopLoss': bot.get('stopLoss'),
+                        'takeProfit': bot.get('takeProfit'),
+                        'maxOpenTrades': bot.get('maxOpenTrades', 3),
+                        'autoCompound': False
+                    }
+                # Place trade
+                result = place_trade(**trade_params)
+                if result.get('success'):
+                    logger.info(f"[TRADE] Bot {bot_id} placed trade: {trade_params} Result: {result}")
+                else:
+                    logger.warning(f"[TRADE] Bot {bot_id} failed to place trade: {trade_params} Result: {result}")
 
             # Note: Integrate this logic into your actual bot trading scheduler/loop.
             # (unchanged scoring logic)
