@@ -1069,14 +1069,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Container(
                     width: 40, height: 40,
                     decoration: BoxDecoration(
-                      color: connected
+                      color: (connected || balance > 0)
                           ? const Color(0xFF69F0AE).withOpacity(0.15)
                           : const Color(0xFFFF8A80).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
-                      connected ? Icons.account_balance_wallet : Icons.error_outline,
-                      color: connected ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      (connected || balance > 0) ? Icons.account_balance_wallet : Icons.error_outline,
+                      color: (connected || balance > 0) ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                       size: 20,
                     ),
                   ),
@@ -1089,12 +1089,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
                         Text('Account: $accountNum',
                           style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10)),
-                        if (!connected && error != null)
+                        if (!connected && balance == 0 && error != null)
                           Text(error, style: GoogleFonts.poppins(color: const Color(0xFFFF8A80), fontSize: 10)),
                       ],
                     ),
                   ),
-                  if (connected)
+                  if (balance > 0 || connected)
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [

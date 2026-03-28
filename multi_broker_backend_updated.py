@@ -6139,6 +6139,7 @@ def get_account_balances():
                 if cached_balance == 0:
                     logger.info(f"ℹ️  {cache_key}: No cached balance — showing $0")
                 
+                has_cached_data = cached_balance > 0
                 account_entry.update({
                     'balance': float(cached_balance),
                     'equity': float(cached_equity),
@@ -6147,10 +6148,14 @@ def get_account_balances():
                     'margin_level': float(cached_margin_level),
                     'total_pl': float(cached_profit),
                     'currency': 'USD',
-                    'connected': False,
-                    'dataSource': 'cache' if cached_balance > 0 else 'not_connected',
-                    'warning': 'Using last known balance' if cached_balance > 0 else 'Account not connected — balance will update when bot runs',
+                    'connected': has_cached_data,  # Show as connected when we have valid cached data
+                    'dataSource': 'cache' if has_cached_data else 'not_connected',
                 })
+                # Clear error when cached data is available — it's not an error
+                if has_cached_data:
+                    account_entry.pop('error', None)
+                else:
+                    account_entry['warning'] = 'Account not connected — balance will update when bot runs'
                 
                 # Add to broker group
                 if broker_name not in accounts_summary['brokers']:
