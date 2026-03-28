@@ -12795,6 +12795,124 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 except Exception as close_check_e:
                     logger.warning(f"Bot {bot_id}: Error checking closed positions: {close_check_e}")
                 
+                # ==================== DISCOVER UNTRACKED POSITIONS ====================
+                # Sync ALL MT5 positions for this bot's symbols into open_positions/tradeHistory.
+                # This catches positions that existed before tracking was enabled, or were placed
+                # by MT5 directly (TP/SL spawned hedges, manual trades on same symbols, etc.)
+                try:
+                    if is_mt5 and mt5_conn and bot_config.get('symbols'):
+                        discovery_positions = mt5_conn.get_positions()
+                        tracked_positions = bot_config.get('open_positions', {})
+                        tracked_tickets = set(tracked_positions.keys())
+                        bot_symbols = set(bot_config.get('symbols', []))
+                        bot_id_short = bot_id.split('_')[-1][:8]
+                        comment_tag = f'ZBot{bot_id_short}'
+                        
+                        discovered_count = 0
+                        for dp in discovery_positions:
+                            dp_ticket = str(dp.get('ticket', ''))
+                            dp_symbol = dp.get('symbol', '')
+                            dp_comment = dp.get('comment', '') or ''
+                            
+                            # Skip if already tracked
+                            if dp_ticket in tracked_tickets:
+                                continue
+                            
+                            # Match: position is on one of the bot's symbols, OR has the bot's comment tag
+                            is_bot_symbol = dp_symbol in bot_symbols
+                            is_bot_comment = comment_tag in dp_comment
+                            
+                            if is_bot_symbol or is_bot_comment:
+                                dp_type = dp.get('type', 'BUY')
+                                dp_volume = dp.get('volume', 0)
+                                dp_entry_price = dp.get('openPrice') or dp.get('price_open') or dp.get('level', 0)
+                                dp_current_price = dp.get('currentPrice') or dp.get('marketPrice') or dp.get('price_current', 0)
+                                dp_profit = round(dp.get('profit') or dp.get('pnl') or 0, 2)
+                                dp_open_time = dp.get('openTime') or dp.get('time', datetime.now().isoformat())
+                                
+                                # Add to open_positions tracker
+                                if 'open_positions' not in bot_config:
+                                    bot_config['open_positions'] = {}
+                                bot_config['open_positions'][dp_ticket] = {
+                                    'ticket': dp.get('ticket', dp_ticket),
+                                    'symbol': dp_symbol,
+                                    'type': dp_type,
+                                    'volume': dp_volume,
+                                    'entryPrice': dp_entry_price,
+                                    'currentPrice': dp_current_price,
+                                    'profit': dp_profit,
+                                    'status': 'open',
+                                    'entryTime': dp_open_time,
+                                    'botId': bot_id,
+                                    'cycle': trade_cycle,
+                                    'strategy': bot_config.get('strategy', 'trend_following'),
+                                    'broker': broker_type,
+                                    'discovered': True,
+                                }
+                                
+                                # Add to tradeHistory if not already there
+                                if 'tradeHistory' not in bot_config:
+                                    bot_config['tradeHistory'] = []
+                                existing_th = next(
+                                    (i for i, t in enumerate(bot_config['tradeHistory']) if str(t.get('ticket')) == dp_ticket),
+                                    None,
+                                )
+                                open_trade = {
+                                    'ticket': dp.get('ticket', dp_ticket),
+                                    'symbol': dp_symbol,
+                                    'type': dp_type,
+                                    'volume': dp_volume,
+                                    'entryPrice': dp_entry_price,
+                                    'currentPrice': dp_current_price,
+                                    'profit': dp_profit,
+                                    'time': dp_open_time,
+                                    'timestamp': int(datetime.now().timestamp() * 1000),
+                                    'botId': bot_id,
+                                    'status': 'open',
+                                    'isWinning': dp_profit > 0,
+                                    'source': f"DISCOVERED_{str(broker_type).upper().replace(' ', '_')}",
+                                    'broker': broker_type,
+                                }
+                                if existing_th is None:
+                                    bot_config['tradeHistory'].append(open_trade)
+                                    bot_config['totalTrades'] = bot_config.get('totalTrades', 0) + 1
+                                    discovered_count += 1
+                                else:
+                                    # Update existing entry with live data
+                                    bot_config['tradeHistory'][existing_th].update({
+                                        'currentPrice': dp_current_price,
+                                        'profit': dp_profit,
+                                        'isWinning': dp_profit > 0,
+                                        'status': 'open',
+                                    })
+                                
+                                # Also insert into DB if not already there
+                                if existing_th is None:
+                                    try:
+                                        disc_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                                        disc_cursor = disc_conn.cursor()
+                                        trade_id = f"disc_{int(datetime.now().timestamp()*1000)}_{dp_ticket}"
+                                        disc_cursor.execute('''
+                                            INSERT OR IGNORE INTO trades (trade_id, bot_id, user_id, symbol, order_type, volume, price, profit, ticket, time_open, status, created_at, trade_data, timestamp)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        ''', (
+                                            trade_id, bot_id, user_id, dp_symbol, dp_type, dp_volume,
+                                            dp_entry_price, dp_profit, dp_ticket, dp_open_time,
+                                            'open', datetime.now().isoformat(),
+                                            json.dumps({'ticket': dp_ticket, 'symbol': dp_symbol, 'type': dp_type, 'entryPrice': dp_entry_price, 'source': 'DISCOVERED'}),
+                                            int(datetime.now().timestamp() * 1000)
+                                        ))
+                                        disc_conn.commit()
+                                        disc_conn.close()
+                                    except Exception as disc_db_e:
+                                        logger.warning(f"Bot {bot_id}: Error saving discovered trade: {disc_db_e}")
+                        
+                        if discovered_count > 0:
+                            logger.info(f"🔍 Bot {bot_id}: Discovered {discovered_count} untracked position(s) on {', '.join(bot_symbols)}")
+                
+                except Exception as disc_e:
+                    logger.warning(f"Bot {bot_id}: Error discovering untracked positions: {disc_e}")
+                
                 # Update account balance (broker-aware)
                 try:
                     if active_conn:
@@ -13583,7 +13701,7 @@ def bot_status():
             
             # Calculate daily profit (safely access dailyProfits)
             today = datetime.now().strftime('%Y-%m-%d')
-            daily_profits = bot.get('dailyProfits', {})
+            daily_profits = dict(bot.get('dailyProfits', {}))  # Copy so we don't mutate the original
             daily_profit = daily_profits.get(today, bot.get('dailyProfit', 0))
             
             # Calculate ROI (safely access totalInvestment and totalProfit)
@@ -13591,6 +13709,19 @@ def bot_status():
             open_positions = list(bot.get('open_positions', {}).values())
             floating_profit = sum(float(position.get('profit') or 0) for position in open_positions)
             current_profit = total_profit + floating_profit
+            
+            # ✅ Inject floating P/L into dailyProfits for "Profit Over Time" chart
+            # Without this, the chart is empty until trades actually close.
+            if floating_profit != 0 or daily_profit != 0:
+                daily_profits[today] = round(daily_profit + floating_profit, 2)
+            # Also add historical profit entries from profitHistory if dailyProfits is sparse
+            profit_history = bot.get('profitHistory', [])
+            for ph in profit_history:
+                ph_ts = ph.get('timestamp', 0)
+                if ph_ts:
+                    ph_date = datetime.fromtimestamp(ph_ts / 1000).strftime('%Y-%m-%d')
+                    if ph_date not in daily_profits:
+                        daily_profits[ph_date] = round(ph.get('profit', 0), 2)
             # Use totalInvestment if available, otherwise assume $10,000 initial investment (standard for demo/live)
             investment = bot.get('totalInvestment', 10000)
             if investment <= 0:

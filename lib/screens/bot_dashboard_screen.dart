@@ -694,26 +694,50 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.2)),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF), size: 16),
-                      const SizedBox(width: 8),
-                      Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.account_balance_wallet, color: Color(0xFF00E5FF), size: 16),
+                          const SizedBox(width: 8),
+                          Text('Balance', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                        ],
+                      ),
+                      Flexible(
+                        child: Text(
+                          _formatAmount(currencyProvider, accountBalance),
+                          style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontWeight: FontWeight.w700, fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
-                  Text(
-                    _formatAmount(currencyProvider, accountBalance),
-                    style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontWeight: FontWeight.w700, fontSize: 14),
-                  ),
                   if (accountEquity > 0 && accountEquity != accountBalance) ...[
-                    Text(' | ', style: GoogleFonts.poppins(color: Colors.white24, fontSize: 12)),
-                    Text('Equity ', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-                    Text(
-                      _formatAmount(currencyProvider, accountEquity),
-                      style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.trending_up, color: Color(0xFF69F0AE), size: 16),
+                            const SizedBox(width: 8),
+                            Text('Equity', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                          ],
+                        ),
+                        Flexible(
+                          child: Text(
+                            _formatAmount(currencyProvider, accountEquity),
+                            style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ],
