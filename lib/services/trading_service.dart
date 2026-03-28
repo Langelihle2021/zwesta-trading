@@ -74,8 +74,8 @@ class TradingService extends ChangeNotifier {
 
   // Account metrics getters
   double get accountBalance => primaryAccount?.balance ?? 0.0;
-  double get accountEquity => primaryAccount?.equity ?? 0.0;
-  double get freeMargin => primaryAccount?.margin ?? 0.0;
+  double get accountEquity => (primaryAccount?.balance ?? 0.0) - (primaryAccount?.usedMargin ?? 0.0);
+  double get freeMargin => primaryAccount?.availableMargin ?? 0.0;
 
   Account? get primaryAccount => _accounts.isNotEmpty ? _accounts[0] : null;
 

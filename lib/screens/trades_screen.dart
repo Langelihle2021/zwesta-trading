@@ -228,17 +228,17 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
-  Widget _buildLivePositionCard(BuildContext context, Map<String, dynamic> position) {
-    final symbol = position['symbol'] ?? 'UNKNOWN';
-    final type = position['type']?.toString() ?? 'buy';
-    final volume = position['volume'] ?? 0.0;
-    final openPrice = position['openPrice']?.toDouble() ?? 0.0;
-    final currentPrice = position['currentPrice']?.toDouble() ?? 0.0;
-    final profit = position['profit']?.toDouble() ?? 0.0;
+  Widget _buildLivePositionCard(BuildContext context, Trade position) {
+    final symbol = position.symbol;
+    final type = position.type == TradeType.buy ? 'BUY' : 'SELL';
+    final volume = position.quantity;
+    final openPrice = position.entryPrice;
+    final currentPrice = position.currentPrice ?? position.entryPrice;
+    final profit = position.profit ?? 0.0;
     final profitPct = openPrice > 0 ? ((currentPrice - openPrice) / openPrice * 100) : 0.0;
-    final openTime = position['openTime']?.toString() ?? '';
+    final openTime = position.openedAt.toString().split('.')[0];
     
-    final isBuy = type.toLowerCase() == 'buy';
+    final isBuy = position.type == TradeType.buy;
     final isProfitable = profit >= 0;
 
     return Card(
@@ -291,7 +291,7 @@ class _TradesScreenState extends State<TradesScreen> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    isBuy ? 'BUY' : 'SELL',
+                    type,
                     style: GoogleFonts.poppins(
                       color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                       fontSize: 11,
@@ -389,6 +389,7 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
+  Widget _buildTabButton(BuildContext context, String label, int index, String count) {
     final isSelected = _selectedTab == index;
     return GestureDetector(
       onTap: () {
