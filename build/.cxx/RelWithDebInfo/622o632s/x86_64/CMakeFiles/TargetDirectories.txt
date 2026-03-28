@@ -1,2 +1,0 @@
-C:/zwesta-trader/Zwesta Flutter App/build/.cxx/RelWithDebInfo/622o632s/x86_64/CMakeFiles/edit_cache.dir
-C:/zwesta-trader/Zwesta Flutter App/build/.cxx/RelWithDebInfo/622o632s/x86_64/CMakeFiles/rebuild_cache.dir

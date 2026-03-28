@@ -155,6 +155,7 @@ class TradingService extends ChangeNotifier {
               balance: (accountData['balance'] as num).toDouble(),
               usedMargin: ((accountData['marginUsed'] ?? 0) as num).toDouble(),
               availableMargin: ((accountData['marginFree'] ?? 0) as num).toDouble(),
+              profit: (accountData['profit'] ?? 0.0).toDouble(),
               currency: accountData['currency'] ?? 'USD',
               status: 'active',
               createdAt: DateTime.now().subtract(const Duration(days: 365)),
@@ -565,6 +566,7 @@ class TradingService extends ChangeNotifier {
           balance: 50000, // Would fetch from broker API
           usedMargin: 5000,
           availableMargin: 45000,
+          profit: 0.0,
           currency: 'USD',
           status: 'active',
           createdAt: DateTime.now().subtract(const Duration(days: 365)),
