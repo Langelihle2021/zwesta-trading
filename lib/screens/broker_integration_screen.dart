@@ -46,24 +46,14 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   List<BrokerAccount> _savedAccounts = [];
   BrokerAccount? _activeAccount;
 
+  // ✅ ONLY INTEGRATED BROKERS - These are fully working and tested
   final List<String> brokers = [
-    'Binance',
-    'OANDA',
-    'XM',
-    'Pepperstone',
-    'FxOpen',
-    'Exness',
-    'Darwinex',
-    'IC Markets',
-    'IG Markets',
-    'FXM',
-    'AvaTrade',
-    'FP Markets',
-    'Zulu Trade (SA)',
-    'Ovex (SA)',
-    'PXBT',
-    'Trade Nations',
-    'MetaQuotes',
+    'Exness',      // ✅ Full MT5 support with crypto
+    'XM',          // ✅ MT5 with forex/indices
+    'PXBT',        // ✅ Prime XBT crypto trading
+    'Binance',     // ✅ Crypto spot trading
+    'OANDA',       // ✅ REST API forex trading
+   // FXCM support available but requires separate API key
   ];
 
   final Map<String, String> brokerServers = {
@@ -138,9 +128,21 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     if (!_isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('❌ Must test connection before saving'),
+          content: Text('❌ Must test connection first (click "Test Connection" button)'),
           backgroundColor: Colors.orange,
-          duration: Duration(seconds: 3),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    
+    // Prevent double-save
+    if (_showSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Already saved - please wait'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
       );
       return;
@@ -280,7 +282,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       
       final exnessCheck = await _checkExnessAvailability();
       
-      if (!exnessCheck['available'] == true) {
+      // ✅ FIXED: Use proper comparison (was "!available == true" which is wrong)
+      if (exnessCheck['available'] != true) {
         if (mounted) {
           setState(() => _isTestingConnection = false);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -300,7 +303,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
       final pxbtCheck = await _checkPxbtAvailability();
 
-      if (!pxbtCheck['available'] == true) {
+      // ✅ FIXED: Use proper comparison (was "!available == true" which is wrong)
+      if (pxbtCheck['available'] != true) {
         if (mounted) {
           setState(() => _isTestingConnection = false);
           ScaffoldMessenger.of(context).showSnackBar(
