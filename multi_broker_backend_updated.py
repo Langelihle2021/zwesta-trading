@@ -13735,10 +13735,14 @@ def bot_status():
             
             # Calculate profitability (profit as % of total traded value)
             total_trades = bot.get('totalTrades', 0)
+            # Count open positions that are currently in profit as "winning"
+            open_winning = sum(1 for p in open_positions if float(p.get('profit') or 0) > 0)
+            closed_winning = bot.get('winningTrades', 0)
+            effective_winning = closed_winning + open_winning
+            effective_win_rate = round((effective_winning / max(total_trades, 1)) * 100, 1)
             if total_trades > 0:
-                # Estimate: avg trade size * total trades = rough traded volume
-                avg_trade_profit = total_profit / total_trades
-                profitability = avg_trade_profit  # Use as profitability metric
+                avg_trade_profit = current_profit / total_trades
+                profitability = avg_trade_profit
             else:
                 profitability = 0
             
@@ -13774,7 +13778,7 @@ def bot_status():
                 'currentProfit': round(current_profit, 2),
                 'totalTrades': bot.get('totalTrades', 0),
                 'winningTrades': bot.get('winningTrades', 0),
-                'winRate': round((bot.get('winningTrades', 0) / max(bot.get('totalTrades', 1), 1)) * 100, 1),
+                'winRate': effective_win_rate,
                 'maxDrawdown': round(bot.get('maxDrawdown', 0), 2),
                 'runtimeFormatted': f"{int(runtime_hours)}h {int(runtime_minutes)}m",
                 'dailyProfit': round(daily_profit + floating_profit, 2),

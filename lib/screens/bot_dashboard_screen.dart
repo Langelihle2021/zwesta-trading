@@ -803,17 +803,23 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       ),
                     ),
                     const Spacer(),
-                    Text(
-                      '${posVolume.toStringAsFixed(2)} lots',
-                      style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
+                    Flexible(
+                      child: Text(
+                        '${posVolume.toStringAsFixed(2)} lots',
+                        style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    const SizedBox(width: 10),
-                    Text(
-                      '@ ${posEntry.toStringAsFixed(posEntry > 100 ? 2 : 5)}',
-                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '@ ${posEntry.toStringAsFixed(posEntry > 100 ? 2 : 5)}',
+                        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     if (posCurrent > 0 || posProfit != 0) ...[
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 6),
                       Text(
                         '\$${posProfit.toStringAsFixed(2)}',
                         style: GoogleFonts.poppins(
@@ -821,6 +827,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],

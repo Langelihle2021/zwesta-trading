@@ -181,7 +181,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         fontSize: 14,
       );
 
-      final totalProfit = (_botData['totalProfit'] ?? 0).toDouble();
+      final totalProfit = (_botData['currentProfit'] ?? _botData['profit'] ?? _botData['totalProfit'] ?? 0).toDouble();
       final totalTrades = _botData['totalTrades']?.toInt() ?? 0;
       final winRate = (_botData['winRate'] ?? 0).toDouble();
       final roi = (_botData['roi'] ?? 0).toDouble();
@@ -562,12 +562,16 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
