@@ -3018,6 +3018,62 @@ class MT5Connection(BrokerConnection):
             if self.is_symbol_available(symbol):
                 return symbol
         return "EURUSDm"  # Last resort fallback
+    
+    def wait_for_critical_symbols(self, symbols: list, timeout_seconds: int = 30) -> bool:
+        """
+        Wait for critical symbols (like ETHUSDm, BTCUSDm) to be loaded and available.
+        Critical symbols require special handling because:
+        - They fail fast if not available (no fallback)
+        - They trade 24/7 but need different subscription patterns
+        - Trading wrong symbol instead causes silent loss
+        
+        Returns True if all critical symbols are available, False on timeout
+        """
+        critical_symbols = {'BTCUSDm', 'ETHUSDm'}  # Define critical symbols that MUST be available
+        symbols_to_wait = [s for s in symbols if s in critical_symbols]
+        
+        if not symbols_to_wait:
+            return True  # No critical symbols, no need to wait
+        
+        logger.info(f"⏳ Checking critical symbols: {symbols_to_wait} (timeout: {timeout_seconds}s)")
+        
+        start_time = time.time()
+        check_interval = 2  # Check every 2 seconds for symbols
+        attempt = 0
+        
+        while time.time() - start_time < timeout_seconds:
+            attempt += 1
+            elapsed = time.time() - start_time
+            unavailable = []
+            
+            for symbol in symbols_to_wait:
+                try:
+                    if not self.mt5.symbol_select(symbol, True):
+                        unavailable.append(symbol)
+                        continue
+                    
+                    tick = self.mt5.symbol_info_tick(symbol)
+                    if tick is None:
+                        unavailable.append(symbol)
+                        continue
+                    
+                    # Symbol is available
+                    logger.debug(f"  ✅ {symbol}: available (bid={tick.bid}, ask={tick.ask})")
+                except Exception as e:
+                    logger.debug(f"  ⚠️ {symbol}: check failed - {e}")
+                    unavailable.append(symbol)
+            
+            if not unavailable:
+                logger.info(f"✅ All critical symbols ready after {elapsed:.0f}s: {symbols_to_wait}")
+                return True
+            else:
+                logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: Waiting for symbols: {unavailable}")
+                time.sleep(check_interval)
+        
+        # Timeout reached
+        logger.error(f"❌ Critical symbols NOT ready after {timeout_seconds}s: {unavailable}")
+        logger.error(f"   {unavailable} may take longer to load. Trading may fail if symbols don't become available.")
+        return False
 
     def _get_filling_type(self, symbol: str):
         """Auto-detect the correct ORDER_FILLING type for the broker/symbol.
@@ -11627,6 +11683,20 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
                                         time.sleep(actual_wait)
                                         continue
+                                
+                                # ==================== WAIT FOR CRITICAL SYMBOLS ====================
+                                # For bots trading ETHUSDm or BTCUSDm, ensure they're fully loaded
+                                # These symbols require special initialization and fail fast if unavailable
+                                symbols_list = bot_config.get('symbols', ['EURUSDm'])
+                                if trade_cycle == 1:  # Only on first cycle to avoid repeated delays
+                                    if not mt5_conn.wait_for_critical_symbols(symbols_list, timeout_seconds=15):
+                                        logger.warning(f"Bot {bot_id}: Critical symbols not ready yet, will retry next cycle")
+                                        # Rather than fail immediately, retry in next cycle
+                                        # Critical symbols usually load within 30-60 seconds total after MT5 connects
+                                        time.sleep(trading_interval)
+                                        continue
+                                # ==================== END CRITICAL SYMBOL CHECK ====================
+                                
                         active_conn = mt5_conn
                         
                     except Exception as e:
@@ -11928,18 +11998,60 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         symbol = actual_symbol  # Update to actual traded symbol
                                         break
                                     else:
-                                        error_msg = order_result.get('error', '').lower()
-                                        is_last_attempt = (index == len(symbols_to_try) - 1)
+                                        # ==================== CRITICAL SYMBOL RETRY LOGIC ====================
+                                        # If critical symbol (ETHUSDm, BTCUSDm) is temporarily unavailable,
+                                        # wait the suggested time and retry (don't give up immediately)
+                                        retry_after = order_result.get('retry_after_seconds')
+                                        is_critical = attempt_symbol in critical_symbols
                                         
-                                        if ('not found' in error_msg or 'disconnected' in error_msg or 'order_send failed' in error_msg) and not is_last_attempt:
-                                            logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol} ({order_result.get('error')}) - trying {symbols_to_try[index+1]}...")
-                                            continue
+                                        if is_critical and retry_after and retry_after > 0:
+                                            logger.warning(f"⏳ Bot {bot_id}: {attempt_symbol} not yet available (retry in {retry_after}s)...")
+                                            logger.warning(f"   Symbol is loading. MT5 terminal may still be initializing symbols.")
+                                            # Wait for symbol to load, then retry immediately (max 3 retries)
+                                            total_retries = 3
+                                            for retry_num in range(total_retries):
+                                                time.sleep(retry_after)
+                                                logger.info(f"🔄 Bot {bot_id}: Retry {retry_num + 1}/{total_retries} for {attempt_symbol}...")
+                                                retry_result = mt5_conn.place_order(
+                                                    symbol=attempt_symbol,
+                                                    order_type=order_type,
+                                                    volume=round(adjusted_volume, 2),
+                                                    comment=comment_short,
+                                                    stopLoss=sl_price,
+                                                    takeProfit=tp_price
+                                                )
+                                                if retry_result.get('success', False):
+                                                    logger.info(f"✅ Bot {bot_id}: {attempt_symbol} order placed successfully after retry {retry_num + 1}")
+                                                    order_result = retry_result
+                                                    symbol = attempt_symbol
+                                                    break
+                                                elif retry_num < total_retries - 1:
+                                                    retry_wait = retry_result.get('retry_after_seconds', retry_after)
+                                                    logger.warning(f"   Retry {retry_num + 1} failed, retrying again...")
+                                                    continue
+                                            
+                                            # After retries, check if we finally succeeded
+                                            if order_result.get('success', False):
+                                                break
+                                            else:
+                                                # All retries failed - log but continue (don't trade this cycle)
+                                                logger.error(f"❌ Bot {bot_id}: {attempt_symbol} unavailable after {total_retries} retries: {order_result.get('error')}")
+                                                order_result = {'success': False, 'error': f'{attempt_symbol} still unavailable after retries'}
+                                                break
                                         else:
-                                            # Don't log CRITICAL for pause conditions (position limit, market closed, etc.)
-                                            if attempt_symbol in critical_symbols and not order_result.get('is_paused'):
-                                                logger.error(f"❌ CRITICAL SYMBOL FAILED: Bot {bot_id}: {attempt_symbol} failed and NO fallback allowed: {order_result.get('error')}")
-                                            logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
-                                            break
+                                            # Standard error handling (not a retry-able initialization delay)
+                                            error_msg = order_result.get('error', '').lower()
+                                            is_last_attempt = (index == len(symbols_to_try) - 1)
+                                            
+                                            if ('not found' in error_msg or 'disconnected' in error_msg or 'order_send failed' in error_msg) and not is_last_attempt:
+                                                logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol} ({order_result.get('error')}) - trying {symbols_to_try[index+1]}...")
+                                                continue
+                                            else:
+                                                # Don't log CRITICAL for pause conditions (position limit, market closed, etc.)
+                                                if attempt_symbol in critical_symbols and not order_result.get('is_paused'):
+                                                    logger.error(f"❌ CRITICAL SYMBOL FAILED: Bot {bot_id}: {attempt_symbol} failed and NO fallback allowed: {order_result.get('error')}")
+                                                logger.warning(f"Bot {bot_id}: Order failed on {attempt_symbol}: {order_result.get('error')}")
+                                                break
                                 except Exception as e:
                                     logger.error(f"Bot {bot_id}: Exception placing order on {attempt_symbol}: {e}")
                                     if index < len(symbols_to_try) - 1:
