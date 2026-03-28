@@ -1555,15 +1555,22 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
 
     return Column(
       children: recentTrades.map((trade) {
-        final isWinning = trade['isWinning'] as bool;
-        final profit = trade['profit'] as num;
+        final status = (trade['status']?.toString() ?? 'closed').toLowerCase();
+        final isOpen = status == 'open';
+        final isWinning = (trade['isWinning'] as bool?) ?? false;
+        final profit = (trade['profit'] as num?) ?? 0;
+        final currentPrice = (trade['currentPrice'] as num?)?.toDouble();
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: Colors.grey[900],
             border: Border.all(
-              color: isWinning ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3),
+              color: isOpen
+                  ? Colors.cyan.withOpacity(0.3)
+                  : isWinning
+                      ? Colors.green.withOpacity(0.3)
+                      : Colors.red.withOpacity(0.3),
             ),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -1584,7 +1591,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${trade['type']} • Vol: ${trade['volume']}',
+                      '${trade['type']} • Vol: ${trade['volume']}' +
+                          (currentPrice != null ? ' • Now: ${currentPrice.toStringAsFixed(currentPrice > 100 ? 2 : 5)}' : ''),
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
@@ -1599,16 +1607,24 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                   Text(
                     '\$${profit.toStringAsFixed(2)}',
                     style: TextStyle(
-                      color: isWinning ? Colors.green : Colors.red,
+                      color: isOpen
+                          ? Colors.cyan
+                          : isWinning
+                              ? Colors.green
+                              : Colors.red,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isWinning ? '✓ Win' : '✗ Loss',
+                    isOpen ? 'Open' : isWinning ? '✓ Win' : '✗ Loss',
                     style: TextStyle(
-                      color: isWinning ? Colors.green : Colors.red,
+                      color: isOpen
+                          ? Colors.cyan
+                          : isWinning
+                              ? Colors.green
+                              : Colors.red,
                       fontSize: 10,
                     ),
                   ),
@@ -1730,6 +1746,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           final type = pos['type']?.toString() ?? '';
           final volume = (pos['volume'] ?? 0).toDouble();
           final entryPrice = (pos['entryPrice'] ?? 0).toDouble();
+          final currentPrice = (pos['currentPrice'] ?? 0).toDouble();
+          final profit = (pos['profit'] ?? 0).toDouble();
           final entryTime = pos['entryTime']?.toString() ?? '';
           final isBuy = type.toUpperCase().contains('BUY');
 
@@ -1771,6 +1789,17 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                         '${isBuy ? "BUY" : "SELL"} • ${volume.toStringAsFixed(2)} lots • @ ${entryPrice.toStringAsFixed(entryPrice > 100 ? 2 : 5)}',
                         style: const TextStyle(color: Colors.white60, fontSize: 12),
                       ),
+                      if (currentPrice > 0 || profit != 0) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'Now: ${currentPrice.toStringAsFixed(currentPrice > 100 ? 2 : 5)} • P/L: \$${profit.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: profit >= 0 ? Colors.greenAccent : Colors.redAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

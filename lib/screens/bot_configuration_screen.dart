@@ -156,6 +156,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   double _riskPercent = 2.0;          // Risk per trade as %
   int _maxOpenTrades = 3;             // Max simultaneous trades
   double _maxDrawdownPercent = 20.0;  // Max allowed drawdown %
+  String _managementProfile = 'beginner';
 
   String _selectedStrategy = 'Trend Following';
   List<String> _selectedSymbols = [];
@@ -390,6 +391,68 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     );
   }
 
+  void _applyManagementProfile(String profile) {
+    setState(() {
+      _managementProfile = profile;
+      if (profile == 'beginner') {
+        if (_maxOpenTrades > 2) {
+          _maxOpenTrades = 2;
+        }
+        if (_riskPercent > 2.0) {
+          _riskPercent = 2.0;
+        }
+        if (_maxDrawdownPercent > 12.0) {
+          _maxDrawdownPercent = 12.0;
+        }
+        _allowedVolatility = ['Low'];
+      } else if (profile == 'balanced') {
+        if (_maxOpenTrades > 3) {
+          _maxOpenTrades = 3;
+        }
+        if (_riskPercent > 3.0) {
+          _riskPercent = 3.0;
+        }
+        if (_maxDrawdownPercent > 18.0) {
+          _maxDrawdownPercent = 18.0;
+        }
+        _allowedVolatility = ['Low', 'Medium'];
+      } else {
+        _allowedVolatility = ['Low', 'Medium'];
+      }
+    });
+  }
+
+  int _recommendedSignalThreshold() {
+    switch (_managementProfile) {
+      case 'beginner':
+        return 70;
+      case 'balanced':
+        return 60;
+      default:
+        return 50;
+    }
+  }
+
+  int _recommendedMaxPositionsPerSymbol() {
+    switch (_managementProfile) {
+      case 'beginner':
+        return 1;
+      case 'balanced':
+        return _maxOpenTrades >= 2 ? 2 : 1;
+      default:
+        return _maxOpenTrades >= 2 ? 2 : 1;
+    }
+  }
+
+  List<String> _recommendedAllowedVolatility() {
+    switch (_managementProfile) {
+      case 'beginner':
+        return ['Low'];
+      default:
+        return ['Low', 'Medium'];
+    }
+  }
+
   final List<String> strategies = [
     'Trend Following',
     'Scalping',
@@ -466,19 +529,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           // Get commodities list for symbol selection (nested by category)
           final commoditiesList = data['commodities'] as Map? ?? {};
           tradingSymbols = _buildSymbolsFromApiData(commoditiesList);
-          // Auto-select recommended symbols if none selected
-          if (_selectedSymbols.isEmpty && tradingSymbols.isNotEmpty) {
-            final recommended = ['EURUSDm', 'GBPUSDm', 'USDJPYm', 'XAUUSDm', 'EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'];
-            _selectedSymbols = tradingSymbols
-                .where((s) => recommended.contains(s['symbol']))
-                .take(4)
-                .map((s) => s['symbol']!)
-                .toList();
-            // Fallback: pick first 3 if no recommended match
-            if (_selectedSymbols.isEmpty) {
-              _selectedSymbols = tradingSymbols.take(3).map((s) => s['symbol']!).toList();
-            }
-          }
+          _selectedSymbols = _selectedSymbols
+              .where((symbol) => tradingSymbols.any((item) => item['symbol'] == symbol))
+              .toList();
           _isLoadingData = false;
         });
       }
@@ -609,6 +662,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       print('   Broker: ${credential.broker}');
       print('   Account: ${credential.accountNumber}');
 
+      final internalRiskPerTrade = (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
+      final recommendedVolatility = _recommendedAllowedVolatility();
+      final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
+      final signalThreshold = _recommendedSignalThreshold();
+
       // STEP 2: Create bot with credential_id
       final botPayload = {
         'botId': _botIdController.text,
@@ -616,12 +674,27 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'symbols': _selectedSymbols,
         'strategy': _selectedStrategy,
         'riskPercent': _riskPercent,               // ✅ NEW: Automated risk %
+        'riskPerTrade': internalRiskPerTrade,
         'maxOpenTrades': _maxOpenTrades,           // ✅ NEW: Max open trades
+        'maxOpenPositions': _maxOpenTrades,
+        'maxPositionsPerSymbol': maxPositionsPerSymbol,
         'maxDrawdownPercent': _maxDrawdownPercent, // ✅ NEW: Max drawdown %
+        'drawdownPausePercent': _maxDrawdownPercent,
+        'signalThreshold': signalThreshold,
         if (_investmentAmountController.text.isNotEmpty)
           'tradeAmount': double.tryParse(_investmentAmountController.text),
         'displayCurrency': _currencyCode(context.read<CurrencyProvider>().currency),
-        'allowedVolatility': _allowedVolatility,
+        'allowedVolatility': recommendedVolatility,
+        'autoSwitch': true,
+        'dynamicSizing': true,
+        'managementProfile': _managementProfile,
+        'intelligentManagement': {
+          'enabled': true,
+          'profile': _managementProfile,
+          'experienceLevel': _managementProfile,
+          'autoSwitch': true,
+          'dynamicSizing': true,
+        },
         'enabled': true,
         'autoWithdrawal': _enableAutoWithdrawal ? {
           'enabled': true,
@@ -1428,6 +1501,48 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   ),
                                 ],
                               ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '🧠 Assisted Management Profile',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Beginner'),
+                                  selected: _managementProfile == 'beginner',
+                                  onSelected: (_) => _applyManagementProfile('beginner'),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Balanced'),
+                                  selected: _managementProfile == 'balanced',
+                                  onSelected: (_) => _applyManagementProfile('balanced'),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Advanced'),
+                                  selected: _managementProfile == 'advanced',
+                                  onSelected: (_) => _applyManagementProfile('advanced'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _managementProfile == 'beginner'
+                                  ? 'Recommended for inexperienced clients: fewer trades, stricter signals, and low-volatility execution only.'
+                                  : _managementProfile == 'balanced'
+                                      ? 'Moderate automation: controlled stacking with medium-volatility access.'
+                                      : 'Keeps intelligent protections on while allowing broader execution settings.',
+                              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                             ),
                           ],
                         ),

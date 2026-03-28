@@ -3128,23 +3128,50 @@ class MT5Connection(BrokerConnection):
                     if not self.is_symbol_available(symbol):
                         return {'success': False, 'error': f'Symbol {original_symbol} not available, and fallback {fallback} also unavailable'}
 
-            # STEP 2: Enforce minimum volume for specific symbols
-            min_volumes = {
+            # STEP 2: Select symbol so broker metadata and ticks are available.
+            if not self.mt5.symbol_select(symbol, True):
+                return {'success': False, 'error': f'Failed to select symbol {symbol}'}
+
+            # STEP 3: Normalize requested volume to broker constraints.
+            sym_info = self.mt5.symbol_info(symbol)
+            fallback_min_volumes = {
                 'OILK': 1.0,
                 'XAUUSD': 0.01,
                 'XAGUSD': 0.1,
                 'XAUUSDm': 0.01,
                 'XAGUSDm': 0.1,
-                # Add more as needed
             }
-            min_volume = min_volumes.get(symbol, 0.01)
-            if volume < min_volume:
-                logger.info(f"Adjusting volume for {symbol}: requested={volume}, min={min_volume}")
-                volume = min_volume
+            min_volume = float(getattr(sym_info, 'volume_min', 0.0) or fallback_min_volumes.get(symbol, 0.01))
+            max_volume = float(getattr(sym_info, 'volume_max', 0.0) or 0.0)
+            volume_step = float(getattr(sym_info, 'volume_step', 0.0) or 0.01)
+            requested_volume = float(volume)
+            normalized_volume = requested_volume
 
-            # STEP 3: Select symbol and get tick data
-            if not self.mt5.symbol_select(symbol, True):
-                return {'success': False, 'error': f'Failed to select symbol {symbol}'}
+            if normalized_volume < min_volume:
+                normalized_volume = min_volume
+
+            if volume_step > 0:
+                import math
+                step_precision = max(0, len(f"{volume_step:.10f}".rstrip('0').split('.')[-1]))
+                step_count = math.ceil(((normalized_volume - min_volume) / volume_step) - 1e-9)
+                step_count = max(0, step_count)
+                normalized_volume = round(min_volume + (step_count * volume_step), step_precision)
+            else:
+                step_precision = 2
+
+            if max_volume > 0 and normalized_volume > max_volume:
+                return {
+                    'success': False,
+                    'error': f'Volume {normalized_volume} exceeds broker maximum {max_volume} for {symbol}'
+                }
+
+            if normalized_volume != requested_volume:
+                logger.info(
+                    f"Adjusting volume for {symbol}: requested={requested_volume}, "
+                    f"normalized={normalized_volume}, min={min_volume}, step={volume_step}"
+                )
+
+            volume = normalized_volume
 
             # Get the tick data (bid/ask prices)
             tick = self.mt5.symbol_info_tick(symbol)
@@ -3242,25 +3269,8 @@ class MT5Connection(BrokerConnection):
                     }
                 return {'success': False, 'error': f'MT5 error: {result.comment}', 'retcode': result.retcode}
 
-            # Insert trade record into trades table
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                trade_id = str(uuid.uuid4())
-                bot_id = kwargs.get('bot_id', 'unknown')
-                user_id = kwargs.get('user_id', 'unknown')
-                now = datetime.now().isoformat()
-                cursor.execute('''
-                    INSERT INTO trades (trade_id, bot_id, user_id, symbol, order_type, volume, price, profit, commission, swap, ticket, time_open, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    trade_id, bot_id, user_id, symbol, order_type, volume, price, 0, 0, 0, result.order, now, 'open', now, now
-                ))
-                conn.commit()
-                conn.close()
-                logger.info(f"✅ Trade record inserted for {symbol} {order_type} vol={volume} bot={bot_id}")
-            except Exception as e:
-                logger.error(f"❌ Error inserting trade record: {e}")
+            # Trade insert is handled by the calling bot trading loop (which has the correct bot_id/user_id)
+            # Do not insert here to avoid duplicate records with bot_id='unknown'
 
             return {
                 'success': True,
@@ -7171,19 +7181,20 @@ def get_account_detailed():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get primary broker credential (ORDER BY credential_id to prefer the first/primary account)
+        # PRIORITY ORDER: Try DEMO account first (where bots are actually trading)
+        # Then fall back to LIVE account
         cursor.execute('''
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
-            ORDER BY credential_id
-            LIMIT 1
+            ORDER BY is_live ASC, credential_id
+            LIMIT 2
         ''', (user_id,))
         
-        cred = cursor.fetchone()
+        creds = cursor.fetchall()
         conn.close()
         
-        if not cred:
+        if not creds:
             return jsonify({
                 'success': False,
                 'error': 'No Exness credentials found'
@@ -7191,52 +7202,66 @@ def get_account_detailed():
         
         # CRITICAL FIX: Read from existing MT5 session instead of re-initializing
         import MetaTrader5 as mt5
-        account_int = int(cred[2])
         account_info = None
+        
+        # First, try to use the currently logged-in MT5 session (where bots are actually trading)
         try:
             existing = mt5.account_info()
-            if existing and existing.login == account_int:
-                account_info = {
-                    'accountNumber': cred[2],
-                    'balance': existing.balance,
-                    'equity': existing.equity,
-                    'marginFree': existing.margin_free,
-                    'currency': existing.currency,
-                    'leverage': existing.leverage,
-                    'broker': 'Exness',
-                    'profit': existing.profit,
-                    'margin': existing.margin,
-                    'margin_level': existing.margin_level if existing.margin_level else 0,
-                    'name': existing.name,
-                    'server': existing.server,
-                    'trade_mode': existing.trade_mode,
-                }
-                logger.info(f"✅ Account detailed: Read from existing MT5 session for {account_int}")
+            if existing:
+                # Check if ANY of the user's accounts matches the currently logged-in account
+                for cred in creds:
+                    if existing.login == int(cred[2]):
+                        account_info = {
+                            'accountNumber': cred[2],
+                            'balance': existing.balance,
+                            'equity': existing.equity,
+                            'marginFree': existing.margin_free,
+                            'currency': existing.currency,
+                            'leverage': existing.leverage,
+                            'broker': 'Exness',
+                            'profit': existing.profit,
+                            'margin': existing.margin,
+                            'margin_level': existing.margin_level if existing.margin_level else 0,
+                            'name': existing.name,
+                            'server': existing.server,
+                            'trade_mode': existing.trade_mode,
+                        }
+                        logger.info(f"✅ Account detailed: Read from existing MT5 session for {existing.login}")
+                        break
         except Exception as e:
             logger.warning(f"Could not read existing MT5 session: {e}")
         
+        # If existing session doesn't match any credential, try connecting to each (demo first)
         if not account_info:
-            # Fallback: try full connect (only if session doesn't match)
-            mt5_conn = MT5Connection({
-                'account': account_int,
-                'password': cred[3],
-                'server': cred[4],
-            })
-            if mt5_conn.connect():
-                account_info = mt5_conn.get_account_info()
-                mt5_conn.disconnect()
+            for cred in creds:
+                try:
+                    logger.info(f"Attempting to connect to Exness account {cred[2]} (is_live={cred[5]})")
+                    mt5_conn = MT5Connection({
+                        'account': int(cred[2]),
+                        'password': cred[3],
+                        'server': cred[4],
+                    })
+                    if mt5_conn.connect():
+                        account_info = mt5_conn.get_account_info()
+                        mt5_conn.disconnect()
+                        logger.info(f"✅ Successfully connected to account {cred[2]}")
+                        break
+                    else:
+                        logger.warning(f"Failed to connect to account {cred[2]}")
+                except Exception as e:
+                    logger.warning(f"Exception connecting to account {cred[2]}: {e}")
         
         if account_info:
-            
             return jsonify({
                 'success': True,
                 'account': account_info,
                 'lastUpdate': datetime.utcnow().isoformat(),
             })
         else:
+            # Return error that allows Flutter to use cached balance instead of mock data
             return jsonify({
                 'success': False,
-                'error': 'Could not connect to Exness'
+                'error': 'Could not connect to Exness - MT5 terminal may not be ready'
             }), 503
             
     except Exception as e:
@@ -8549,6 +8574,11 @@ PERSISTED_BOT_STATE_FIELDS = {
     'lastStrategySwitch',
     'maxDailyLoss',
     'maxDrawdown',
+    'maxOpenPositions',
+    'maxPositionsPerSymbol',
+    'managementMode',
+    'managementProfile',
+    'managementState',
     'mode',
     'name',
     'peakProfit',
@@ -8556,10 +8586,12 @@ PERSISTED_BOT_STATE_FIELDS = {
     'profitHistory',
     'profitLock',
     'riskPerTrade',
+    'signalThreshold',
     'startTime',
     'strategy',
     'strategyHistory',
     'symbols',
+    'open_positions',
     'totalInvestment',
     'totalLosses',
     'totalProfit',
@@ -8590,10 +8622,18 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'enabled': bool(row['enabled']),
         'riskPerTrade': 20.0,
         'maxDailyLoss': 60.0,
+        'maxOpenPositions': 5,
+        'maxPositionsPerSymbol': 5,
         'profitLock': 80.0,
         'drawdownPausePercent': 5.0,
         'drawdownPauseHours': 6.0,
         'allowedVolatility': ['Low', 'Medium'],
+        'autoSwitch': True,
+        'dynamicSizing': True,
+        'managementMode': 'assisted',
+        'managementProfile': 'beginner',
+        'managementState': 'normal',
+        'signalThreshold': 70,
         'displayCurrency': 'USD',
         'totalTrades': 0,
         'winningTrades': 0,
@@ -8643,6 +8683,12 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     bot_state['strategy'] = row['strategy']
     bot_state['enabled'] = bool(row['enabled'])
     bot_state['createdAt'] = row['created_at'] or bot_state.get('createdAt') or datetime.now().isoformat()
+    bot_state['maxOpenPositions'] = bot_state.get('maxOpenPositions') or 5
+    bot_state['maxPositionsPerSymbol'] = bot_state.get('maxPositionsPerSymbol') or bot_state['maxOpenPositions']
+    bot_state['managementProfile'] = _normalize_management_profile(bot_state.get('managementProfile'))
+    bot_state['managementMode'] = bot_state.get('managementMode') or 'assisted'
+    bot_state['managementState'] = bot_state.get('managementState') or 'normal'
+    bot_state['signalThreshold'] = bot_state.get('signalThreshold') or BOT_MANAGEMENT_PROFILES[bot_state['managementProfile']]['signalThreshold']
     restored_symbols = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
     bot_state['symbols'] = validate_and_correct_symbols(restored_symbols, broker_name)
     bot_state['tradeHistory'] = bot_state.get('tradeHistory') or []
@@ -8667,8 +8713,47 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
                 logger.info(f"📊 Restored {len(bot_state['tradeHistory'])} trades from DB for bot {row['bot_id']}")
         except Exception as e:
             logger.warning(f"Could not load trades from DB for bot {row['bot_id']}: {e}")
+    # ✅ Always resync totalTrades from DB count — covers both: tradeHistory loaded now
+    # AND the case where tradeHistory was already in persisted runtime_state but totalTrades=0
+    try:
+        tsync_conn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
+        tsync_cur = tsync_conn.cursor()
+        tsync_cur.execute('SELECT COUNT(*) FROM trades WHERE bot_id = ?', (row['bot_id'],))
+        db_trade_count = tsync_cur.fetchone()[0] or 0
+        tsync_conn.close()
+        if db_trade_count > bot_state.get('totalTrades', 0):
+            bot_state['totalTrades'] = db_trade_count
+            logger.info(f"📊 Resynced totalTrades={db_trade_count} from DB for bot {row['bot_id']}")
+    except Exception as e:
+        logger.warning(f"Could not resync totalTrades for bot {row['bot_id']}: {e}")
     bot_state['profitHistory'] = bot_state.get('profitHistory') or []
     bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
+    # Restore open_positions from DB if not already in runtime_state
+    if not bot_state.get('open_positions'):
+        bot_state['open_positions'] = {}
+        try:
+            tconn2 = sqlite3.connect(DATABASE_PATH, timeout=10.0)
+            tconn2.row_factory = sqlite3.Row
+            tcursor2 = tconn2.cursor()
+            tcursor2.execute(
+                "SELECT ticket, symbol, order_type, volume, price, time_open FROM trades WHERE bot_id = ? AND status = 'open'",
+                (row['bot_id'],)
+            )
+            for trow in tcursor2.fetchall():
+                ticket_str = str(trow['ticket'])
+                bot_state['open_positions'][ticket_str] = {
+                    'ticket': trow['ticket'],
+                    'symbol': trow['symbol'],
+                    'type': trow['order_type'],
+                    'volume': trow['volume'],
+                    'entryPrice': trow['price'],
+                    'entryTime': trow['time_open'],
+                }
+            tconn2.close()
+            if bot_state['open_positions']:
+                logger.info(f"📂 Restored {len(bot_state['open_positions'])} open positions from DB for bot {row['bot_id']}")
+        except Exception as e:
+            logger.warning(f"Could not restore open positions for bot {row['bot_id']}: {e}")
     # Clear today's P&L on restore — stale/sample-trade values from before a
     # restart would otherwise immediately trigger daily-loss limits.  Real
     # intra-day P&L will be recalculated from new trades placed after restart.
@@ -9224,7 +9309,7 @@ def should_trade_today(bot_config, symbol):
             return False
 
     # 5. Volatility Filter: Only trade if volatility is allowed
-    allowed_vol = bot_config.get('allowedVolatility', ['Low', 'Medium'])
+    allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Low', 'Medium'])
     # Get current volatility for symbol
     vol = commodity_market_data.get(symbol, {}).get('volatility', 'Medium')
     if allowed_vol and vol not in allowed_vol:
@@ -9238,6 +9323,11 @@ def should_trade_today(bot_config, symbol):
         return False
 
     return True
+
+
+def should_trade_symbol_based_on_risk_management(bot_config, symbol):
+    """Compatibility wrapper for the live trading loop risk gate."""
+    return should_trade_today(bot_config, symbol)
 
 def get_live_prices_from_mt5():
     """Fetch real-time prices from MT5 for all available symbols"""
@@ -10813,6 +10903,48 @@ BOT_RISK_LIMITS = {
     'drawdownPauseHours': (2.0, 12.0),
 }
 
+BOT_MANAGEMENT_PROFILES = {
+    'beginner': {
+        'riskPerTrade': 10.0,
+        'maxDailyLoss': 40.0,
+        'profitLock': 60.0,
+        'drawdownPausePercent': 5.0,
+        'drawdownPauseHours': 8.0,
+        'maxOpenPositions': 2,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': 70,
+        'allowedVolatility': ['Low'],
+        'autoSwitch': True,
+        'dynamicSizing': True,
+    },
+    'balanced': {
+        'riskPerTrade': 15.0,
+        'maxDailyLoss': 80.0,
+        'profitLock': 100.0,
+        'drawdownPausePercent': 7.0,
+        'drawdownPauseHours': 6.0,
+        'maxOpenPositions': 3,
+        'maxPositionsPerSymbol': 2,
+        'signalThreshold': 60,
+        'allowedVolatility': ['Low', 'Medium'],
+        'autoSwitch': True,
+        'dynamicSizing': True,
+    },
+    'advanced': {
+        'riskPerTrade': 20.0,
+        'maxDailyLoss': 120.0,
+        'profitLock': 120.0,
+        'drawdownPausePercent': 10.0,
+        'drawdownPauseHours': 4.0,
+        'maxOpenPositions': 5,
+        'maxPositionsPerSymbol': 2,
+        'signalThreshold': 50,
+        'allowedVolatility': ['Low', 'Medium'],
+        'autoSwitch': True,
+        'dynamicSizing': True,
+    },
+}
+
 SUPPORTED_DISPLAY_CURRENCIES = {'USD', 'ZAR', 'GBP'}
 
 
@@ -10833,33 +10965,146 @@ def _clamp_bot_config_value(field_name: str, raw_value, minimum: float, maximum:
     return parsed_value
 
 
+def _clamp_int_value(field_name: str, raw_value, minimum: int, maximum: int, default_value: int, warnings: List[str]) -> int:
+    try:
+        parsed_value = int(round(float(raw_value)))
+    except (TypeError, ValueError):
+        warnings.append(f'{field_name} defaulted to {default_value}')
+        return default_value
+
+    if parsed_value < minimum:
+        warnings.append(f'{field_name} raised to minimum {minimum}')
+        return minimum
+    if parsed_value > maximum:
+        warnings.append(f'{field_name} reduced to maximum {maximum}')
+        return maximum
+    return parsed_value
+
+
+def _coerce_bool(raw_value, default_value: bool = False) -> bool:
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        return raw_value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    if raw_value is None:
+        return default_value
+    return bool(raw_value)
+
+
+def _normalize_management_profile(raw_profile) -> str:
+    profile = str(raw_profile or 'beginner').strip().lower()
+    if profile in {'safe', 'conservative', 'starter', 'new', 'novice'}:
+        return 'beginner'
+    if profile in {'moderate', 'medium', 'assisted'}:
+        return 'balanced'
+    if profile in {'pro', 'expert', 'aggressive'}:
+        return 'advanced'
+    if profile not in BOT_MANAGEMENT_PROFILES:
+        return 'beginner'
+    return profile
+
+
+def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    profile = _normalize_management_profile(bot_config.get('managementProfile'))
+    is_assisted = bot_config.get('managementMode', 'assisted') != 'manual'
+    defaults = BOT_MANAGEMENT_PROFILES.get(profile, BOT_MANAGEMENT_PROFILES['beginner'])
+    effective = {
+        'profile': profile,
+        'mode': 'assisted' if is_assisted else 'manual',
+        'maxOpenPositions': int(bot_config.get('maxOpenPositions') or defaults['maxOpenPositions']),
+        'maxPositionsPerSymbol': int(bot_config.get('maxPositionsPerSymbol') or defaults['maxPositionsPerSymbol']),
+        'signalThreshold': int(bot_config.get('signalThreshold') or defaults['signalThreshold']),
+        'allowedVolatility': list(bot_config.get('allowedVolatility') or defaults['allowedVolatility']),
+    }
+
+    if is_assisted:
+        effective['maxOpenPositions'] = min(effective['maxOpenPositions'], defaults['maxOpenPositions'])
+        effective['maxPositionsPerSymbol'] = min(effective['maxPositionsPerSymbol'], defaults['maxPositionsPerSymbol'])
+        effective['signalThreshold'] = max(effective['signalThreshold'], defaults['signalThreshold'])
+        effective['allowedVolatility'] = [
+            level for level in effective['allowedVolatility'] if level in defaults['allowedVolatility']
+        ] or list(defaults['allowedVolatility'])
+
+        recent_trades = bot_config.get('tradeHistory') or []
+        recent_closed = recent_trades[-6:]
+        consecutive_losses = 0
+        for trade in reversed(recent_closed):
+            if (trade.get('profit') or 0) < 0:
+                consecutive_losses += 1
+            else:
+                break
+
+        recent_count = len(recent_closed)
+        recent_wins = sum(1 for trade in recent_closed if (trade.get('profit') or 0) > 0)
+        recent_win_rate = (recent_wins / recent_count * 100) if recent_count else 100.0
+
+        if consecutive_losses >= 2 or (recent_count >= 4 and recent_win_rate < 40):
+            effective['signalThreshold'] = min(85, effective['signalThreshold'] + 10)
+            effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 1 if profile == 'beginner' else 2)
+            effective['maxPositionsPerSymbol'] = 1
+            effective['allowedVolatility'] = ['Low']
+            bot_config['managementState'] = 'recovery'
+        else:
+            bot_config['managementState'] = 'normal'
+    else:
+        bot_config['managementState'] = 'manual'
+
+    bot_config['effectiveSignalThreshold'] = effective['signalThreshold']
+    bot_config['effectiveMaxOpenPositions'] = effective['maxOpenPositions']
+    bot_config['effectiveMaxPositionsPerSymbol'] = effective['maxPositionsPerSymbol']
+    bot_config['effectiveAllowedVolatility'] = effective['allowedVolatility']
+    return effective
+
+
 def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
     """Normalize bot risk configuration before persisting or trading."""
     warnings: List[str] = []
 
+    intelligent_settings = data.get('intelligentManagement') or {}
+    if not isinstance(intelligent_settings, dict):
+        intelligent_settings = {}
+
+    management_profile = _normalize_management_profile(
+        intelligent_settings.get('profile')
+        or intelligent_settings.get('experienceLevel')
+        or data.get('managementProfile')
+        or data.get('riskProfile')
+        or 'beginner'
+    )
+    management_mode = 'manual' if not _coerce_bool(intelligent_settings.get('enabled', True), True) else 'assisted'
+    profile_defaults = BOT_MANAGEMENT_PROFILES[management_profile]
+
+    raw_risk_per_trade = data.get('riskPerTrade')
+    if raw_risk_per_trade is None and data.get('riskPercent') is not None:
+        try:
+            raw_risk_per_trade = float(data.get('riskPercent', 2.0)) * 10.0
+        except (TypeError, ValueError):
+            raw_risk_per_trade = profile_defaults['riskPerTrade']
+            warnings.append(f"riskPercent defaulted to {profile_defaults['riskPerTrade'] / 10:.1f}% profile value")
+
     risk_per_trade = _clamp_bot_config_value(
         'riskPerTrade',
-        data.get('riskPerTrade', 20),
+        raw_risk_per_trade if raw_risk_per_trade is not None else profile_defaults['riskPerTrade'],
         BOT_RISK_LIMITS['riskPerTrade'][0],
         BOT_RISK_LIMITS['riskPerTrade'][1],
-        20.0,
+        profile_defaults['riskPerTrade'],
         warnings,
     )
     max_daily_loss = _clamp_bot_config_value(
         'maxDailyLoss',
-        data.get('maxDailyLoss', 60),
+        data.get('maxDailyLoss', profile_defaults['maxDailyLoss']),
         BOT_RISK_LIMITS['maxDailyLoss'][0],
         BOT_RISK_LIMITS['maxDailyLoss'][1],
-        60.0,
+        profile_defaults['maxDailyLoss'],
         warnings,
     )
 
-    raw_profit_lock = data.get('profitLock', 80)
+    raw_profit_lock = data.get('profitLock', profile_defaults['profitLock'])
     try:
         parsed_profit_lock = float(raw_profit_lock)
     except (TypeError, ValueError):
-        parsed_profit_lock = 80.0
-        warnings.append('profitLock defaulted to 80.0')
+        parsed_profit_lock = profile_defaults['profitLock']
+        warnings.append(f"profitLock defaulted to {profile_defaults['profitLock']}")
 
     if parsed_profit_lock <= 0:
         profit_lock = 0.0
@@ -10869,26 +11114,74 @@ def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
             parsed_profit_lock,
             20.0,
             BOT_RISK_LIMITS['profitLock'][1],
-            80.0,
+            profile_defaults['profitLock'],
             warnings,
         )
 
     drawdown_pause_percent = _clamp_bot_config_value(
         'drawdownPausePercent',
-        data.get('drawdownPausePercent', 5),
+        data.get('drawdownPausePercent', data.get('maxDrawdownPercent', profile_defaults['drawdownPausePercent'])),
         BOT_RISK_LIMITS['drawdownPausePercent'][0],
         BOT_RISK_LIMITS['drawdownPausePercent'][1],
-        5.0,
+        profile_defaults['drawdownPausePercent'],
         warnings,
     )
     drawdown_pause_hours = _clamp_bot_config_value(
         'drawdownPauseHours',
-        data.get('drawdownPauseHours', 6),
+        data.get('drawdownPauseHours', profile_defaults['drawdownPauseHours']),
         BOT_RISK_LIMITS['drawdownPauseHours'][0],
         BOT_RISK_LIMITS['drawdownPauseHours'][1],
-        6.0,
+        profile_defaults['drawdownPauseHours'],
         warnings,
     )
+
+    max_open_positions = _clamp_int_value(
+        'maxOpenPositions',
+        data.get('maxOpenPositions', data.get('maxOpenTrades', profile_defaults['maxOpenPositions'])),
+        1,
+        8,
+        profile_defaults['maxOpenPositions'],
+        warnings,
+    )
+    max_positions_per_symbol = _clamp_int_value(
+        'maxPositionsPerSymbol',
+        data.get('maxPositionsPerSymbol', max_open_positions),
+        1,
+        max_open_positions,
+        min(profile_defaults['maxPositionsPerSymbol'], max_open_positions),
+        warnings,
+    )
+    signal_threshold = _clamp_int_value(
+        'signalThreshold',
+        data.get('signalThreshold', profile_defaults['signalThreshold']),
+        45,
+        90,
+        profile_defaults['signalThreshold'],
+        warnings,
+    )
+
+    allowed_volatility = data.get('allowedVolatility') or profile_defaults['allowedVolatility']
+    if not isinstance(allowed_volatility, list):
+        allowed_volatility = profile_defaults['allowedVolatility']
+        warnings.append('allowedVolatility defaulted to profile setting')
+    allowed_volatility = [str(level).title() for level in allowed_volatility if str(level).strip()]
+    if not allowed_volatility:
+        allowed_volatility = list(profile_defaults['allowedVolatility'])
+
+    auto_switch = _coerce_bool(
+        data.get('autoSwitch', intelligent_settings.get('autoSwitch', profile_defaults['autoSwitch'])),
+        profile_defaults['autoSwitch'],
+    )
+    dynamic_sizing = _coerce_bool(
+        data.get('dynamicSizing', intelligent_settings.get('dynamicSizing', profile_defaults['dynamicSizing'])),
+        profile_defaults['dynamicSizing'],
+    )
+
+    if management_mode == 'assisted':
+        max_open_positions = min(max_open_positions, profile_defaults['maxOpenPositions'])
+        max_positions_per_symbol = min(max_positions_per_symbol, profile_defaults['maxPositionsPerSymbol'])
+        signal_threshold = max(signal_threshold, profile_defaults['signalThreshold'])
+        allowed_volatility = [level for level in allowed_volatility if level in profile_defaults['allowedVolatility']] or list(profile_defaults['allowedVolatility'])
 
     display_currency = 'USD'  # Force USD - all accounts are in USD
     
@@ -10898,6 +11191,14 @@ def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
         'profitLock': profit_lock,
         'drawdownPausePercent': drawdown_pause_percent,
         'drawdownPauseHours': drawdown_pause_hours,
+        'maxOpenPositions': max_open_positions,
+        'maxPositionsPerSymbol': max_positions_per_symbol,
+        'signalThreshold': signal_threshold,
+        'allowedVolatility': allowed_volatility,
+        'autoSwitch': auto_switch,
+        'dynamicSizing': dynamic_sizing,
+        'managementMode': management_mode,
+        'managementProfile': management_profile,
         'displayCurrency': display_currency,  # Always USD
         'warnings': warnings,
     }
@@ -11063,6 +11364,14 @@ def create_bot():
             profit_lock = sanitized_risk_config['profitLock']
             drawdown_pause_percent = sanitized_risk_config['drawdownPausePercent']
             drawdown_pause_hours = sanitized_risk_config['drawdownPauseHours']
+            max_open_positions = sanitized_risk_config['maxOpenPositions']
+            max_positions_per_symbol = sanitized_risk_config['maxPositionsPerSymbol']
+            signal_threshold = sanitized_risk_config['signalThreshold']
+            allowed_volatility = sanitized_risk_config['allowedVolatility']
+            auto_switch = sanitized_risk_config['autoSwitch']
+            dynamic_sizing = sanitized_risk_config['dynamicSizing']
+            management_mode = sanitized_risk_config['managementMode']
+            management_profile = sanitized_risk_config['managementProfile']
             display_currency = sanitized_risk_config['displayCurrency']
             trading_enabled = data.get('enabled', True)
             trade_amount = data.get('tradeAmount')  # Fixed dollar trade amount (overrides risk %)
@@ -11141,10 +11450,18 @@ def create_bot():
                 'profitLock': profit_lock,
                 'drawdownPausePercent': drawdown_pause_percent,
                 'drawdownPauseHours': drawdown_pause_hours,
+                'signalThreshold': signal_threshold,
+                'allowedVolatility': allowed_volatility,
+                'autoSwitch': auto_switch,
+                'dynamicSizing': dynamic_sizing,
+                'managementMode': management_mode,
+                'managementProfile': management_profile,
+                'managementState': 'normal',
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
-                'maxOpenPositions': data.get('maxOpenPositions', 5),  # Max concurrent positions (prevents unlimited trades)
+                'maxOpenPositions': max_open_positions,
+                'maxPositionsPerSymbol': max_positions_per_symbol,
                 'basePositionSize': data.get('basePositionSize', 1.0),
                 'totalTrades': 0,
                 'winningTrades': 0,
@@ -11303,6 +11620,16 @@ def create_bot():
                     'drawdownPausePercent': drawdown_pause_percent or 0.0,
                     'drawdownPauseHours': drawdown_pause_hours or 6.0,
                 },
+                'appliedManagementConfig': {
+                    'managementMode': management_mode,
+                    'managementProfile': management_profile,
+                    'maxOpenPositions': max_open_positions,
+                    'maxPositionsPerSymbol': max_positions_per_symbol,
+                    'signalThreshold': signal_threshold,
+                    'allowedVolatility': allowed_volatility,
+                    'autoSwitch': auto_switch,
+                    'dynamicSizing': dynamic_sizing,
+                },
                 'warnings': (sanitized_risk_config or {}).get('warnings', []),
                 'message': f'Bot {bot_id} created and starting...',
                 'status': 'STARTING'
@@ -11387,6 +11714,48 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         if not bot_config:
             logger.error(f"Bot {bot_id} not found in active_bots")
             return
+        
+        # ✅ DEFENSIVE FIX: Load bot_credentials from bot_config if not passed in
+        if not bot_credentials:
+            # Try to extract credentials from bot_config (set during start_bot)
+            credential_id = bot_config.get('credentialId')
+            if credential_id:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT * FROM broker_credentials WHERE credential_id = ? AND user_id = ?', (credential_id, user_id))
+                    cred_row = cursor.fetchone()
+                    conn.close()
+                    
+                    if cred_row:
+                        cred_dict = dict(cred_row)
+                        bot_credentials = {
+                            'account': cred_dict.get('account_number', ''),
+                            'password': cred_dict.get('password', ''),
+                            'server': cred_dict.get('server', 'Exness-Real'),
+                            'broker': cred_dict.get('broker_name', 'Exness'),
+                            'is_live': bool(cred_dict.get('is_live', False))
+                        }
+                        logger.info(f"📌 Bot {bot_id}: Loaded credentials from database (credential_id={credential_id})")
+                    else:
+                        logger.warning(f"⚠️  Bot {bot_id}: Credential {credential_id} not found in database")
+                        bot_credentials = {}
+                except Exception as e:
+                    logger.warning(f"⚠️  Bot {bot_id}: Could not load credentials: {e}")
+                    bot_credentials = {}
+            else:
+                logger.warning(f"⚠️  Bot {bot_id}: No credentialId found in bot_config")
+                bot_credentials = {}
+        
+        # Ensure bot_credentials is never None
+        if not bot_credentials:
+            bot_credentials = {
+                'account': '',
+                'password': '',
+                'server': 'Exness-Real',
+                'broker': 'Exness',
+                'is_live': False
+            }
         
         # Get trading mode configuration
         trading_mode = bot_config.get('tradingMode', 'interval')  # 'interval' or 'signal-driven'
@@ -11540,6 +11909,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         # ==================== REST/SOCKET TRADING FAST PATH ====================
                         # Socket bridge or MetaAPI cloud for supported brokers → saves ~300MB RAM per account
                         if trade_router and not use_rest_trading:
+                            # ✅ DEFENSIVE: Ensure bot_credentials is dict, never None
+                            if not isinstance(bot_credentials, dict):
+                                logger.warning(f"⚠️  Bot {bot_id}: bot_credentials is {type(bot_credentials).__name__}, expected dict - using empty dict")
+                                bot_credentials = {}
+                            
                             _broker_for_route = bot_config.get('broker_type', 'MT5')
                             _account_for_route = bot_credentials.get('account', '')
                             _exec_mode = trade_router.determine_mode(_broker_for_route, _account_for_route)
@@ -11644,6 +12018,17 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             logger.error(f"Bot {bot_id}: Account switch to {expected_account} failed - will retry")
                                             time.sleep(trading_interval)
                                             continue
+                                        # Verify the switch actually stuck (another concurrent bot may have
+                                        # switched the singleton back while we held the conn lock)
+                                        try:
+                                            import MetaTrader5 as _mt5_verify
+                                            _verify_info = _mt5_verify.account_info()
+                                            if _verify_info and _verify_info.login != expected_account:
+                                                logger.warning(f"⚠️  Bot {bot_id}: Switch verification failed — MT5 is on {_verify_info.login}, not {expected_account}. Skipping cycle to avoid wrong-account trade.")
+                                                time.sleep(trading_interval)
+                                                continue
+                                        except Exception:
+                                            pass
                                         logger.info(f"✅ Bot {bot_id}: Switched MT5 to account {expected_account}")
                                     elif expected_account and not mt5_current_account:
                                         # First time — verify via MT5 IPC
@@ -11700,7 +12085,10 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         active_conn = mt5_conn
                         
                     except Exception as e:
+                        import traceback
                         logger.error(f"Bot {bot_id}: MT5 connection exception: {e}")
+                        logger.error(f"  Traceback: {traceback.format_exc()}")
+                        logger.error(f"  Exception type: {type(e).__name__}")
                         # STAGGER: Add random delay to prevent thundering herd
                         stagger_delay = random.uniform(2, 12)
                         actual_wait = trading_interval + stagger_delay
@@ -11752,7 +12140,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 profit_lock = bot_config.get('profitLock', 0.0) or 0.0
                 max_daily_loss = bot_config.get('maxDailyLoss', 0.0) or 0.0
                 today = datetime.now().strftime('%Y-%m-%d')
-                daily_profit = bot_config.get('dailyProfits', {}).get(today, 0.0)
+                # Safely handle dailyProfits - ensure it's a dict
+                daily_profits_dict = bot_config.get('dailyProfits') or {}
+                if not isinstance(daily_profits_dict, dict):
+                    daily_profits_dict = {}
+                    bot_config['dailyProfits'] = daily_profits_dict
+                daily_profit = daily_profits_dict.get(today, 0.0)
                 
                 pause_reason = None
                 if profit_lock > 0 and daily_profit >= profit_lock:
@@ -11775,9 +12168,10 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         bot_config['pauseReason'] = None
                 
                 # ENHANCED LOGGING: Log signal evaluation for ALL symbols upfront
-                signal_threshold = bot_config.get('signalThreshold', 50)
+                management_state = apply_assisted_management_overrides(bot_config)
+                signal_threshold = management_state['signalThreshold']
                 signal_summary = []
-                for eval_symbol in symbols[:3]:
+                for eval_symbol in symbols:
                     eval_market_data = commodity_market_data.get(eval_symbol, {'current_price': 0, 'volatility_pct': 1.0})
                     eval_params = strategy_func(eval_symbol, bot_config['accountId'], bot_config['riskPerTrade'], eval_market_data)
                     signal_score = eval_params.get('signal', {}).get('strength', 0) if eval_params else 0
@@ -11786,11 +12180,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 
                 logger.info(f"📊 Bot {bot_id} Cycle #{trade_cycle}: Signal check: {' | '.join(signal_summary)} (threshold: {signal_threshold}/100)")
                 
-                for symbol in symbols[:3]:  # Max 3 trades per cycle
+                trades_this_cycle = 0
+                for symbol in symbols:
                     if bot_stop_flags.get(bot_id, False):
                         break  # Stop requested, exit loop
                     
                     try:
+                        if not should_trade_symbol_based_on_risk_management(bot_config, symbol):
+                            continue
+
                         # Dynamic position sizing
                         fixed_trade_amount = bot_config.get('tradeAmount')
                         if fixed_trade_amount:
@@ -11875,7 +12273,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 symbols_to_try = [symbol, 'EURUSDm']  # Fallback only if primary fails
                             
                             # ✅ POSITION LIMIT CHECK: Enforce maxOpenPositions to prevent unlimited trades
-                            max_open = bot_config.get('maxOpenPositions', 5)  # Default: max 5 concurrent positions
+                            max_open = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions') or 5
+                            max_per_symbol = bot_config.get('effectiveMaxPositionsPerSymbol') or bot_config.get('maxPositionsPerSymbol') or max_open
                             existing_positions = mt5_conn.get_positions()
                             bot_id_short = bot_id.split('_')[-1][:8]
                             comment_short = f'ZBot{bot_id_short}'
@@ -11897,9 +12296,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     if ep_symbol == symbol:
                                         bot_positions_on_symbol += 1
                             
-                            # Skip if bot already has an open position on this specific symbol
-                            if bot_positions_on_symbol > 0:
-                                logger.info(f"📌 Bot {bot_id}: Already has {bot_positions_on_symbol} open position(s) on {symbol} - skipping")
+                            # Respect the bot's configured per-symbol position cap.
+                            if bot_positions_on_symbol >= max_per_symbol:
+                                logger.info(
+                                    f"📌 Bot {bot_id}: Already has {bot_positions_on_symbol} open position(s) on {symbol} "
+                                    f"(limit {max_per_symbol}) - skipping"
+                                )
                                 continue
                             
                             # Skip if bot has reached max open positions overall
@@ -11982,7 +12384,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     order_result = mt5_conn.place_order(
                                         symbol=attempt_symbol,
                                         order_type=order_type,
-                                        volume=round(adjusted_volume, 2),
+                                        volume=adjusted_volume,
                                         comment=comment_short,
                                         stopLoss=sl_price,
                                         takeProfit=tp_price
@@ -12015,7 +12417,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                                 retry_result = mt5_conn.place_order(
                                                     symbol=attempt_symbol,
                                                     order_type=order_type,
-                                                    volume=round(adjusted_volume, 2),
+                                                    volume=adjusted_volume,
                                                     comment=comment_short,
                                                     stopLoss=sl_price,
                                                     takeProfit=tp_price
@@ -12143,6 +12545,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     pos_symbol = matched_pos.get('symbol') or matched_pos.get('instrument') or symbol
                                     pos_type = matched_pos.get('type') or matched_pos.get('direction', order_type)
                                     pos_ticket = matched_pos.get('ticket') or matched_pos.get('deal_id', order_ticket)
+                                    current_profit = matched_pos.get('profit') or matched_pos.get('pnl') or 0
+                                    current_price = matched_pos.get('currentPrice') or matched_pos.get('marketPrice') or matched_pos.get('price_current') or 0
                                     
                                     # ============ TRACK AS OPEN POSITION — DO NOT RECORD P&L YET ============
                                     # The position was just opened, P&L is ~$0 (spread only).
@@ -12157,6 +12561,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         'type': pos_type,
                                         'volume': matched_pos.get('volume') or matched_pos.get('size', 0),
                                         'entryPrice': matched_pos.get('openPrice') or matched_pos.get('level', 0),
+                                        'currentPrice': current_price,
+                                        'profit': round(current_profit, 2),
+                                        'status': 'open',
                                         'entryTime': matched_pos.get('openTime', datetime.now().isoformat()),
                                         'botId': bot_id,
                                         'cycle': trade_cycle,
@@ -12193,6 +12600,37 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         trade_conn.close()
                                     except Exception as e:
                                         logger.error(f"Bot {bot_id}: Error storing open trade: {e}")
+
+                                    open_trade = {
+                                        'ticket': pos_ticket,
+                                        'symbol': pos_symbol,
+                                        'type': pos_type,
+                                        'volume': matched_pos.get('volume') or matched_pos.get('size', 0),
+                                        'entryPrice': matched_pos.get('openPrice', 0),
+                                        'currentPrice': current_price,
+                                        'profit': round(current_profit, 2),
+                                        'entryTime': matched_pos.get('openTime', datetime.now().isoformat()),
+                                        'time': matched_pos.get('openTime', datetime.now().isoformat()),
+                                        'timestamp': int(datetime.now().timestamp() * 1000),
+                                        'botId': bot_id,
+                                        'cycle': trade_cycle,
+                                        'strategy': strategy_name,
+                                        'isWinning': current_profit > 0,
+                                        'status': 'open',
+                                        'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}",
+                                        'broker': broker_type,
+                                    }
+
+                                    trade_history = bot_config.setdefault('tradeHistory', [])
+                                    existing_index = next(
+                                        (index for index, existing in enumerate(trade_history) if str(existing.get('ticket')) == str(pos_ticket)),
+                                        None,
+                                    )
+                                    if existing_index is None:
+                                        trade_history.append(open_trade)
+                                        bot_config['totalTrades'] = bot_config.get('totalTrades', 0) + 1
+                                    else:
+                                        trade_history[existing_index] = {**trade_history[existing_index], **open_trade}
                                     
                                     logger.info(f"✅ Bot {bot_id}: Position OPENED | {pos_symbol} {pos_type} @ {matched_pos.get('openPrice', 0)} | Ticket: {pos_ticket}")
                                     trades_placed += 1
@@ -12217,7 +12655,19 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         
                         current_tickets = set()
                         for cp in current_positions:
-                            current_tickets.add(str(cp.get('ticket') or cp.get('deal_id', '')))
+                            current_ticket = str(cp.get('ticket') or cp.get('deal_id', ''))
+                            current_tickets.add(current_ticket)
+                            if current_ticket in tracked_positions:
+                                tracked_positions[current_ticket]['currentPrice'] = cp.get('currentPrice') or cp.get('marketPrice') or cp.get('price_current') or tracked_positions[current_ticket].get('currentPrice', 0)
+                                tracked_positions[current_ticket]['profit'] = round(cp.get('profit') or cp.get('pnl') or 0, 2)
+                                tracked_positions[current_ticket]['status'] = 'open'
+                                for trade in bot_config.get('tradeHistory', []):
+                                    if str(trade.get('ticket')) == current_ticket:
+                                        trade['currentPrice'] = tracked_positions[current_ticket]['currentPrice']
+                                        trade['profit'] = tracked_positions[current_ticket]['profit']
+                                        trade['status'] = 'open'
+                                        trade['isWinning'] = tracked_positions[current_ticket]['profit'] > 0
+                                        break
                         
                         closed_tickets = []
                         for ticket_str, tracked in list(tracked_positions.items()):
@@ -12250,6 +12700,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     'type': tracked.get('type', ''),
                                     'volume': tracked.get('volume', 0),
                                     'entryPrice': tracked.get('entryPrice', 0),
+                                    'currentPrice': tracked.get('currentPrice', 0),
                                     'entryTime': tracked.get('entryTime', ''),
                                     'exitTime': datetime.now().isoformat(),
                                     'profit': round(real_profit, 2),
@@ -12286,10 +12737,16 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 # Update bot analytics with REAL P&L
                                 if 'tradeHistory' not in bot_config:
                                     bot_config['tradeHistory'] = []
-                                bot_config['tradeHistory'].append(trade)
-                                
-                                bot_config['totalTrades'] = bot_config.get('totalTrades', 0) + 1
-                                bot_config['totalInvestment'] = bot_config.get('totalInvestment', 0) + (trade['volume'] * trade['entryPrice'])
+                                existing_index = next(
+                                    (index for index, existing in enumerate(bot_config['tradeHistory']) if str(existing.get('ticket')) == str(ticket_str)),
+                                    None,
+                                )
+                                if existing_index is None:
+                                    bot_config['tradeHistory'].append(trade)
+                                    bot_config['totalTrades'] = bot_config.get('totalTrades', 0) + 1
+                                    bot_config['totalInvestment'] = bot_config.get('totalInvestment', 0) + (trade['volume'] * trade['entryPrice'])
+                                else:
+                                    bot_config['tradeHistory'][existing_index] = {**bot_config['tradeHistory'][existing_index], **trade, 'status': 'closed'}
                                 
                                 if real_profit > 0:
                                     bot_config['winningTrades'] = bot_config.get('winningTrades', 0) + 1
@@ -12332,40 +12789,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         # Remove closed positions from tracker
                         for t in closed_tickets:
                             del tracked_positions[t]
-                        
-                        # ==================== AUTO-STOP: ALL POSITIONS CLOSED EXTERNALLY ====================
-                        # If bot HAD open positions but now ALL are gone (user closed them in Exness/MT5),
-                        # automatically stop the bot so it doesn't open new unwanted trades.
                         if closed_tickets and len(tracked_positions) == 0:
-                            # All tracked positions were closed - check if this was external
-                            # (If bot_stop_flags is already set, this is a normal stop)
-                            if not bot_stop_flags.get(bot_id, False):
-                                logger.warning(f"🛑 Bot {bot_id}: ALL {len(closed_tickets)} positions closed externally (manual close in Exness/MT5)")
-                                logger.warning(f"   Auto-stopping bot to prevent opening new unwanted trades")
-                                logger.warning(f"   User can restart the bot from the app when ready")
-                                
-                                bot_config['status'] = 'STOPPED'
-                                bot_config['stopReason'] = f'All positions closed externally ({len(closed_tickets)} trades)'
-                                bot_config['stoppedAt'] = datetime.now().isoformat()
-                                bot_stop_flags[bot_id] = True
-                                running_bots[bot_id] = False
-                                bot_config['enabled'] = False
-                                
-                                # Update database
-                                try:
-                                    _stop_conn = get_db_connection()
-                                    _stop_cursor = _stop_conn.cursor()
-                                    _stop_cursor.execute('''
-                                        UPDATE user_bots SET status = 'stopped', enabled = 0, updated_at = ?
-                                        WHERE bot_id = ?
-                                    ''', (datetime.now().isoformat(), bot_id))
-                                    _stop_conn.commit()
-                                    _stop_conn.close()
-                                except Exception as _stop_e:
-                                    logger.error(f"Bot {bot_id}: Error updating stopped status in DB: {_stop_e}")
-                                
-                                persist_bot_runtime_state(bot_id)
-                                break  # Exit the trading loop
+                            logger.info(f"🔁 Bot {bot_id}: All tracked positions are closed. Continuing trading on next cycle.")
                 
                 except Exception as close_check_e:
                     logger.warning(f"Bot {bot_id}: Error checking closed positions: {close_check_e}")
@@ -13163,11 +13588,14 @@ def bot_status():
             
             # Calculate ROI (safely access totalInvestment and totalProfit)
             total_profit = bot.get('totalProfit', 0)
+            open_positions = list(bot.get('open_positions', {}).values())
+            floating_profit = sum(float(position.get('profit') or 0) for position in open_positions)
+            current_profit = total_profit + floating_profit
             # Use totalInvestment if available, otherwise assume $10,000 initial investment (standard for demo/live)
             investment = bot.get('totalInvestment', 10000)
             if investment <= 0:
                 investment = 10000  # Default assumption for ROI calculation
-            roi = (total_profit / investment) * 100 if investment > 0 else 0
+            roi = (current_profit / investment) * 100 if investment > 0 else 0
             
             # Calculate profitability (profit as % of total traded value)
             total_trades = bot.get('totalTrades', 0)
@@ -13187,7 +13615,14 @@ def bot_status():
             
             # Safely access symbols and other fields
             symbols = bot.get('symbols', [])
-            symbol = symbols[0] if symbols else 'EURUSDm'
+            if open_positions:
+                symbol = open_positions[0].get('symbol', 'EURUSDm')
+            elif len(symbols) == 1:
+                symbol = symbols[0]
+            elif len(symbols) > 1:
+                symbol = 'MULTI'
+            else:
+                symbol = 'EURUSDm'
             trade_history = bot.get('tradeHistory', [])
             last_trade_time = trade_history[-1].get('time') if trade_history else bot.get('createdAt', datetime.now().isoformat())
             
@@ -13196,17 +13631,19 @@ def bot_status():
                 'symbol': symbol,
                 'symbols': symbols,
                 'strategy': bot.get('strategy', 'Unknown'),
-                'commission': round(total_profit * 0.01, 2),
-                'profit': round(total_profit, 2),
+                'commission': round(max(total_profit, 0) * 0.01, 2),
+                'profit': round(current_profit, 2),
                 'totalProfit': round(total_profit, 2),
+                'floatingProfit': round(floating_profit, 2),
+                'currentProfit': round(current_profit, 2),
                 'totalTrades': bot.get('totalTrades', 0),
                 'winningTrades': bot.get('winningTrades', 0),
                 'winRate': round((bot.get('winningTrades', 0) / max(bot.get('totalTrades', 1), 1)) * 100, 1),
                 'maxDrawdown': round(bot.get('maxDrawdown', 0), 2),
                 'runtimeFormatted': f"{int(runtime_hours)}h {int(runtime_minutes)}m",
-                'dailyProfit': round(daily_profit, 2),
+                'dailyProfit': round(daily_profit + floating_profit, 2),
                 'roi': round(roi, 2),
-                'profitability': round(profitability, 2),
+                'profitability': round(profitability if total_trades > 0 else current_profit, 2),
                 'profitFactor': round(profit_factor, 2),
                 'avgProfitPerTrade': round(total_profit / max(bot.get('totalTrades', 1), 1), 2),
                 'enabled': bot.get('enabled', True),
@@ -13216,15 +13653,20 @@ def bot_status():
                 'lastPauseEvent': bot.get('lastPauseEvent'),  # Include last market pause event
                 'displayCurrency': bot.get('displayCurrency', 'USD'),
                 'maxOpenPositions': bot.get('maxOpenPositions', 5),
+                'maxPositionsPerSymbol': bot.get('maxPositionsPerSymbol', 1),
+                'signalThreshold': bot.get('effectiveSignalThreshold', bot.get('signalThreshold', 70)),
+                'managementMode': bot.get('managementMode', 'assisted'),
+                'managementProfile': bot.get('managementProfile', 'beginner'),
+                'managementState': bot.get('managementState', 'normal'),
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
                 'broker_type': bot.get('broker_type', 'MT5'),
                 'mode': (bot.get('mode') or 'demo').upper(),
                 'is_live': (bot.get('mode') or 'demo').lower() == 'live',
-                'profitField': round(total_profit, 2),
+                'profitField': round(current_profit, 2),
                 'tradeHistory': trade_history,  # Include full trade history for analytics
                 'dailyProfits': daily_profits,  # Include daily profits map for charts
-                'openPositions': list(bot.get('open_positions', {}).values()),  # Currently open positions
+                'openPositions': open_positions,  # Currently open positions
                 'accountBalance': round(bot.get('accountBalance', 0), 2),  # Latest known balance
                 'accountEquity': round(bot.get('accountEquity', 0), 2),  # Latest known equity
             }

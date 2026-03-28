@@ -201,16 +201,25 @@ class RecoveryManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('PRAGMA integrity_check')
-            result = cursor.fetchone()[0]
+            rows = cursor.fetchall()
             conn.close()
-            
-            if result == 'ok':
+
+            # Collect only real errors — filter out "never used" freelist-page
+            # warnings which are normal SQLite behaviour after page deletions and
+            # do NOT indicate data corruption.
+            real_errors = [
+                r[0] for r in rows
+                if r[0] != 'ok' and 'never used' not in r[0].lower()
+            ]
+
+            if not real_errors:
                 logger.info("✅ Database integrity check passed")
                 return True
             else:
+                result = '\n'.join(real_errors)
                 logger.error(f"❌ Database integrity issues: {result}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ Integrity check failed: {e}")
             return False

@@ -739,6 +739,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               final posType = pos['type']?.toString() ?? '';
               final posVolume = double.tryParse(pos['volume']?.toString() ?? '0') ?? 0;
               final posEntry = double.tryParse(pos['entryPrice']?.toString() ?? '0') ?? 0;
+              final posCurrent = double.tryParse(pos['currentPrice']?.toString() ?? '0') ?? 0;
+              final posProfit = double.tryParse(pos['profit']?.toString() ?? '0') ?? 0;
               final isBuy = posType.toUpperCase().contains('BUY');
               return Container(
                 margin: const EdgeInsets.only(bottom: 4),
@@ -786,6 +788,17 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       '@ ${posEntry.toStringAsFixed(posEntry > 100 ? 2 : 5)}',
                       style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
                     ),
+                    if (posCurrent > 0 || posProfit != 0) ...[
+                      const SizedBox(width: 10),
+                      Text(
+                        '\$${posProfit.toStringAsFixed(2)}',
+                        style: GoogleFonts.poppins(
+                          color: posProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               );
