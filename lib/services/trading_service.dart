@@ -72,6 +72,11 @@ class TradingService extends ChangeNotifier {
   // Get live open positions only (status = open)
   List<Trade> get liveOpenPositions => _trades.where((t) => t.status == TradeStatus.open).toList();
 
+  // Account metrics getters
+  double get accountBalance => primaryAccount?.balance ?? 0.0;
+  double get accountEquity => primaryAccount?.equity ?? 0.0;
+  double get freeMargin => primaryAccount?.margin ?? 0.0;
+
   Account? get primaryAccount => _accounts.isNotEmpty ? _accounts[0] : null;
 
   List<Trade> get activeTrades => _trades.where((t) => t.status == TradeStatus.open).toList();

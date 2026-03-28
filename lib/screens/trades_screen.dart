@@ -93,6 +93,69 @@ class _TradesScreenState extends State<TradesScreen> {
               },
             ),
 
+            // Live Positions Indicator
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00E5FF).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(0xFF00E5FF),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Live MT5 positions • Auto-refreshing every 30 seconds',
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFF00E5FF),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.update, color: Color(0xFF00E5FF), size: 16),
+                ],
+              ),
+            ),
+
+            // Account Balance Card
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF1A237E).withOpacity(0.5),
+                    const Color(0xFF0D47A1).withOpacity(0.3),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.2)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildAccountMetric('Account Balance', tradingService.accountBalance, Colors.white),
+                  Container(width: 1, height: 40, color: Colors.white.withOpacity(0.1)),
+                  _buildAccountMetric('Equity', tradingService.accountEquity, const Color(0xFF69F0AE)),
+                  Container(width: 1, height: 40, color: Colors.white.withOpacity(0.1)),
+                  _buildAccountMetric('Free Margin', tradingService.freeMargin, const Color(0xFF00E5FF)),
+                ],
+              ),
+            ),
+
             // Tab Selector
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -118,6 +181,13 @@ class _TradesScreenState extends State<TradesScreen> {
                     2,
                     '${tradingService.closedTrades.length}',
                   ),
+                  const SizedBox(width: AppSpacing.md),
+                  _buildTabButton(
+                    context,
+                    'Live MT5',
+                    3,
+                    '${tradingService.liveOpenPositions.length}',
+                  ),
                 ],
               ),
             ),
@@ -138,7 +208,187 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
-  Widget _buildTabButton(BuildContext context, String label, int index, String count) {
+  Widget _buildAccountMetric(String label, double value, Color color) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '\$${value.toStringAsFixed(2)}',
+          style: GoogleFonts.poppins(
+            color: color,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLivePositionCard(BuildContext context, Map<String, dynamic> position) {
+    final symbol = position['symbol'] ?? 'UNKNOWN';
+    final type = position['type']?.toString() ?? 'buy';
+    final volume = position['volume'] ?? 0.0;
+    final openPrice = position['openPrice']?.toDouble() ?? 0.0;
+    final currentPrice = position['currentPrice']?.toDouble() ?? 0.0;
+    final profit = position['profit']?.toDouble() ?? 0.0;
+    final profitPct = openPrice > 0 ? ((currentPrice - openPrice) / openPrice * 100) : 0.0;
+    final openTime = position['openTime']?.toString() ?? '';
+    
+    final isBuy = type.toLowerCase() == 'buy';
+    final isProfitable = profit >= 0;
+
+    return Card(
+      color: Colors.white.withOpacity(0.05),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.3) : const Color(0xFFFF8A80).withOpacity(0.3),
+          ),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00E5FF).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    'LIVE',
+                    style: GoogleFonts.poppins(
+                      color: const Color(0xFF00E5FF),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    symbol,
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isBuy ? const Color(0xFF1B5E20).withOpacity(0.2) : const Color(0xFFB71C1C).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    isBuy ? 'BUY' : 'SELL',
+                    style: GoogleFonts.poppins(
+                      color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Volume', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
+                    Text('$volume lots', style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('Open Price', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
+                    Text('\$${openPrice.toStringAsFixed(5)}', style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('Current Price', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
+                    Text('\$${currentPrice.toStringAsFixed(5)}', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 13, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.1) : const Color(0xFFFF8A80).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.3) : const Color(0xFFFF8A80).withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        isProfitable ? Icons.trending_up : Icons.trending_down,
+                        color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('P/L', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
+                          Text(
+                            '${isProfitable ? '+' : ''}\$${profit.toStringAsFixed(2)}',
+                            style: GoogleFonts.poppins(
+                              color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '${isProfitable ? '+' : ''}${profitPct.toStringAsFixed(2)}%',
+                    style: GoogleFonts.poppins(
+                      color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (openTime.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Opened: $openTime',
+                style: GoogleFonts.poppins(color: Colors.white38, fontSize: 9),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
     final isSelected = _selectedTab == index;
     return GestureDetector(
       onTap: () {
@@ -182,6 +432,45 @@ class _TradesScreenState extends State<TradesScreen> {
   }
 
   Widget _buildTradesList(BuildContext context, TradingService tradingService) {
+    // Handle Live MT5 Tab (case 3)
+    if (_selectedTab == 3) {
+      final livePositions = tradingService.liveOpenPositions;
+      
+      if (livePositions.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.cloud_off_outlined,
+                size: 64,
+                color: AppColors.lightGrey,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'No live MT5 positions',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Live positions from MT5 will appear here',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        );
+      }
+
+      return ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: livePositions.length,
+        itemBuilder: (context, index) {
+          return _buildLivePositionCard(context, livePositions[index]);
+        },
+      );
+    }
+
+    // Regular Trades List for tabs 0, 1, 2
     List<Trade> trades;
 
     switch (_selectedTab) {
