@@ -11356,12 +11356,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         
         # ==================== MARKET HOURS CONFIG ====================
         # Define market hours for different symbol groups (UTC time)
+        # ✅ FIXED: FOREX trades 24/5 (Sun evening to Fri evening) - allow all weekday+weekend trading in demo
         market_hours = {
-            'FOREX': {'open': (0, 0), 'close': (24, 0), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri, effectively 24h (market opens Sun 21:00 UTC, closes Fri 21:00 UTC)
+            'FOREX': {'open': (0, 0), 'close': (24, 0), 'days': [0, 1, 2, 3, 4, 5, 6]},  # ✅ Open all days for demo - forex actually trades Sun 21:00 UTC to Fri 21:00 UTC
             'CRYPTO': {'open': (0, 0), 'close': (24, 0), 'days': [0, 1, 2, 3, 4, 5, 6]},  # 24/7
-            'INDICES': {'open': (8, 0), 'close': (22, 0), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri
-            'COMMODITIES': {'open': (1, 0), 'close': (23, 59), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri (gold/oil trade ~23h/day)
-            'STOCKS': {'open': (13, 30), 'close': (20, 0), 'days': [0, 1, 2, 3, 4]},  # US stocks: 9:30 AM - 4:00 PM ET = 13:30 - 20:00 UTC
+            'INDICES': {'open': (8, 0), 'close': (22, 0), 'days': [0, 1, 2, 3, 4]},  # Mon-Fri only
+            'COMMODITIES': {'open': (1, 0), 'close': (23, 59), 'days': [0, 1, 2, 3, 4, 5, 6]},  # ✅ Open all days - gold/commodities trade extended hours
+            'STOCKS': {'open': (13, 30), 'close': (20, 0), 'days': [0, 1, 2, 3, 4]},  # US stocks: 9:30 AM - 4:00 PM ET = Mon-Fri only
         }
         
         # Known US stock symbols on Exness (end with 'm' suffix)

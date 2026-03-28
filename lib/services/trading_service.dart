@@ -12,6 +12,7 @@ class TradingService extends ChangeNotifier {
   String? _apiUrl;
   bool _useApi = false;
   bool _isConnected = false;
+  Timer? _priceRefreshTimer; // Auto-refresh trades every 30 seconds
   
   List<Trade> _trades = [];
   List<Account> _accounts = [];
@@ -33,6 +34,22 @@ class TradingService extends ChangeNotifier {
     } catch (e) {
       _initializeMockData();
     }
+    
+    // Start auto-refresh of trades every 30 seconds
+    _startAutoRefresh();
+  }
+  
+  void _startAutoRefresh() {
+    _priceRefreshTimer?.cancel();
+    _priceRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) {
+        if (_useApi && _isConnected) {
+          fetchTrades();
+          fetchAccounts();
+        }
+      },
+    );
   }
 
   void updateToken(String? token) {
@@ -50,6 +67,9 @@ class TradingService extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get isConnected => _isConnected;
   bool get isUsingApi => _useApi && _isConnected;
+  
+  // Get live open positions only (status = open)
+  List<Trade> get liveOpenPositions => _trades.where((t) => t.status == TradeStatus.open).toList();
 
   Account? get primaryAccount => _accounts.isNotEmpty ? _accounts[0] : null;
 
@@ -178,39 +198,86 @@ class TradingService extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         final sessionToken = prefs.getString('auth_token');
         
-        // Use public endpoint for trades (no auth required)
-        final response = await http.get(
-          Uri.parse('$_apiUrl/api/trades-public'),
-          headers: {
-            'Content-Type': 'application/json',
-            if (sessionToken != null && sessionToken.isNotEmpty)
-              'X-Session-Token': sessionToken,
-          },
-        ).timeout(const Duration(seconds: 10));
+        List<Trade> allTrades = [];
+        
+        // Fetch 1: Database stored trades from /api/trades-public
+        try {
+          final response = await http.get(
+            Uri.parse('$_apiUrl/api/trades-public'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (sessionToken != null && sessionToken.isNotEmpty)
+                'X-Session-Token': sessionToken,
+            },
+          ).timeout(const Duration(seconds: 10));
 
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final tradesData = data['trades'] as List;
-          
-          _trades = tradesData.map((t) {
-            return Trade(
-              id: t['ticket'].toString(),
-              symbol: t['symbol'],
-              type: t['type'] == 'BUY' ? TradeType.buy : TradeType.sell,
-              quantity: (t['volume'] as num).toDouble(),
-              entryPrice: (t['price'] as num).toDouble(),
-              currentPrice: ((t['currentPrice'] ?? t['price']) as num).toDouble(),
-              takeProfit: null,
-              stopLoss: null,
-              status: TradeStatus.open,
-              openedAt: DateTime.parse(t['time'] ?? DateTime.now().toIso8601String()),
-              profit: ((t['profit'] ?? 0) as num).toDouble(),
-              profitPercentage: null,
-            );
-          }).toList();
-
-          _errorMessage = null;
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final tradesData = data['trades'] as List;
+            
+            allTrades.addAll(tradesData.map((t) {
+              return Trade(
+                id: t['ticket'].toString(),
+                symbol: t['symbol'],
+                type: t['type'] == 'BUY' ? TradeType.buy : TradeType.sell,
+                quantity: (t['volume'] as num).toDouble(),
+                entryPrice: (t['price'] as num).toDouble(),
+                currentPrice: ((t['currentPrice'] ?? t['price']) as num).toDouble(),
+                takeProfit: null,
+                stopLoss: null,
+                status: TradeStatus.open,
+                openedAt: DateTime.parse(t['time'] ?? DateTime.now().toIso8601String()),
+                profit: ((t['profit'] ?? 0) as num).toDouble(),
+                profitPercentage: null,
+              );
+            }));
+          }
+        } catch (e) {
+          print('Error fetching database trades: $e');
         }
+        
+          // Fetch 2: Live MT5 positions from /api/positions/all
+        try {
+          final posResponse = await http.get(
+            Uri.parse('$_apiUrl/api/positions/all'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (sessionToken != null && sessionToken.isNotEmpty)
+                'X-Session-Token': sessionToken,
+            },
+          ).timeout(const Duration(seconds: 10));
+
+          if (posResponse.statusCode == 200) {
+            final posData = jsonDecode(posResponse.body);
+            final positions = posData['positions'] as List? ?? [];
+            
+            if (positions.isNotEmpty) {
+              print('✅ Fetched ${positions.length} live MT5 positions');
+            }
+            
+            allTrades.addAll(positions.map((p) {
+              return Trade(
+                id: p['ticket'].toString(),
+                symbol: p['symbol'],
+                type: p['type'] == 'BUY' ? TradeType.buy : TradeType.sell,
+                quantity: (p['volume'] as num).toDouble(),
+                entryPrice: (p['openPrice'] as num).toDouble(),
+                currentPrice: (p['currentPrice'] as num).toDouble(),
+                takeProfit: null,
+                stopLoss: null,
+                status: TradeStatus.open, // MT5 positions are always open
+                openedAt: DateTime.parse(p['time'] ?? DateTime.now().toIso8601String()),
+                profit: ((p['profit'] ?? 0) as num).toDouble(),
+                profitPercentage: ((p['profitPercent'] ?? 0) as num).toDouble(),
+              );
+            }));
+          }
+        } catch (e) {
+          print('Note: Live MT5 positions not available: $e');
+        }
+        
+        _trades = allTrades;
+        _errorMessage = null;
       } catch (e) {
         print('Error fetching trades from API: $e');
         _useApi = false;
