@@ -6096,7 +6096,6 @@ def get_account_balances():
                 if broker_name not in accounts_summary['brokers']:
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
-                
                 # Accumulate totals
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
@@ -6110,7 +6109,6 @@ def get_account_balances():
                 cached_margin_free = 0
                 cached_margin_level = 0
                 cached_profit = 0
-                
                 # Check in-memory cache (populated by bot trading loops)
                 with balance_cache_lock:
                     if cache_key in balance_cache:
@@ -6122,7 +6120,6 @@ def get_account_balances():
                         cached_margin_level = cached_info.get('margin_level', 0)
                         cached_profit = cached_info.get('total_pl', 0)
                         logger.info(f"✅ Balance cache hit for {cache_key}: ${cached_balance:.2f}")
-                
                 # Fallback: try SQLite cached_balance column
                 if cached_balance == 0 and cred['credential_id'] in cached_data:
                     cache = dict(cached_data[cred['credential_id']])
@@ -6134,11 +6131,23 @@ def get_account_balances():
                     cached_profit = cache.get('cached_profit', 0) or 0
                     if cached_balance > 0:
                         logger.info(f"✅ SQLite cache hit for {cache_key}: ${cached_balance:.2f}")
-                
-                # If still $0 — account genuinely not connected / not funded
-                if cached_balance == 0:
-                    logger.info(f"ℹ️  {cache_key}: No cached balance — showing $0")
-                
+                # --- NEW: If still $0 and Exness, try live fetch from MT5 ---
+                if cached_balance == 0 and broker_name == 'Exness':
+                    try:
+                        import MetaTrader5 as mt5
+                        if mt5.initialize():
+                            acc_info = mt5.account_info()
+                            if acc_info and acc_info.login == int(account_num):
+                                cached_balance = acc_info.balance
+                                cached_equity = acc_info.equity
+                                cached_margin = acc_info.margin
+                                cached_margin_free = acc_info.margin_free
+                                cached_margin_level = acc_info.margin_level if acc_info.margin_level else 0
+                                cached_profit = acc_info.profit
+                                logger.info(f"✅ Live MT5 fetch for Exness {account_num}: ${cached_balance:.2f}")
+                            mt5.shutdown()
+                    except Exception as e:
+                        logger.warning(f"Live MT5 fetch failed for Exness {account_num}: {e}")
                 has_cached_data = cached_balance > 0
                 account_entry.update({
                     'balance': float(cached_balance),
@@ -6156,12 +6165,10 @@ def get_account_balances():
                     account_entry.pop('error', None)
                 else:
                     account_entry['warning'] = 'Account not connected — balance will update when bot runs'
-                
                 # Add to broker group
                 if broker_name not in accounts_summary['brokers']:
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
-                
                 # Accumulate totals from cache (better than $0)
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
