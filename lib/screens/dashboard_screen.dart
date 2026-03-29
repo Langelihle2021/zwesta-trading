@@ -53,6 +53,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _refreshTimer;
   int _refreshFailureCount = 0;
 
+  /// Convert currency code to symbol (e.g., ZAR → R, USD → $, EUR → €)
+  String _currencySymbol(String code) {
+    const symbols = {
+      'USD': '\$', 'EUR': '€', 'GBP': '£', 'ZAR': 'R',
+      'JPY': '¥', 'CHF': 'CHF', 'AUD': 'A\$', 'CAD': 'C\$',
+      'NZD': 'NZ\$', 'SGD': 'S\$', 'HKD': 'HK\$', 'CNY': '¥',
+      'INR': '₹', 'BRL': 'R\$', 'KRW': '₩', 'TRY': '₺',
+      'MXN': 'MX\$', 'PLN': 'zł', 'SEK': 'kr', 'NOK': 'kr',
+      'NGN': '₦', 'KES': 'KSh', 'GHS': 'GH₵', 'USDT': 'USDT',
+    };
+    return symbols[code.toUpperCase()] ?? code;
+  }
+
   // Broker account balances
   List<Map<String, dynamic>> _brokerAccounts = [];
   bool _brokerBalancesLoading = false;
@@ -343,17 +356,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
                     children: [
-                      _buildMetricCard('Balance', '$currency ${balance.toStringAsFixed(2)}', Colors.white, const Color(0xFF00E5FF)),
-                      _buildMetricCard('Equity', '$currency ${equity.toStringAsFixed(2)}', Colors.white, const Color(0xFF69F0AE)),
+                      _buildMetricCard('Balance', '${_currencySymbol(currency)}${balance.toStringAsFixed(2)}', Colors.white, const Color(0xFF00E5FF)),
+                      _buildMetricCard('Equity', '${_currencySymbol(currency)}${equity.toStringAsFixed(2)}', Colors.white, const Color(0xFF69F0AE)),
                       _buildMetricCard(
                         'Free Margin',
-                        '$currency ${((connected['free_margin'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                        '${_currencySymbol(currency)}${((connected['free_margin'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
                         Colors.white,
                         const Color(0xFF81C784),
                       ),
                       _buildMetricCard(
                         'Margin Used',
-                        '$currency ${((connected['margin'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                        '${_currencySymbol(currency)}${((connected['margin'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
                         Colors.white,
                         const Color(0xFFFFB74D),
                       ),
@@ -365,7 +378,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       _buildMetricCard(
                         'Total P/L',
-                        '$currency ${((connected['total_pl'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                        '${_currencySymbol(currency)}${((connected['total_pl'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
                         ((connected['total_pl'] as num?)?.toDouble() ?? 0.0) >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                         ((connected['total_pl'] as num?)?.toDouble() ?? 0.0) >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                       ),
@@ -394,7 +407,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               style: GoogleFonts.poppins(color: Colors.white60, fontSize: 11),
                             ),
                             Text(
-                              '$currency ${balanceChange.abs().toStringAsFixed(2)}',
+                              '${_currencySymbol(currency)}${balanceChange.abs().toStringAsFixed(2)}',
                               style: GoogleFonts.poppins(
                                 color: isIncreasing ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                                 fontSize: 14,
@@ -413,7 +426,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       children: [
                         Text('Recent Withdrawals', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
                         Text(
-                          'Total: $currency ${totalWithdrawn.toStringAsFixed(2)}',
+                          'Total: ${_currencySymbol(currency)}${totalWithdrawn.toStringAsFixed(2)}',
                           style: GoogleFonts.poppins(color: const Color(0xFFFFB74D), fontSize: 12, fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -432,7 +445,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '$currency ${amount.toStringAsFixed(2)}',
+                                    '${_currencySymbol(currency)}${amount.toStringAsFixed(2)}',
                                     style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
                                   ),
                                   Text(

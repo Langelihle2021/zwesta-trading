@@ -2519,6 +2519,7 @@ class MT5Connection(BrokerConnection):
                                             'balance': balance,
                                             'equity': float(self.account_info.get('equity', 0)),
                                             'marginFree': float(self.account_info.get('marginFree', 0)),
+                                            'currency': self.account_info.get('currency', 'USD'),
                                             'timestamp': time.time()
                                         }
                                         logger.info(f"  💾 [BOT CACHE] Key='{cache_key}' Balance=${balance:.2f} (Total cache entries: {len(balance_cache)})")
@@ -2738,6 +2739,7 @@ class MT5Connection(BrokerConnection):
                                 'balance': float(account_info.balance),
                                 'equity': float(account_info.equity),
                                 'marginFree': float(account_info.margin_free) if hasattr(account_info, 'margin_free') else 0,
+                                'currency': account_info.currency if hasattr(account_info, 'currency') else 'USD',
                                 'timestamp': time.time()
                             }
                         logger.info(f"  💾 Cached balance for {cache_key}: ${account_info.balance} (cache size: {len(balance_cache)} entries)")
@@ -2792,8 +2794,8 @@ class MT5Connection(BrokerConnection):
                 'accountNumber': info.login,
                 'broker': info.server,
                 'company': info.company if hasattr(info, 'company') else 'Exness',
-                'currency': 'USD',  # Force USD
-                'displayCurrency': 'USD',
+                'currency': info.currency if hasattr(info, 'currency') else 'USD',
+                'displayCurrency': info.currency if hasattr(info, 'currency') else 'USD',
                 
                 # === BALANCE & EQUITY ===
                 'balance': round(float(info.balance), 2),
@@ -6110,6 +6112,7 @@ def get_account_balances():
                 cached_margin_free = 0
                 cached_margin_level = 0
                 cached_profit = 0
+                cached_currency = 'USD'
                 
                 # Check in-memory cache (populated by bot trading loops)
                 with balance_cache_lock:
@@ -6121,6 +6124,7 @@ def get_account_balances():
                         cached_margin_free = cached_info.get('marginFree', 0)
                         cached_margin_level = cached_info.get('margin_level', 0)
                         cached_profit = cached_info.get('total_pl', 0)
+                        cached_currency = cached_info.get('currency', 'USD')
                         logger.info(f"✅ Balance cache hit for {cache_key}: ${cached_balance:.2f}")
                 
                 # Fallback: try SQLite cached_balance column
@@ -6147,7 +6151,7 @@ def get_account_balances():
                     'margin': float(cached_margin),
                     'margin_level': float(cached_margin_level),
                     'total_pl': float(cached_profit),
-                    'currency': 'USD',
+                    'currency': cached_currency,
                     'connected': has_cached_data,  # Show as connected when we have valid cached data
                     'dataSource': 'cache' if has_cached_data else 'not_connected',
                 })
@@ -11188,7 +11192,7 @@ def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
         signal_threshold = max(signal_threshold, profile_defaults['signalThreshold'])
         allowed_volatility = [level for level in allowed_volatility if level in profile_defaults['allowedVolatility']] or list(profile_defaults['allowedVolatility'])
 
-    display_currency = 'USD'  # Force USD - all accounts are in USD
+    display_currency = 'USD'  # Default, overridden by actual account currency
     
     return {
         'riskPerTrade': risk_per_trade,
