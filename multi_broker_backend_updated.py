@@ -374,24 +374,46 @@ MT5_CONFIG = {
     'path': None
 }
 
+# ==================== DUAL EXNESS TERMINAL PATHS ====================
+# Support separate MT5 terminals for DEMO and LIVE trading simultaneously
+EXNESS_DEMO_PATH = os.getenv('EXNESS_DEMO_PATH', r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe').strip()
+EXNESS_LIVE_PATH = os.getenv('EXNESS_LIVE_PATH', r'C:\Program Files\MetaTrader 5\terminal64.exe').strip()
+
+if os.path.exists(EXNESS_DEMO_PATH):
+    logger.info(f"[DUAL MT5] ✅ Exness DEMO terminal: {EXNESS_DEMO_PATH}")
+else:
+    logger.warning(f"[DUAL MT5] ⚠️  Exness DEMO terminal NOT FOUND: {EXNESS_DEMO_PATH}")
+    EXNESS_DEMO_PATH = None
+
+if os.path.exists(EXNESS_LIVE_PATH):
+    logger.info(f"[DUAL MT5] ✅ Exness LIVE terminal: {EXNESS_LIVE_PATH}")
+else:
+    logger.warning(f"[DUAL MT5] ⚠️  Exness LIVE terminal NOT FOUND: {EXNESS_LIVE_PATH}")
+    EXNESS_LIVE_PATH = None
+
 # DEPLOYMENT-AWARE: Only auto-detect local MT5 paths if LOCAL deployment
 # On VPS, MT5 terminal is remote, so don't specify a path (connect to running instance)
 if DEPLOYMENT_MODE == 'LOCAL':
-    # Try to find Exness terminal specifically (PRIORITY: broker-specific only)
-    exness_paths = [
-        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
-        r'C:\Program Files\Exness MT5\terminal64.exe',
-        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
-        r'C:\MT5\Exness\terminal64.exe',
-    ]
-    for path in exness_paths:
-        if os.path.exists(path):
-            MT5_CONFIG['path'] = path
-            logger.info(f"Found Exness MT5 at: {path}")
-            break
+    # Use DEMO terminal as default for MT5_CONFIG
+    if EXNESS_DEMO_PATH:
+        MT5_CONFIG['path'] = EXNESS_DEMO_PATH
+        logger.info(f"Found Exness MT5 (DEMO) at: {EXNESS_DEMO_PATH}")
+    else:
+        # Fallback: try any Exness terminal
+        exness_paths = [
+            r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+            r'C:\Program Files\Exness MT5\terminal64.exe',
+            r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+            r'C:\MT5\Exness\terminal64.exe',
+        ]
+        for path in exness_paths:
+            if os.path.exists(path):
+                MT5_CONFIG['path'] = path
+                logger.info(f"Found Exness MT5 at: {path}")
+                break
 
-    if MT5_CONFIG['path'] is None:
-        logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
+        if MT5_CONFIG['path'] is None:
+            logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
 else:
     logger.info(f"[VPS MODE] Not searching for local MT5 - will connect to remote MT5 terminal")
     logger.info(f"[VPS MODE] Ensure MT5 terminal is running on VPS and accessible")
@@ -482,14 +504,23 @@ def get_known_mt5_paths(broker_name: str) -> List[str]:
     ]
 
 
-def find_mt5_terminal_path(broker_name: str, configured_path: str = None) -> Optional[str]:
-    """Resolve a broker-specific terminal path even on VPS/local mixed setups."""
+def find_mt5_terminal_path(broker_name: str, configured_path: str = None, is_live: bool = None) -> Optional[str]:
+    """Resolve a broker-specific terminal path even on VPS/local mixed setups.
+    For Exness: uses separate DEMO/LIVE terminals when is_live is specified."""
     candidate_paths = []
 
     if configured_path:
         candidate_paths.append(configured_path)
 
-    env_path = os.getenv(f"{canonicalize_broker_name(broker_name).upper().replace(' ', '_')}_PATH", '').strip()
+    # For Exness: prefer the dedicated demo/live terminal path
+    normalized = canonicalize_broker_name(broker_name)
+    if normalized == 'Exness' and is_live is not None:
+        if is_live and EXNESS_LIVE_PATH:
+            candidate_paths.insert(0, EXNESS_LIVE_PATH)
+        elif not is_live and EXNESS_DEMO_PATH:
+            candidate_paths.insert(0, EXNESS_DEMO_PATH)
+
+    env_path = os.getenv(f"{normalized.upper().replace(' ', '_')}_PATH", '').strip()
     if env_path:
         candidate_paths.append(env_path)
 
@@ -542,7 +573,7 @@ if ENVIRONMENT == 'LIVE':
             'account': int(live_account),
             'password': live_password,
             'server': live_server,
-            'path': os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
+            'path': os.getenv('EXNESS_LIVE_PATH') or os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
         }
         logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}")
     
@@ -2334,9 +2365,12 @@ class MT5Connection(BrokerConnection):
             self.mt5 = mt5
             broker_cfg = get_mt5_config_for_broker(self.mt5_broker)
             # Prefer explicit credential path, then broker-specific config path.
+            # Pass is_live to select the correct terminal for dual-terminal setups
+            is_live = credentials.get('is_live', False)
             self.mt5_path = find_mt5_terminal_path(
                 self.mt5_broker,
-                credentials.get('path') or broker_cfg.get('path')
+                credentials.get('path') or broker_cfg.get('path'),
+                is_live=is_live
             )
         except ImportError:
             logger.error("MetaTrader5 not installed")
@@ -10304,7 +10338,7 @@ def test_broker_connection():
                     lock_acquired = mt5_connection_lock.acquire(timeout=2.0)  # Short timeout for balance check
                     if lock_acquired:
                         try:
-                            terminal_path = find_mt5_terminal_path(broker)
+                            terminal_path = find_mt5_terminal_path(broker, is_live=is_live)
                             init_ok = False
                             if terminal_path:
                                 init_ok = mt5_mod.initialize(
