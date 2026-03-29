@@ -1006,8 +1006,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── BROKER ACCOUNTS CARD ──
   Widget _buildBrokerAccountsCard() {
-    // Always show the Broker Accounts card, even if only live accounts are present
-    final shownAccounts = _brokerAccounts;
+    // Filter accounts by balance mode (All / Live / Demo)
+    final shownAccounts = _brokerAccounts
+        .where((account) {
+          if (_balanceMode == 'all') return true;
+          final mode = (account['mode'] ?? '').toString().toLowerCase();
+          if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
+          return mode == 'demo' || mode == 'trial';
+        })
+        .cast<Map<String, dynamic>>()
+        .toList();
+    
     final shownTotal = shownAccounts.fold<double>(
       0, (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
     );
