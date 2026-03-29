@@ -376,32 +376,22 @@ MT5_CONFIG = {
 
 # DEPLOYMENT-AWARE: Only auto-detect local MT5 paths if LOCAL deployment
 # On VPS, MT5 terminal is remote, so don't specify a path (connect to running instance)
-#
-# ENHANCEMENT: Support separate EXNESS_DEMO_PATH and EXNESS_LIVE_PATH for demo/live terminals
 if DEPLOYMENT_MODE == 'LOCAL':
-    exness_demo_path = os.getenv('EXNESS_DEMO_PATH', '').strip()
-    exness_live_path = os.getenv('EXNESS_LIVE_PATH', '').strip()
-    if ENVIRONMENT == 'LIVE' and exness_live_path:
-        MT5_CONFIG['path'] = exness_live_path
-        logger.info(f"[EXNESS] Using EXNESS_LIVE_PATH: {exness_live_path}")
-    elif ENVIRONMENT != 'LIVE' and exness_demo_path:
-        MT5_CONFIG['path'] = exness_demo_path
-        logger.info(f"[EXNESS] Using EXNESS_DEMO_PATH: {exness_demo_path}")
-    else:
-        # Fallback to auto-detect
-        exness_paths = [
-            r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
-            r'C:\Program Files\Exness MT5\terminal64.exe',
-            r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
-            r'C:\MT5\Exness\terminal64.exe',
-        ]
-        for path in exness_paths:
-            if os.path.exists(path):
-                MT5_CONFIG['path'] = path
-                logger.info(f"Found Exness MT5 at: {path}")
-                break
-        if MT5_CONFIG['path'] is None:
-            logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
+    # Try to find Exness terminal specifically (PRIORITY: broker-specific only)
+    exness_paths = [
+        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+        r'C:\Program Files\Exness MT5\terminal64.exe',
+        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+        r'C:\MT5\Exness\terminal64.exe',
+    ]
+    for path in exness_paths:
+        if os.path.exists(path):
+            MT5_CONFIG['path'] = path
+            logger.info(f"Found Exness MT5 at: {path}")
+            break
+
+    if MT5_CONFIG['path'] is None:
+        logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
 else:
     logger.info(f"[VPS MODE] Not searching for local MT5 - will connect to remote MT5 terminal")
     logger.info(f"[VPS MODE] Ensure MT5 terminal is running on VPS and accessible")
@@ -545,19 +535,16 @@ if ENVIRONMENT == 'LIVE':
         print("Set in .env file:")
         print("  EXNESS_ACCOUNT=your_account_number")
         print("  EXNESS_PASSWORD=your_password")
-        print("  EXNESS_LIVE_PATH=path_to_live_mt5_terminal64.exe (optional)")
         print("="*70 + "\n")
     else:
-        # Use EXNESS_LIVE_PATH if set, else fallback to previous logic
-        exness_live_path = os.getenv('EXNESS_LIVE_PATH', '').strip()
         MT5_CONFIG = {
             'broker': 'Exness',
             'account': int(live_account),
             'password': live_password,
             'server': live_server,
-            'path': exness_live_path or os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
+            'path': os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
         }
-        logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}, Path: {MT5_CONFIG['path']}")
+        logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}")
     
     # XM GLOBAL LIVE VALIDATION
     if not xm_account or not xm_password:
@@ -606,10 +593,6 @@ if ENVIRONMENT == 'LIVE':
 
 else:
     # DEMO MODE (default)
-    exness_demo_path = os.getenv('EXNESS_DEMO_PATH', '').strip()
-    if exness_demo_path:
-        MT5_CONFIG['path'] = exness_demo_path
-        logger.info(f"[DEMO] Using EXNESS_DEMO_PATH: {exness_demo_path}")
     print(f"{'='*70}")
     print(f"[DEMO MODE] 🟢 USING DEMO ACCOUNTS (Safe for Testing)")
     print(f"{'='*70}")
@@ -644,7 +627,7 @@ if ENVIRONMENT == 'LIVE':
 else:
     logger.info(f"[DEMO] DEMO MODE - Exness Account: {MT5_CONFIG['account']} (Demo)")
     logger.info(f"[DEMO] Available in DEMO: 298997455")
-    logger.info(f"[DEMO] Available in LIVE: 295619855")
+    logger.info(f"[DEMO] Available in LIVE: 295677214")
 
 # ==================== API AUTHENTICATION ====================
 OWNER_USER_ID = 'SYSTEM_OWNER_USER_ID'  # TODO: Set your real owner user_id here
@@ -2411,7 +2394,7 @@ class MT5Connection(BrokerConnection):
             server = self.credentials.get('server') or broker_cfg.get('server')
             is_live = self.credentials.get('is_live', False)
             
-            # Broker-specific server normalization — always enforce Exness server
+            # Broker-specific server normalization — use per-credential is_live, NOT global ENVIRONMENT
             if broker_name == 'Exness':
                 server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
             elif broker_name in ['XM', 'XM Global'] and (not server or 'xm' not in str(server).lower()):
@@ -6012,37 +5995,15 @@ def get_account_balances():
             timed_out = False
             
             try:
-                # --- PATCH: Always attempt live fetch for Exness live accounts using socket bridge ---
-                if broker_name == 'Exness' and is_live:
-                    try:
-                        bridge = socket_bridge_manager.get_bridge('Exness', str(account_num))
-                        if bridge:
-                            acc_info = bridge.get_account_info()
-                            if acc_info and acc_info.get('balance') is not None:
-                                account_info = {
-                                    'accountNumber': account_num,
-                                    'balance': float(acc_info.get('balance', 0)),
-                                    'equity': float(acc_info.get('equity', 0)),
-                                    'marginFree': float(acc_info.get('margin_free', 0)),
-                                    'margin': float(acc_info.get('margin', 0)),
-                                    'margin_level': float(acc_info.get('margin_level', 0)),
-                                    'total_pl': float(acc_info.get('profit', 0)),
-                                    'currency': acc_info.get('currency', 'USD'),
-                                    'connected': True,
-                                    'dataSource': 'live',
-                                }
-                                logger.info(f"✅ Live MT5 fetch via socket bridge for Exness {account_num}: ${account_info['balance']:.2f}")
-                            else:
-                                error_msg = "Socket bridge did not return valid account info"
-                        else:
-                            error_msg = "No socket bridge available for Exness account"
-                    except Exception as e:
-                        logger.warning(f"Socket bridge live fetch failed for Exness {account_num}: {e}")
-                        error_msg = f"Socket bridge live fetch failed: {e}"
-                elif broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
-                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint for demo or other brokers.
+                if broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
+                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint.
+                    # Live and demo accounts have separate MT5 credentials — each account's
+                    # balance is populated into balance_cache by the bot trading loop when
+                    # that account is actively connected.  This prevents cross-contamination
+                    # between live and demo balances and avoids MT5 lock contention.
                     logger.info(f"ℹ️ Balance: {broker_name} {account_num} — using cache only (MT5 disconnected in balance endpoint)")
                     error_msg = "Using cached balance — MT5 reads handled by trading loop"
+                
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
                     try:
@@ -6135,6 +6096,7 @@ def get_account_balances():
                 if broker_name not in accounts_summary['brokers']:
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
+                
                 # Accumulate totals
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
@@ -6148,6 +6110,7 @@ def get_account_balances():
                 cached_margin_free = 0
                 cached_margin_level = 0
                 cached_profit = 0
+                
                 # Check in-memory cache (populated by bot trading loops)
                 with balance_cache_lock:
                     if cache_key in balance_cache:
@@ -6159,6 +6122,7 @@ def get_account_balances():
                         cached_margin_level = cached_info.get('margin_level', 0)
                         cached_profit = cached_info.get('total_pl', 0)
                         logger.info(f"✅ Balance cache hit for {cache_key}: ${cached_balance:.2f}")
+                
                 # Fallback: try SQLite cached_balance column
                 if cached_balance == 0 and cred['credential_id'] in cached_data:
                     cache = dict(cached_data[cred['credential_id']])
@@ -6170,23 +6134,11 @@ def get_account_balances():
                     cached_profit = cache.get('cached_profit', 0) or 0
                     if cached_balance > 0:
                         logger.info(f"✅ SQLite cache hit for {cache_key}: ${cached_balance:.2f}")
-                # --- NEW: If still $0 and Exness, try live fetch from MT5 ---
-                if cached_balance == 0 and broker_name == 'Exness':
-                    try:
-                        import MetaTrader5 as mt5
-                        if mt5.initialize():
-                            acc_info = mt5.account_info()
-                            if acc_info and acc_info.login == int(account_num):
-                                cached_balance = acc_info.balance
-                                cached_equity = acc_info.equity
-                                cached_margin = acc_info.margin
-                                cached_margin_free = acc_info.margin_free
-                                cached_margin_level = acc_info.margin_level if acc_info.margin_level else 0
-                                cached_profit = acc_info.profit
-                                logger.info(f"✅ Live MT5 fetch for Exness {account_num}: ${cached_balance:.2f}")
-                            mt5.shutdown()
-                    except Exception as e:
-                        logger.warning(f"Live MT5 fetch failed for Exness {account_num}: {e}")
+                
+                # If still $0 — account genuinely not connected / not funded
+                if cached_balance == 0:
+                    logger.info(f"ℹ️  {cache_key}: No cached balance — showing $0")
+                
                 has_cached_data = cached_balance > 0
                 account_entry.update({
                     'balance': float(cached_balance),
@@ -6204,10 +6156,12 @@ def get_account_balances():
                     account_entry.pop('error', None)
                 else:
                     account_entry['warning'] = 'Account not connected — balance will update when bot runs'
+                
                 # Add to broker group
                 if broker_name not in accounts_summary['brokers']:
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
+                
                 # Accumulate totals from cache (better than $0)
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
@@ -9246,47 +9200,14 @@ def get_best_trading_assets(limit=5):
                     return
                 symbol = tradable_symbols[0]  # Or use your asset selection logic
 
-                # --- Small Account & Fast Growth Profile Logic ---
-                profile = bot.get('managementProfile') or bot.get('profile')
-                balance = float(bot.get('accountBalance', 0))
-                min_lot = 0.01
-                # If Fast Growth profile or balance is small, apply special logic
-                if profile == 'fast_growth' or balance <= 200:
-                    risk_percent = min(float(bot.get('riskPercent', 4.0)), 5.0)
-                    sl = float(bot.get('stopLoss', 0))
-                    tp = float(bot.get('takeProfit', 0))
-                    if not sl or sl > balance * 0.01:
-                        sl = round(balance * 0.005, 2)  # 0.5% of balance
-                    if not tp or tp > balance * 0.02:
-                        tp = round(balance * 0.01, 2)   # 1% of balance
-                    max_trades = max(int(bot.get('maxOpenTrades', 6)), 4)
-                    lot_size = max(min_lot, round((balance * risk_percent / 100) / (sl if sl else 1), 2))
-                    trade_params = {
-                        'symbol': symbol,
-                        'order_type': 'BUY',  # or use bot logic
-                        'volume': lot_size,
-                        'stopLoss': sl,
-                        'takeProfit': tp,
-                        'maxOpenTrades': max_trades,
-                        'autoCompound': True
-                    }
-                else:
-                    # Default logic for other profiles
-                    trade_params = {
-                        'symbol': symbol,
-                        'order_type': 'BUY',  # or use bot logic
-                        'volume': bot.get('lotSize', 0.01),
-                        'stopLoss': bot.get('stopLoss'),
-                        'takeProfit': bot.get('takeProfit'),
-                        'maxOpenTrades': bot.get('maxOpenTrades', 3),
-                        'autoCompound': False
-                    }
-                # Place trade
-                result = place_trade(**trade_params)
-                if result.get('success'):
-                    logger.info(f"[TRADE] Bot {bot_id} placed trade: {trade_params} Result: {result}")
-                else:
-                    logger.warning(f"[TRADE] Bot {bot_id} failed to place trade: {trade_params} Result: {result}")
+                # ...existing trade logic...
+                # Only place trade if should_trade_today passed
+                # (Insert your trade execution code here)
+
+                # Example: Place trade (pseudo-code)
+                # result = place_trade(symbol, ...)
+                # if result['success']:
+                #     update bot metrics, etc.
 
             # Note: Integrate this logic into your actual bot trading scheduler/loop.
             # (unchanged scoring logic)
@@ -9392,15 +9313,13 @@ def should_trade_today(bot_config, symbol):
             )
             return False
 
-    # 5. Volatility Filter: Only trade if volatility is allowed (can be disabled per bot)
-    volatility_filter_enabled = bot_config.get('volatilityFilterEnabled', True)
-    if volatility_filter_enabled:
-        allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Low', 'Medium'])
-        # Get current volatility for symbol
-        vol = commodity_market_data.get(symbol, {}).get('volatility', 'Medium')
-        if allowed_vol and vol not in allowed_vol:
-            logger.info(f"[RISK] Bot {bot_config.get('botId')} skipping {symbol} due to volatility: {vol}")
-            return False
+    # 5. Volatility Filter: Only trade if volatility is allowed
+    allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Low', 'Medium'])
+    # Get current volatility for symbol
+    vol = commodity_market_data.get(symbol, {}).get('volatility', 'Medium')
+    if allowed_vol and vol not in allowed_vol:
+        logger.info(f"[RISK] Bot {bot_config.get('botId')} skipping {symbol} due to volatility: {vol}")
+        return False
 
     # 6. Regime Check: Only trade if signal is strong (not consolidating/weak)
     signal = commodity_market_data.get(symbol, {}).get('signal', '')
@@ -10039,8 +9958,8 @@ def save_broker_credentials():
                     'success': False,
                     'error': 'Exness requires: account_number, password, server'
                 }), 400
-            # Always enforce correct Exness server regardless of user input
-            server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+            if not server:
+                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
         else:
             return jsonify({
                 'success': False,
@@ -10302,23 +10221,6 @@ def test_broker_connection():
 
         # ==================== MT5 BROKERS ====================
         else:
-            # --- Always reset MT5 session before new connection attempt ---
-            try:
-                import MetaTrader5 as mt5_mod
-                # Shutdown any existing session
-                mt5_mod.shutdown()
-                # Reset global MT5 connection instance
-                set_global_mt5(None)
-                # Release lock if held (defensive)
-                if mt5_connection_lock.locked():
-                    try:
-                        mt5_connection_lock.release()
-                        logger.info("[MT5] Released lingering connection lock before new broker test.")
-                    except Exception as e:
-                        logger.warning(f"[MT5] Could not release lock: {e}")
-                logger.info("[MT5] Clean session reset before broker test-connection.")
-            except Exception as e:
-                logger.warning(f"[MT5] Error during session reset: {e}")
             account = data.get('account_number', '')
             password = data.get('password', '')
             server = data.get('server', '')
@@ -10330,7 +10232,7 @@ def test_broker_connection():
                     'error': 'Missing required fields for MT5: broker, account_number, password, server'
                 }), 400
             
-            # Fix server name for MT5 brokers — always enforce Exness server
+            # Fix server name for MT5 brokers — use per-account is_live, NOT global ENVIRONMENT
             broker_l = broker.lower()
             if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness', 'pxbt', 'prime xbt', 'primexbt']:
                 if broker_l in ['xm', 'xm global']:
@@ -10342,8 +10244,7 @@ def test_broker_connection():
                 else:
                     expected_server = 'MetaQuotes-Live' if is_live else 'MetaQuotes-Demo'
 
-                # Always enforce Exness server
-                if broker_l == 'exness' or not server or server != expected_server:
+                if not server or server != expected_server:
                     server = expected_server
                     logger.info(f"   Corrected server to: {server} (is_live={is_live})")
             
