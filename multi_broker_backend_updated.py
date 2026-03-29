@@ -376,22 +376,32 @@ MT5_CONFIG = {
 
 # DEPLOYMENT-AWARE: Only auto-detect local MT5 paths if LOCAL deployment
 # On VPS, MT5 terminal is remote, so don't specify a path (connect to running instance)
+#
+# ENHANCEMENT: Support separate EXNESS_DEMO_PATH and EXNESS_LIVE_PATH for demo/live terminals
 if DEPLOYMENT_MODE == 'LOCAL':
-    # Try to find Exness terminal specifically (PRIORITY: broker-specific only)
-    exness_paths = [
-        r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
-        r'C:\Program Files\Exness MT5\terminal64.exe',
-        r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
-        r'C:\MT5\Exness\terminal64.exe',
-    ]
-    for path in exness_paths:
-        if os.path.exists(path):
-            MT5_CONFIG['path'] = path
-            logger.info(f"Found Exness MT5 at: {path}")
-            break
-
-    if MT5_CONFIG['path'] is None:
-        logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
+    exness_demo_path = os.getenv('EXNESS_DEMO_PATH', '').strip()
+    exness_live_path = os.getenv('EXNESS_LIVE_PATH', '').strip()
+    if ENVIRONMENT == 'LIVE' and exness_live_path:
+        MT5_CONFIG['path'] = exness_live_path
+        logger.info(f"[EXNESS] Using EXNESS_LIVE_PATH: {exness_live_path}")
+    elif ENVIRONMENT != 'LIVE' and exness_demo_path:
+        MT5_CONFIG['path'] = exness_demo_path
+        logger.info(f"[EXNESS] Using EXNESS_DEMO_PATH: {exness_demo_path}")
+    else:
+        # Fallback to auto-detect
+        exness_paths = [
+            r'C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe',
+            r'C:\Program Files\Exness MT5\terminal64.exe',
+            r'C:\Program Files (x86)\Exness MT5\terminal64.exe',
+            r'C:\MT5\Exness\terminal64.exe',
+        ]
+        for path in exness_paths:
+            if os.path.exists(path):
+                MT5_CONFIG['path'] = path
+                logger.info(f"Found Exness MT5 at: {path}")
+                break
+        if MT5_CONFIG['path'] is None:
+            logger.warning("⚠️  Exness MT5 not found in common paths - ensure Exness MT5 is installed")
 else:
     logger.info(f"[VPS MODE] Not searching for local MT5 - will connect to remote MT5 terminal")
     logger.info(f"[VPS MODE] Ensure MT5 terminal is running on VPS and accessible")
@@ -535,16 +545,19 @@ if ENVIRONMENT == 'LIVE':
         print("Set in .env file:")
         print("  EXNESS_ACCOUNT=your_account_number")
         print("  EXNESS_PASSWORD=your_password")
+        print("  EXNESS_LIVE_PATH=path_to_live_mt5_terminal64.exe (optional)")
         print("="*70 + "\n")
     else:
+        # Use EXNESS_LIVE_PATH if set, else fallback to previous logic
+        exness_live_path = os.getenv('EXNESS_LIVE_PATH', '').strip()
         MT5_CONFIG = {
             'broker': 'Exness',
             'account': int(live_account),
             'password': live_password,
             'server': live_server,
-            'path': os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
+            'path': exness_live_path or os.getenv('MT5_PATH') or os.getenv('EXNESS_PATH') or None
         }
-        logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}")
+        logger.info(f"[LIVE] ✅ EXNESS - Account: {MT5_CONFIG['account']}, Server: {live_server}, Path: {MT5_CONFIG['path']}")
     
     # XM GLOBAL LIVE VALIDATION
     if not xm_account or not xm_password:
@@ -593,6 +606,10 @@ if ENVIRONMENT == 'LIVE':
 
 else:
     # DEMO MODE (default)
+    exness_demo_path = os.getenv('EXNESS_DEMO_PATH', '').strip()
+    if exness_demo_path:
+        MT5_CONFIG['path'] = exness_demo_path
+        logger.info(f"[DEMO] Using EXNESS_DEMO_PATH: {exness_demo_path}")
     print(f"{'='*70}")
     print(f"[DEMO MODE] 🟢 USING DEMO ACCOUNTS (Safe for Testing)")
     print(f"{'='*70}")
@@ -2394,7 +2411,7 @@ class MT5Connection(BrokerConnection):
             server = self.credentials.get('server') or broker_cfg.get('server')
             is_live = self.credentials.get('is_live', False)
             
-            # Broker-specific server normalization — use per-credential is_live, NOT global ENVIRONMENT
+            # Broker-specific server normalization — always enforce Exness server
             if broker_name == 'Exness':
                 server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
             elif broker_name in ['XM', 'XM Global'] and (not server or 'xm' not in str(server).lower()):
@@ -10022,8 +10039,8 @@ def save_broker_credentials():
                     'success': False,
                     'error': 'Exness requires: account_number, password, server'
                 }), 400
-            if not server:
-                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+            # Always enforce correct Exness server regardless of user input
+            server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
         else:
             return jsonify({
                 'success': False,
@@ -10313,7 +10330,7 @@ def test_broker_connection():
                     'error': 'Missing required fields for MT5: broker, account_number, password, server'
                 }), 400
             
-            # Fix server name for MT5 brokers — use per-account is_live, NOT global ENVIRONMENT
+            # Fix server name for MT5 brokers — always enforce Exness server
             broker_l = broker.lower()
             if broker_l in ['metaquotes', 'xm', 'xm global', 'metatrader5', 'mt5', 'exness', 'pxbt', 'prime xbt', 'primexbt']:
                 if broker_l in ['xm', 'xm global']:
@@ -10325,7 +10342,8 @@ def test_broker_connection():
                 else:
                     expected_server = 'MetaQuotes-Live' if is_live else 'MetaQuotes-Demo'
 
-                if not server or server != expected_server:
+                # Always enforce Exness server
+                if broker_l == 'exness' or not server or server != expected_server:
                     server = expected_server
                     logger.info(f"   Corrected server to: {server} (is_live={is_live})")
             
