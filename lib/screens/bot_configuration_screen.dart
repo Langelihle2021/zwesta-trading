@@ -1,3 +1,5 @@
+  // Volatility filter toggle
+  bool _volatilityFilterEnabled = true;
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -694,6 +696,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           'dynamicSizing': true,
         },
         'enabled': true,
+        'volatilityFilterEnabled': _volatilityFilterEnabled,
         'autoWithdrawal': _enableAutoWithdrawal ? {
           'enabled': true,
           'withdrawalMode': _withdrawalMode,
@@ -1420,6 +1423,17 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  // Volatility Filter Toggle
+                  SwitchListTile(
+                    value: _volatilityFilterEnabled,
+                    onChanged: (val) {
+                      setState(() => _volatilityFilterEnabled = val);
+                    },
+                    title: const Text('Enable Volatility Filter'),
+                    subtitle: const Text('If disabled, bot will trade regardless of market volatility.'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(height: 16),
                   // Currency Selection
                   Container(
                     padding: const EdgeInsets.all(16),
