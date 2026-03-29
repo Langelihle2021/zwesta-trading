@@ -545,7 +545,7 @@ if ENVIRONMENT == 'LIVE':
     # LIVE MODE - Load from .env file
     live_account = os.getenv('EXNESS_ACCOUNT', '').strip()
     live_password = os.getenv('EXNESS_PASSWORD', '').strip()
-    live_server = os.getenv('EXNESS_SERVER', 'Exness-Real').strip()
+    live_server = os.getenv('EXNESS_SERVER', 'Exness-MT5Real27').strip()
     
     xm_account = os.getenv('XM_ACCOUNT', '').strip()
     xm_password = os.getenv('XM_PASSWORD', '').strip()
@@ -2430,7 +2430,7 @@ class MT5Connection(BrokerConnection):
             
             # Broker-specific server normalization — use per-credential is_live, NOT global ENVIRONMENT
             if broker_name == 'Exness':
-                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+                server = 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
             elif broker_name in ['XM', 'XM Global'] and (not server or 'xm' not in str(server).lower()):
                 server = 'XMGlobal-Real' if is_live else 'XMGlobal-MT5Demo'
             elif broker_name == 'PXBT':
@@ -8933,9 +8933,10 @@ def _get_bot_thread_credentials(bot_config: Dict[str, Any]) -> Optional[Dict[str
             }
 
         return {
-            'account_number': credential_row['account_number'],
+            'account': credential_row['account_number'],
             'password': credential_row['password'],
             'server': credential_row['server'],
+            'broker': canonicalize_broker_name(credential_row['broker_name']),
             'is_live': bool(credential_row['is_live']),
         }
     except Exception as e:
@@ -9997,7 +9998,7 @@ def save_broker_credentials():
                     'error': 'Exness requires: account_number, password, server'
                 }), 400
             if not server:
-                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+                server = 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
         else:
             return jsonify({
                 'success': False,
@@ -10276,7 +10277,7 @@ def test_broker_connection():
                 if broker_l in ['xm', 'xm global']:
                     expected_server = 'XMGlobal-Real' if is_live else 'XMGlobal-Demo'
                 elif broker_l == 'exness':
-                    expected_server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+                    expected_server = 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
                 elif broker_l in ['pxbt', 'prime xbt', 'primexbt']:
                     expected_server = 'PXBTTrading-1'
                 else:
@@ -11775,7 +11776,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         bot_credentials = {
                             'account': cred_dict.get('account_number', ''),
                             'password': cred_dict.get('password', ''),
-                            'server': cred_dict.get('server', 'Exness-Real'),
+                            'server': cred_dict.get('server', 'Exness-MT5Real27'),
                             'broker': cred_dict.get('broker_name', 'Exness'),
                             'is_live': bool(cred_dict.get('is_live', False))
                         }
@@ -11795,7 +11796,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
             bot_credentials = {
                 'account': '',
                 'password': '',
-                'server': 'Exness-Real',
+                'server': 'Exness-MT5Real27',
                 'broker': 'Exness',
                 'is_live': False
             }
@@ -12033,6 +12034,18 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         broker_connection_cache[cache_key] = mt5_conn
                                         logger.debug(f"✨ Bot {bot_id}: MT5 connection cached")
                         
+                                # CRITICAL FIX: Update singleton credentials with THIS bot's creds
+                                # so _connect_with_lock uses correct is_live, server, and terminal path
+                                if bot_credentials and mt5_conn:
+                                    mt5_conn.credentials = bot_credentials
+                                    _bot_is_live = bot_credentials.get('is_live', False)
+                                    mt5_conn.mt5_path = find_mt5_terminal_path(
+                                        mt5_conn.mt5_broker,
+                                        bot_credentials.get('path'),
+                                        is_live=_bot_is_live
+                                    )
+                                    logger.info(f"Bot {bot_id}: Updated MT5 credentials (is_live={_bot_is_live}, account={bot_credentials.get('account', '?')})")
+
                                 if not mt5_conn.connect():
                                     logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
                                     # STAGGER: Add random delay (1-15s) so bots don't all retry simultaneously
@@ -13177,7 +13190,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 server = 'MetaQuotes-Demo' if not is_live else 'MetaQuotes-Live'
             elif 'exness' in server.lower():
                 # Normalize Exness server name based on live/demo mode
-                server = 'Exness-Real' if is_live else 'Exness-MT5Trial9'
+                server = 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
             elif 'pxbt' in server.lower() or 'primexbt' in server.lower() or broker_name == 'PXBT':
                 server = 'PXBTTrading-1'
             
