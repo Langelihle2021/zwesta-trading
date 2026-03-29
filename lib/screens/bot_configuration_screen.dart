@@ -1,5 +1,3 @@
-  // Volatility filter toggle
-  bool _volatilityFilterEnabled = true;
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -24,6 +22,8 @@ class BotConfigurationScreen extends StatefulWidget {
 }
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
+  // Volatility filter toggle
+  bool _volatilityFilterEnabled = true;
   static const List<Map<String, String>> _binanceSymbols = [
     // --- Tier 1: Large Cap ---
     {'symbol': 'BTCUSDT',  'name': '₿ Bitcoin / Tether',     'category': 'Large Cap'},
