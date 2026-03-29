@@ -9353,16 +9353,17 @@ def should_trade_today(bot_config, symbol):
             return False
 
     # 5. Volatility Filter: Only trade if volatility is allowed
-    allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Low', 'Medium'])
+    allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Very Low', 'Low', 'Medium'])
     # Get current volatility for symbol
     vol = commodity_market_data.get(symbol, {}).get('volatility', 'Medium')
     if allowed_vol and vol not in allowed_vol:
         logger.info(f"[RISK] Bot {bot_config.get('botId')} skipping {symbol} due to volatility: {vol}")
         return False
 
-    # 6. Regime Check: Only trade if signal is strong (not consolidating/weak)
+    # 6. Regime Check: Only trade if signal is not consolidating/extremely volatile
+    # NOTE: 'WEAK' signals are allowed — they already passed the strength threshold check above
     signal = commodity_market_data.get(symbol, {}).get('signal', '')
-    if 'CONSOLIDAT' in signal or 'VOLATILE' in signal or 'WEAK' in signal:
+    if 'CONSOLIDAT' in signal or 'EXTREMELY VOLATILE' in signal:
         logger.info(f"[RISK] Bot {bot_config.get('botId')} skipping {symbol} due to regime: {signal}")
         return False
 
