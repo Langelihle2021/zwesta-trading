@@ -5995,15 +5995,37 @@ def get_account_balances():
             timed_out = False
             
             try:
-                if broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
-                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint.
-                    # Live and demo accounts have separate MT5 credentials — each account's
-                    # balance is populated into balance_cache by the bot trading loop when
-                    # that account is actively connected.  This prevents cross-contamination
-                    # between live and demo balances and avoids MT5 lock contention.
+                # --- PATCH: Always attempt live fetch for Exness live accounts using socket bridge ---
+                if broker_name == 'Exness' and is_live:
+                    try:
+                        bridge = socket_bridge_manager.get_bridge('Exness', str(account_num))
+                        if bridge:
+                            acc_info = bridge.get_account_info()
+                            if acc_info and acc_info.get('balance') is not None:
+                                account_info = {
+                                    'accountNumber': account_num,
+                                    'balance': float(acc_info.get('balance', 0)),
+                                    'equity': float(acc_info.get('equity', 0)),
+                                    'marginFree': float(acc_info.get('margin_free', 0)),
+                                    'margin': float(acc_info.get('margin', 0)),
+                                    'margin_level': float(acc_info.get('margin_level', 0)),
+                                    'total_pl': float(acc_info.get('profit', 0)),
+                                    'currency': acc_info.get('currency', 'USD'),
+                                    'connected': True,
+                                    'dataSource': 'live',
+                                }
+                                logger.info(f"✅ Live MT5 fetch via socket bridge for Exness {account_num}: ${account_info['balance']:.2f}")
+                            else:
+                                error_msg = "Socket bridge did not return valid account info"
+                        else:
+                            error_msg = "No socket bridge available for Exness account"
+                    except Exception as e:
+                        logger.warning(f"Socket bridge live fetch failed for Exness {account_num}: {e}")
+                        error_msg = f"Socket bridge live fetch failed: {e}"
+                elif broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
+                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint for demo or other brokers.
                     logger.info(f"ℹ️ Balance: {broker_name} {account_num} — using cache only (MT5 disconnected in balance endpoint)")
                     error_msg = "Using cached balance — MT5 reads handled by trading loop"
-                
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
                     try:
