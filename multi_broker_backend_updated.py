@@ -10285,6 +10285,23 @@ def test_broker_connection():
 
         # ==================== MT5 BROKERS ====================
         else:
+            # --- Always reset MT5 session before new connection attempt ---
+            try:
+                import MetaTrader5 as mt5_mod
+                # Shutdown any existing session
+                mt5_mod.shutdown()
+                # Reset global MT5 connection instance
+                set_global_mt5(None)
+                # Release lock if held (defensive)
+                if mt5_connection_lock.locked():
+                    try:
+                        mt5_connection_lock.release()
+                        logger.info("[MT5] Released lingering connection lock before new broker test.")
+                    except Exception as e:
+                        logger.warning(f"[MT5] Could not release lock: {e}")
+                logger.info("[MT5] Clean session reset before broker test-connection.")
+            except Exception as e:
+                logger.warning(f"[MT5] Error during session reset: {e}")
             account = data.get('account_number', '')
             password = data.get('password', '')
             server = data.get('server', '')
