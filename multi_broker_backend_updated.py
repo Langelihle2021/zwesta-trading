@@ -5651,6 +5651,246 @@ def get_user(user_id):
 
 # ==================== BOT STRATEGY MANAGEMENT ====================
 
+# ==================== SMALL ACCOUNT PRESETS ($10-$1000) ====================
+SMALL_ACCOUNT_PRESETS = {
+    'crypto': {
+        'name': 'Crypto Small Account (DCA + Swing)',
+        'description': 'DCA into BTC/ETH with swing trend entries. Best for $10-$1000 crypto accounts.',
+        'symbols': ['BTCUSDm', 'ETHUSDm'],
+        'strategy': 'Swing Trend DCA',
+        'managementProfile': 'small_account',
+        'riskPerTrade': 5.0,
+        'maxDailyLoss': 20.0,
+        'profitLock': 30.0,
+        'drawdownPausePercent': 3.0,
+        'drawdownPauseHours': 12.0,
+        'maxOpenPositions': 2,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': 75,
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'autoSwitch': False,
+        'dynamicSizing': True,
+        'basePositionSize': 0.01,
+        'tradeAmount': None,
+        'tips': [
+            'DCA weekly: buy fixed R amount regardless of price',
+            'Only spot or max 2-5x leverage',
+            'Stick to BTC + ETH (majors only)',
+            'Expect 5-8% monthly net on a good run',
+        ],
+    },
+    'forex': {
+        'name': 'Forex Small Account (Swing Trend)',
+        'description': 'Swing trend following on major pairs with micro lots. Best for $10-$1000 forex accounts.',
+        'symbols': ['EURUSDm'],
+        'strategy': 'Swing Trend DCA',
+        'managementProfile': 'small_account',
+        'riskPerTrade': 5.0,
+        'maxDailyLoss': 20.0,
+        'profitLock': 30.0,
+        'drawdownPausePercent': 3.0,
+        'drawdownPauseHours': 12.0,
+        'maxOpenPositions': 2,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': 75,
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'autoSwitch': False,
+        'dynamicSizing': True,
+        'basePositionSize': 0.01,
+        'tradeAmount': None,
+        'tips': [
+            'Use cent/micro account (0.01 lots)',
+            'Only EUR/USD and GBP/USD (tightest spreads)',
+            'Trade during London/NY overlap (15:00-19:00 SAST)',
+            'Target 1:2 or 1:3 risk-reward minimum',
+        ],
+    },
+    'stocks': {
+        'name': 'Stocks Small Account (Swing Pullback)',
+        'description': 'Swing pullback entries on blue-chip stocks/ETFs. Best for $50-$1000 stock accounts.',
+        'symbols': ['NVDAm', 'AAPLm', 'MSFTm'],
+        'strategy': 'Swing Trend DCA',
+        'managementProfile': 'small_account',
+        'riskPerTrade': 5.0,
+        'maxDailyLoss': 20.0,
+        'profitLock': 30.0,
+        'drawdownPausePercent': 3.0,
+        'drawdownPauseHours': 12.0,
+        'maxOpenPositions': 2,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': 70,
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'autoSwitch': False,
+        'dynamicSizing': True,
+        'basePositionSize': 0.01,
+        'tradeAmount': None,
+        'tips': [
+            'Use fractional shares or CFDs for small sizing',
+            'Focus on mega-cap tech (NVDA, AAPL, MSFT)',
+            'Check earnings calendar — avoid holding through earnings',
+            'Trail stop with 50 SMA on daily chart',
+        ],
+    },
+    'commodities': {
+        'name': 'Commodities Small Account (Gold Swing)',
+        'description': 'Swing trend following on gold (XAU/USD). Best for $100-$1000 commodity accounts.',
+        'symbols': ['XAUUSDm'],
+        'strategy': 'Swing Trend DCA',
+        'managementProfile': 'small_account',
+        'riskPerTrade': 5.0,
+        'maxDailyLoss': 20.0,
+        'profitLock': 30.0,
+        'drawdownPausePercent': 3.0,
+        'drawdownPauseHours': 12.0,
+        'maxOpenPositions': 1,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': 75,
+        'allowedVolatility': ['Low', 'Medium'],
+        'autoSwitch': False,
+        'dynamicSizing': True,
+        'basePositionSize': 0.01,
+        'tradeAmount': None,
+        'tips': [
+            'Gold is volatile — use wider stops (1.5-2x ATR)',
+            'Only trade with the daily trend',
+            'Avoid trading on FOMC / NFP days',
+            'CFDs keep position sizes minimal',
+        ],
+    },
+    'mixed': {
+        'name': 'Mixed Small Account (Diversified)',
+        'description': 'Diversified swing trading across forex, crypto, and gold. Best all-rounder for $100-$1000.',
+        'symbols': ['EURUSDm', 'BTCUSDm', 'XAUUSDm'],
+        'strategy': 'Swing Trend DCA',
+        'managementProfile': 'small_account',
+        'riskPerTrade': 5.0,
+        'maxDailyLoss': 20.0,
+        'profitLock': 30.0,
+        'drawdownPausePercent': 3.0,
+        'drawdownPauseHours': 12.0,
+        'maxOpenPositions': 2,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': 75,
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'autoSwitch': False,
+        'dynamicSizing': True,
+        'basePositionSize': 0.01,
+        'tradeAmount': None,
+        'tips': [
+            'Max 3 assets — keeps risk manageable',
+            'Rebalance monthly: trim winners, add to laggards',
+            'Journal every trade (use app trade history)',
+            'Target 5-8% monthly growth with patience',
+        ],
+    },
+}
+
+# Compounding projection helper
+def _compound_projection(starting_balance, monthly_return_pct=6.0, months=18):
+    """Show realistic compounding growth for small accounts"""
+    projections = []
+    balance = float(starting_balance)
+    for month in range(1, int(months) + 1):
+        balance *= (1 + monthly_return_pct / 100)
+        projections.append({'month': month, 'balance': round(balance, 2)})
+    return projections
+
+
+@app.route('/api/presets/small-account', methods=['GET'])
+@require_api_key
+def get_small_account_presets():
+    """Get all small-account trading presets ($10-$1000)"""
+    try:
+        market = request.args.get('market', '').lower()
+        balance = float(request.args.get('balance', 100))
+
+        if market and market in SMALL_ACCOUNT_PRESETS:
+            preset = SMALL_ACCOUNT_PRESETS[market]
+            return jsonify({
+                'success': True,
+                'preset': preset,
+                'compounding': _compound_projection(balance),
+                'riskManagement': {
+                    'riskPerTradePercent': 1.0,
+                    'maxRiskPerTradeDollars': round(balance * 0.01, 2),
+                    'rewardToRiskRatio': '1:2 minimum (1:3 ideal)',
+                    'maxOpenTrades': preset['maxOpenPositions'],
+                    'recommendedTimeframes': '4H + Daily charts',
+                    'stopLossRule': 'Always use — below recent swing low or 1-2% below entry',
+                    'demoFirst': 'Demo trade 3-6 months on TradingView + MT5 before going live',
+                },
+            }), 200
+
+        # Return all presets
+        presets_summary = {}
+        for key, preset in SMALL_ACCOUNT_PRESETS.items():
+            presets_summary[key] = {
+                'name': preset['name'],
+                'description': preset['description'],
+                'symbols': preset['symbols'],
+                'strategy': preset['strategy'],
+                'tips': preset['tips'],
+            }
+
+        return jsonify({
+            'success': True,
+            'presets': presets_summary,
+            'compounding': _compound_projection(balance),
+            'coreRules': {
+                'riskPerTrade': '1% of account balance per trade',
+                'rewardToRisk': '1:2 minimum, 1:3 ideal',
+                'maxOpenTrades': '1-2 at a time',
+                'maxSymbols': '3-5 total',
+                'timeframes': '4H + Daily charts (avoid 1M/5M noise)',
+                'stopLoss': 'ALWAYS — below recent swing low',
+                'revenge': 'NEVER revenge trade after a loss',
+                'journal': 'Log every trade for review',
+                'demo': 'Demo trade 3-6 months before live',
+                'compounding': f'Start ${balance}, avg 5-8% monthly → ~${round(balance * (1.065 ** 12), 2)} in 12 months',
+            },
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching small-account presets: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/presets/small-account/apply', methods=['POST'])
+@require_api_key
+def apply_small_account_preset():
+    """Apply a small-account preset when creating a bot.
+
+    Body: { "market": "crypto|forex|stocks|commodities|mixed", "credentialId": "..." }
+    Returns the same shape as /api/bots/create so the Flutter app can use it directly.
+    """
+    try:
+        data = request.get_json() or {}
+        market = data.get('market', 'mixed').lower()
+        if market not in SMALL_ACCOUNT_PRESETS:
+            return jsonify({'success': False, 'error': f'Unknown market: {market}. Choose from: {list(SMALL_ACCOUNT_PRESETS.keys())}'}), 400
+
+        preset = SMALL_ACCOUNT_PRESETS[market]
+
+        # Merge preset into the request body so create_bot picks it up
+        bot_create_payload = {**preset, **data}
+        # Ensure preset values take priority for safety-critical fields
+        for key in ('riskPerTrade', 'maxDailyLoss', 'profitLock', 'drawdownPausePercent',
+                     'drawdownPauseHours', 'maxOpenPositions', 'maxPositionsPerSymbol',
+                     'signalThreshold', 'allowedVolatility', 'basePositionSize',
+                     'managementProfile', 'strategy'):
+            bot_create_payload[key] = preset[key]
+
+        return jsonify({
+            'success': True,
+            'message': f'Small-account preset "{preset["name"]}" ready. Send this payload to /api/bots/create.',
+            'botCreatePayload': bot_create_payload,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error applying small-account preset: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/strategies', methods=['GET'])
 @require_api_key
 def list_strategies():
@@ -8318,6 +8558,52 @@ def breakout_strategy(symbol, account_id, risk_amount, market_data=None):
         'duration_seconds': 1200,  # 20 minutes
     }
 
+def swing_trend_dca_strategy(symbol, account_id, risk_amount, market_data=None):
+    """Swing Trend + DCA: BEST FOR SMALL ACCOUNTS ($10-$1000).
+
+    - Only trades WITH the prevailing trend (50/200 SMA golden/death cross logic
+      is embedded in evaluate_real_trade_signal via the trend field).
+    - Requires RSI confirmation: in uptrend RSI must be > 40 (pullback not
+      overdone); in downtrend RSI must be < 60.
+    - Uses wide stops (1.5× ATR) and 1:2+ reward-to-risk for swing holding.
+    - Volume is intentionally tiny (0.01 lots base) to preserve small capital.
+    - Only fires on HIGH-strength signals to avoid chop.
+    """
+    if market_data is None:
+        market_data = commodity_market_data.get(symbol, {})
+
+    signal_eval = evaluate_real_trade_signal(symbol, market_data)
+    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+
+    # Must have a clear trend — no RANGING markets
+    if signal_eval['trend'] == 'RANGING':
+        return None
+
+    # Need a strong signal (higher bar than normal strategies)
+    min_strength = max(params['min_signal_strength'] + 10, 60)
+    if signal_eval['strength'] < min_strength:
+        return None
+
+    # RSI confirmation: only enter pullbacks, not chasing extremes
+    rsi = signal_eval['rsi']
+    if signal_eval['trend'] == 'UP' and rsi < 40:
+        return None  # Pullback too deep in uptrend
+    if signal_eval['trend'] == 'DOWN' and rsi > 60:
+        return None  # Pullback too deep in downtrend
+
+    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+
+    return {
+        'symbol': symbol,
+        'type': order_type,
+        'volume': 0.01,  # Minimum lot — position sizer will scale from here
+        'stop_loss': params['stop_loss_pips'] * 1.5,   # Wide stop for swing
+        'take_profit': params['take_profit_pips'] * 2.5,  # 1:2.5+ R:R target
+        'signal': signal_eval,
+        'duration_seconds': 14400,  # 4 hours — swing timeframe
+    }
+
+
 STRATEGY_MAP = {
     'Scalping': scalping_strategy,
     'Momentum Trading': momentum_strategy,
@@ -8325,6 +8611,7 @@ STRATEGY_MAP = {
     'Mean Reversion': mean_reversion_strategy,
     'Range Trading': range_trading_strategy,
     'Breakout Trading': breakout_strategy,
+    'Swing Trend DCA': swing_trend_dca_strategy,
 }
 
 # ==================== INTELLIGENT STRATEGY SWITCHING & POSITION SIZING ====================
@@ -8477,6 +8764,7 @@ class DynamicPositionSizer:
         
         # 3. VOLATILITY ADJUSTMENT
         volatility_multiplier = {
+            'Very Low': 1.15,  # Slightly increase in very low volatility
             'Low': 1.1,      # Increase size in low volatility
             'Medium': 1.0,   # Normal size
             'High': 0.8,     # Reduce in high volatility
@@ -10949,6 +11237,19 @@ BOT_RISK_LIMITS = {
 }
 
 BOT_MANAGEMENT_PROFILES = {
+    'small_account': {
+        'riskPerTrade': 5.0,          # 1% risk on scale (5/10 = 0.5%, ultra conservative)
+        'maxDailyLoss': 20.0,         # Stop trading after $20 daily loss
+        'profitLock': 30.0,           # Lock profits at $30
+        'drawdownPausePercent': 3.0,  # Pause at just 3% drawdown
+        'drawdownPauseHours': 12.0,   # Long cooldown after drawdown
+        'maxOpenPositions': 2,        # Max 2 trades open at once
+        'maxPositionsPerSymbol': 1,   # 1 trade per symbol
+        'signalThreshold': 75,        # Only high-quality signals
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],  # No high volatility
+        'autoSwitch': False,          # Stick to swing trend strategy
+        'dynamicSizing': True,        # Scale with equity
+    },
     'beginner': {
         'riskPerTrade': 10.0,
         'maxDailyLoss': 40.0,
@@ -11038,6 +11339,8 @@ def _coerce_bool(raw_value, default_value: bool = False) -> bool:
 
 def _normalize_management_profile(raw_profile) -> str:
     profile = str(raw_profile or 'beginner').strip().lower()
+    if profile in {'small_account', 'small', 'micro', 'tiny', 'dca', 'swing', 'swing_dca', 'small-account'}:
+        return 'small_account'
     if profile in {'safe', 'conservative', 'starter', 'new', 'novice'}:
         return 'beginner'
     if profile in {'moderate', 'medium', 'assisted'}:
