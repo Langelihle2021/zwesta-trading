@@ -674,8 +674,23 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       }
     } catch (e) {
       print('Error fetching commodity data: $e');
-      // Use default market data if API fails
-      setState(() => _isLoadingData = false);
+      // Use default fallback symbols if API fails so save button still works
+      setState(() {
+        tradingSymbols = [
+          {'symbol': 'BTCUSDm', 'name': '₿ Bitcoin (BTC/USD)', 'category': 'Crypto'},
+          {'symbol': 'ETHUSDm', 'name': 'Ethereum (ETH/USD)', 'category': 'Crypto'},
+          {'symbol': 'XAUUSDm', 'name': '🥇 Gold (XAU/USD)', 'category': 'Precious Metals'},
+          {'symbol': 'EURUSDm', 'name': '💱 Euro vs US Dollar', 'category': 'Forex'},
+          {'symbol': 'USDJPYm', 'name': '💱 US Dollar vs Japanese Yen', 'category': 'Forex'},
+          {'symbol': 'GBPUSDm', 'name': '💱 British Pound vs US Dollar', 'category': 'Forex'},
+          {'symbol': 'AUDUSDm', 'name': '💱 Australian Dollar vs US Dollar', 'category': 'Forex'},
+          {'symbol': 'USDCADm', 'name': '💱 US Dollar vs Canadian Dollar', 'category': 'Forex'},
+          {'symbol': 'NVDAm', 'name': '📈 NVIDIA Corporation', 'category': 'Stocks'},
+          {'symbol': 'AAPLm', 'name': '📈 Apple Inc.', 'category': 'Stocks'},
+          {'symbol': 'MSFTm', 'name': '📈 Microsoft Corporation', 'category': 'Stocks'},
+        ];
+        _isLoadingData = false;
+      });
     }
   }
 
@@ -1885,30 +1900,37 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                         const SizedBox(height: 16),
                         
                         // Trade Amount Input
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '💵 Trade Amount (USD)',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: _investmentAmountController,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(
-                                hintText: 'Fixed dollar amount per trade (optional)',
-                                prefixText: '\$ ',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                filled: true,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Fixed dollar amount per trade. Leave empty to use Risk % instead.',
-                              style: TextStyle(fontSize: 11, color: Colors.grey[400]),
-                            ),
-                          ],
+                        Builder(
+                          builder: (context) {
+                            final curr = context.watch<CurrencyProvider>().currency;
+                            final prefix = curr == AppCurrency.zar ? 'R ' : curr == AppCurrency.gbp ? '£ ' : '\$ ';
+                            final currLabel = curr == AppCurrency.zar ? 'ZAR' : curr == AppCurrency.gbp ? 'GBP' : 'USD';
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '💵 Trade Amount ($currLabel)',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                TextField(
+                                  controller: _investmentAmountController,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: InputDecoration(
+                                    hintText: 'Fixed amount per trade (optional)',
+                                    prefixText: prefix,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    filled: true,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Fixed $currLabel amount per trade. Leave empty to use Risk % instead.',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                                ),
+                              ],
+                            );
+                          },
                         ),
                         const SizedBox(height: 16),
                         

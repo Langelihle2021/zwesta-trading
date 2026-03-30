@@ -7046,34 +7046,49 @@ def list_commodities():
             # Exness symbols verified in MT5 Market Watch for the current account/server.
             symbol_config = {
                 'forex': [
-                    {'symbol': 'EURUSDm', 'name': 'Euro vs US Dollar (Exness)', 'min_price': 1.08, 'max_price': 1.10},
-                    {'symbol': 'USDJPYm', 'name': 'US Dollar vs Japanese Yen (Exness)', 'min_price': 149.0, 'max_price': 151.0},
+                    {'symbol': 'EURUSDm', 'name': '💱 Euro vs US Dollar', 'min_price': 1.08, 'max_price': 1.12},
+                    {'symbol': 'GBPUSDm', 'name': '💱 British Pound vs US Dollar', 'min_price': 1.26, 'max_price': 1.30},
+                    {'symbol': 'USDJPYm', 'name': '💱 US Dollar vs Japanese Yen', 'min_price': 148.0, 'max_price': 152.0},
+                    {'symbol': 'AUDUSDm', 'name': '💱 Australian Dollar vs US Dollar', 'min_price': 0.64, 'max_price': 0.68},
+                    {'symbol': 'USDCADm', 'name': '💱 US Dollar vs Canadian Dollar', 'min_price': 1.34, 'max_price': 1.38},
+                    {'symbol': 'USDCHFm', 'name': '💱 US Dollar vs Swiss Franc', 'min_price': 0.87, 'max_price': 0.91},
+                    {'symbol': 'NZDUSDm', 'name': '💱 New Zealand Dollar vs US Dollar', 'min_price': 0.60, 'max_price': 0.64},
+                    {'symbol': 'EURGBPm', 'name': '💱 Euro vs British Pound', 'min_price': 0.83, 'max_price': 0.87},
+                    {'symbol': 'EURJPYm', 'name': '💱 Euro vs Japanese Yen', 'min_price': 160.0, 'max_price': 166.0},
+                    {'symbol': 'GBPJPYm', 'name': '💱 British Pound vs Japanese Yen', 'min_price': 188.0, 'max_price': 196.0},
                 ],
                 'precious_metals': [
-                    {'symbol': 'XAUUSDm', 'name': '🥇 Gold (per troy oz)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 2100},
+                    {'symbol': 'XAUUSDm', 'name': '🥇 Gold (XAU/USD)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 3200},
+                    {'symbol': 'XAGUSDm', 'name': '🥈 Silver (XAG/USD)', 'type': 'Metal', 'min_price': 22, 'max_price': 35},
                 ],
-                'energy': [],
-                'indices': [],
+                'energy': [
+                    {'symbol': 'USOILm', 'name': '🛢️ Crude Oil (WTI)', 'type': 'Energy', 'min_price': 65, 'max_price': 90},
+                    {'symbol': 'UKOILm', 'name': '🛢️ Brent Crude Oil', 'type': 'Energy', 'min_price': 70, 'max_price': 95},
+                ],
+                'indices': [
+                    {'symbol': 'US30m', 'name': '📊 Dow Jones 30 (US30)', 'type': 'Index CFD', 'min_price': 38000, 'max_price': 42000},
+                    {'symbol': 'US500m', 'name': '📊 S&P 500 (US500)', 'type': 'Index CFD', 'min_price': 5000, 'max_price': 5800},
+                    {'symbol': 'USTECm', 'name': '📊 Nasdaq 100 (USTEC)', 'type': 'Index CFD', 'min_price': 17000, 'max_price': 20000},
+                ],
+                'crypto': [
+                    {'symbol': 'BTCUSDm', 'name': '₿ Bitcoin (BTC/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 40000, 'max_price': 100000},
+                    {'symbol': 'ETHUSDm', 'name': 'Ξ Ethereum (ETH/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 2000, 'max_price': 5000},
+                ],
                 'stocks': [
-                    {'symbol': 'AAPLm', 'name': 'Apple Inc.', 'type': 'Stock CFD', 'min_price': 180, 'max_price': 260},
-                    {'symbol': 'AMDm', 'name': 'Advanced Micro Devices, Inc.', 'type': 'Stock CFD', 'min_price': 120, 'max_price': 230},
-                    {'symbol': 'MSFTm', 'name': 'Microsoft Corporation', 'type': 'Stock CFD', 'min_price': 380, 'max_price': 520},
-                    {'symbol': 'NVDAm', 'name': 'NVIDIA Corporation', 'type': 'Stock CFD', 'min_price': 700, 'max_price': 1100},
-                    {'symbol': 'JPMm', 'name': 'J P Morgan Chase & Co', 'type': 'Stock CFD', 'min_price': 170, 'max_price': 280},
-                    {'symbol': 'BACm', 'name': 'Bank of America Corporation', 'type': 'Stock CFD', 'min_price': 28, 'max_price': 55},
-                    {'symbol': 'WFCm', 'name': 'Wells Fargo & Company', 'type': 'Stock CFD', 'min_price': 45, 'max_price': 85},
-                    {'symbol': 'GOOGLm', 'name': 'Alphabet Inc.', 'type': 'Stock CFD', 'min_price': 130, 'max_price': 230},
-                    {'symbol': 'METAm', 'name': 'META Platforms, Inc.', 'type': 'Stock CFD', 'min_price': 350, 'max_price': 700},
-                    {'symbol': 'ORCLm', 'name': 'Oracle Corporation', 'type': 'Stock CFD', 'min_price': 100, 'max_price': 220},
-                    {'symbol': 'TSMm', 'name': 'Taiwan Semiconductor Manufacturing Company, Limited', 'type': 'Stock CFD', 'min_price': 110, 'max_price': 240},
+                    {'symbol': 'AAPLm', 'name': '📈 Apple Inc.', 'type': 'Stock CFD', 'min_price': 180, 'max_price': 260},
+                    {'symbol': 'AMDm', 'name': '📈 Advanced Micro Devices', 'type': 'Stock CFD', 'min_price': 120, 'max_price': 230},
+                    {'symbol': 'MSFTm', 'name': '📈 Microsoft Corporation', 'type': 'Stock CFD', 'min_price': 380, 'max_price': 520},
+                    {'symbol': 'NVDAm', 'name': '📈 NVIDIA Corporation', 'type': 'Stock CFD', 'min_price': 700, 'max_price': 1100},
+                    {'symbol': 'GOOGLm', 'name': '📈 Alphabet Inc.', 'type': 'Stock CFD', 'min_price': 130, 'max_price': 230},
+                    {'symbol': 'METAm', 'name': '📈 META Platforms', 'type': 'Stock CFD', 'min_price': 350, 'max_price': 700},
+                    {'symbol': 'TSLAm', 'name': '📈 Tesla Inc.', 'type': 'Stock CFD', 'min_price': 150, 'max_price': 350},
+                    {'symbol': 'JPMm', 'name': '📈 JPMorgan Chase', 'type': 'Stock CFD', 'min_price': 170, 'max_price': 280},
+                    {'symbol': 'BACm', 'name': '📈 Bank of America', 'type': 'Stock CFD', 'min_price': 28, 'max_price': 55},
+                    {'symbol': 'WFCm', 'name': '📈 Wells Fargo', 'type': 'Stock CFD', 'min_price': 45, 'max_price': 85},
+                    {'symbol': 'ORCLm', 'name': '📈 Oracle Corporation', 'type': 'Stock CFD', 'min_price': 100, 'max_price': 220},
+                    {'symbol': 'TSMm', 'name': '📈 TSMC', 'type': 'Stock CFD', 'min_price': 110, 'max_price': 240},
                 ]
             }
-            
-            # Add crypto symbols (available on Exness)
-            symbol_config['commodities'] = [
-                {'symbol': 'BTCUSDm', 'name': '₿ Bitcoin (BTC/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 40000, 'max_price': 70000},
-                {'symbol': 'ETHUSDm', 'name': 'Ethereum (ETH/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 2000, 'max_price': 4000},
-            ]
             
             # Build response by merging live data with config
             for category, items in symbol_config.items():
@@ -7738,23 +7753,21 @@ def get_account_performance():
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
-    # Verified Exness/MT5 symbols currently supported by the app and backend.
-    'BTCUSDm',   # Bitcoin / USD
-    'ETHUSDm',   # Ethereum / USD
-    'EURUSDm',   # Euro / USD
-    'USDJPYm',   # USD / Japanese Yen
-    'XAUUSDm',   # Gold / USD
-    'AAPLm',     # Apple Inc.
-    'AMDm',      # Advanced Micro Devices, Inc.
-    'MSFTm',     # Microsoft Corporation
-    'NVDAm',     # NVIDIA Corporation
-    'JPMm',      # J P Morgan Chase & Co
-    'BACm',      # Bank of America Corporation
-    'WFCm',      # Wells Fargo & Company
-    'GOOGLm',    # Alphabet Inc.
-    'METAm',     # META Platforms, Inc.
-    'ORCLm',     # Oracle Corporation
-    'TSMm',      # Taiwan Semiconductor Manufacturing Company, Limited
+    # Verified Exness/MT5 symbols with "m" suffix (micro accounts)
+    # ===== FOREX =====
+    'EURUSDm', 'GBPUSDm', 'USDJPYm', 'AUDUSDm', 'USDCADm',
+    'USDCHFm', 'NZDUSDm', 'EURGBPm', 'EURJPYm', 'GBPJPYm',
+    # ===== CRYPTO =====
+    'BTCUSDm', 'ETHUSDm',
+    # ===== PRECIOUS METALS =====
+    'XAUUSDm', 'XAGUSDm',
+    # ===== ENERGY =====
+    'USOILm', 'UKOILm',
+    # ===== INDICES =====
+    'US30m', 'US500m', 'USTECm',
+    # ===== STOCKS =====
+    'AAPLm', 'AMDm', 'MSFTm', 'NVDAm', 'GOOGLm', 'METAm',
+    'TSLAm', 'JPMm', 'BACm', 'WFCm', 'ORCLm', 'TSMm',
 }
 
 BINANCE_VALID_SYMBOLS = {
@@ -7797,35 +7810,44 @@ SYMBOL_MAPPING = {
     
     # OLD -> NEW SYMBOL CORRECTIONS
     # Metals
-    'GOLD': 'XAUUSDm', 'XAGUSD': 'XAUUSDm',
-    'SILVER': 'XAUUSDm',
+    'GOLD': 'XAUUSDm', 'XAGUSD': 'XAGUSDm',
+    'SILVER': 'XAGUSDm',
     'PLATINUM': 'XAUUSDm',
     'PALLADIUM': 'XAUUSDm',
     'COPPER': 'XAUUSDm',
     
-    # Energy (not available on Exness demo - map to EURUSDm)
-    'WTIUSD': 'EURUSDm', 'CRUDE_OIL': 'EURUSDm',
-    'BRENTUSD': 'EURUSDm',
-    'NATGASUS': 'EURUSDm', 'NATURAL_GAS': 'EURUSDm',
-    'OILK': 'EURUSDm',
+    # Energy — map to Exness oil symbols
+    'WTIUSD': 'USOILm', 'CRUDE_OIL': 'USOILm', 'OIL': 'USOILm',
+    'BRENTUSD': 'UKOILm', 'BRENT': 'UKOILm',
+    'NATGASUS': 'USOILm', 'NATURAL_GAS': 'USOILm',
+    'OILK': 'USOILm',
     
-    # Agriculture (not available on Exness demo - map to EURUSDm)
-    'CORNUSD': 'EURUSDm', 'CORN': 'EURUSDm',
-    'WHEATUSD': 'EURUSDm', 'WHEAT': 'EURUSDm',
-    'SOYBEANSUSD': 'EURUSDm', 'SOYBEANS': 'EURUSDm',
-    'COFFEEUSD': 'EURUSDm', 'COFFEE': 'EURUSDm',
-    'COCOAUSD': 'EURUSDm', 'COCOA': 'EURUSDm',
-    'SUGARUSD': 'EURUSDm', 'SUGAR': 'EURUSDm',
+    # Agriculture (not available on Exness — map to gold)
+    'CORNUSD': 'XAUUSDm', 'CORN': 'XAUUSDm',
+    'WHEATUSD': 'XAUUSDm', 'WHEAT': 'XAUUSDm',
+    'SOYBEANSUSD': 'XAUUSDm', 'SOYBEANS': 'XAUUSDm',
+    'COFFEEUSD': 'XAUUSDm', 'COFFEE': 'XAUUSDm',
+    'COCOAUSD': 'XAUUSDm', 'COCOA': 'XAUUSDm',
+    'SUGARUSD': 'XAUUSDm', 'SUGAR': 'XAUUSDm',
     
-    # Indices (not available on Exness demo - map to EURUSDm)
-    'SPX500': 'EURUSDm', 'S&P500': 'EURUSDm', 'SP500': 'EURUSDm', 'SP500m': 'EURUSDm',
-    'DAX40': 'EURUSDm', 'GDAX': 'EURUSDm', 'DAX': 'EURUSDm',
-    'FTSE100': 'EURUSDm', 'FTSE': 'EURUSDm',
-    'CAC40': 'EURUSDm',
-    'NIKKEI225': 'EURUSDm', 'NIKKEI': 'EURUSDm', 'NIKL': 'EURUSDm',
+    # Indices — map to Exness index symbols
+    'SPX500': 'US500m', 'S&P500': 'US500m', 'SP500': 'US500m', 'SP500m': 'US500m',
+    'NASDAQ': 'USTECm', 'US100': 'USTECm', 'USTEC': 'USTECm',
+    'DOW': 'US30m', 'US30': 'US30m', 'DJIA': 'US30m',
+    'DAX40': 'US500m', 'GDAX': 'US500m', 'DAX': 'US500m',
+    'FTSE100': 'US500m', 'FTSE': 'US500m',
+    'CAC40': 'US500m',
+    'NIKKEI225': 'US500m', 'NIKKEI': 'US500m', 'NIKL': 'US500m',
+    
+    # Forex aliases without m suffix
+    'GBPUSD': 'GBPUSDm', 'AUDUSD': 'AUDUSDm', 'USDCAD': 'USDCADm',
+    'USDCHF': 'USDCHFm', 'NZDUSD': 'NZDUSDm', 'EURGBP': 'EURGBPm',
+    'EURJPY': 'EURJPYm', 'GBPJPY': 'GBPJPYm',
+    'XAUUSD': 'XAUUSDm', 'XAGUSD': 'XAGUSDm',
+    'USOIL': 'USOILm', 'UKOIL': 'UKOILm',
     
     # Stocks aliases
-    'APPLE': 'AAPLm',
+    'APPLE': 'AAPLm', 'TSLA': 'TSLAm', 'TESLA': 'TSLAm',
     'ALPHABET': 'GOOGLm',
     'GOOGLE': 'GOOGLm',
     'MICROSOFT': 'MSFTm',
