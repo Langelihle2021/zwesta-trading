@@ -7036,7 +7036,7 @@ def list_commodities():
             flat_market_data = {}  # {EURUSDm: {signal, trend, etc}, BTCUSDm: {signal, trend, etc}, ...}
             categorized = {
                 'forex': [],
-                'commodities': [],
+                'crypto': [],
                 'precious_metals': [],
                 'energy': [],
                 'indices': [],
