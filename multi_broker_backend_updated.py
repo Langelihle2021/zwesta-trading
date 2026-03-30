@@ -5669,6 +5669,7 @@ SMALL_ACCOUNT_PRESETS = {
         'signalThreshold': 75,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
+        'intelligentScanner': True,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
         'tradeAmount': None,
@@ -5695,6 +5696,7 @@ SMALL_ACCOUNT_PRESETS = {
         'signalThreshold': 75,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
+        'intelligentScanner': True,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
         'tradeAmount': None,
@@ -5721,6 +5723,7 @@ SMALL_ACCOUNT_PRESETS = {
         'signalThreshold': 70,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
+        'intelligentScanner': True,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
         'tradeAmount': None,
@@ -5747,6 +5750,7 @@ SMALL_ACCOUNT_PRESETS = {
         'signalThreshold': 75,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
+        'intelligentScanner': True,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
         'tradeAmount': None,
@@ -5773,6 +5777,7 @@ SMALL_ACCOUNT_PRESETS = {
         'signalThreshold': 75,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
+        'intelligentScanner': True,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
         'tradeAmount': None,
@@ -8790,6 +8795,235 @@ class DynamicPositionSizer:
 strategy_tracker = StrategyPerformanceTracker()
 position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
 
+
+# ==================== INTELLIGENT OPPORTUNITY SCANNER & REALLOCATION ====================
+
+def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold):
+    """Scan ALL valid symbols across every asset class for the best trade opportunities.
+    
+    Returns a ranked list of (symbol, signal_strength, signal_eval, trade_params) sorted
+    by signal strength descending.  The caller decides how many to act on.
+    """
+    opportunities = []
+    for symbol in sorted(VALID_SYMBOLS):
+        try:
+            market_data = commodity_market_data.get(symbol, {'current_price': 0, 'volatility_pct': 1.0})
+            trade_params = strategy_func(symbol, account_id, risk_per_trade, market_data)
+            if trade_params is None:
+                continue
+            strength = trade_params.get('signal', {}).get('strength', 0)
+            if strength >= signal_threshold:
+                opportunities.append({
+                    'symbol': symbol,
+                    'strength': strength,
+                    'signal': trade_params['signal']['signal'],
+                    'trend': trade_params['signal'].get('trend', 'UNKNOWN'),
+                    'rsi': trade_params['signal'].get('rsi', 50),
+                    'trade_params': trade_params,
+                })
+        except Exception as e:
+            logger.debug(f"[SCANNER] Error scanning {symbol}: {e}")
+    
+    # Sort by signal strength descending
+    opportunities.sort(key=lambda x: x['strength'], reverse=True)
+    return opportunities
+
+
+def evaluate_open_positions_for_reallocation(bot_config, opportunities, active_conn, is_mt5, signal_threshold):
+    """Evaluate open positions and decide which to close in favour of better opportunities.
+    
+    Logic:
+    - A position is a "close candidate" if its current profit is negative AND
+      its symbol's CURRENT signal has reversed or weakened below threshold.
+    - We only close if there's a genuinely better opportunity waiting (higher strength).
+    - Never close a position that is in profit (let winners run).
+    - Respects maxOpenPositions: only close to free a slot if we're at the limit.
+    
+    Returns list of tickets to close and the replacement symbols.
+    """
+    tracked = bot_config.get('open_positions', {})
+    if not tracked:
+        return [], []
+    
+    max_positions = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions', 2)
+    open_count = len(tracked)
+    
+    # If we have room for more positions, no need to close anything
+    if open_count < max_positions:
+        return [], []
+    
+    # Build set of symbols we already have open
+    open_symbols = set()
+    close_candidates = []
+    
+    for ticket_str, pos in tracked.items():
+        pos_symbol = pos.get('symbol', '')
+        open_symbols.add(pos_symbol)
+        profit = pos.get('profit', 0)
+        
+        # Never close a winning position
+        if profit > 0:
+            continue
+        
+        # Check if the CURRENT signal for this symbol has weakened
+        market_data = commodity_market_data.get(pos_symbol, {})
+        current_eval = evaluate_real_trade_signal(pos_symbol, market_data)
+        current_strength = current_eval.get('strength', 0)
+        current_signal = current_eval.get('signal', 'NEUTRAL')
+        
+        # Position direction
+        pos_type = (pos.get('type', '') or '').upper()
+        
+        # Signal reversal: we're long but signal says sell, or vice versa
+        signal_reversed = (
+            (pos_type == 'BUY' and 'SELL' in current_signal) or
+            (pos_type == 'SELL' and 'BUY' in current_signal)
+        )
+        
+        # Signal weakened below threshold
+        signal_weak = current_strength < signal_threshold * 0.6  # Below 60% of threshold
+        
+        if signal_reversed or signal_weak:
+            close_candidates.append({
+                'ticket': ticket_str,
+                'symbol': pos_symbol,
+                'profit': profit,
+                'strength': current_strength,
+                'reason': 'SIGNAL_REVERSED' if signal_reversed else 'SIGNAL_WEAKENED',
+            })
+    
+    if not close_candidates:
+        return [], []
+    
+    # Sort by worst profit first (close the biggest losers first)
+    close_candidates.sort(key=lambda x: x['profit'])
+    
+    # Only close if there's a better opportunity not already open
+    tickets_to_close = []
+    replacement_symbols = []
+    
+    for candidate in close_candidates:
+        # Find the best opportunity that isn't already open
+        for opp in opportunities:
+            if opp['symbol'] not in open_symbols and opp['symbol'] != candidate['symbol']:
+                if opp['strength'] > candidate['strength'] + 15:  # Must be significantly better
+                    tickets_to_close.append(candidate['ticket'])
+                    replacement_symbols.append(opp['symbol'])
+                    open_symbols.add(opp['symbol'])  # Mark as taken
+                    break
+        
+        # Only close up to 1 position per cycle to avoid whipsaw
+        if len(tickets_to_close) >= 1:
+            break
+    
+    return tickets_to_close, replacement_symbols
+
+
+def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt5_conn, 
+                                       strategy_func, signal_threshold, broker_type):
+    """Main intelligence loop: scan, evaluate, close weak, reallocate to strong.
+    
+    Called once per trading cycle when intelligentScanner is enabled.
+    Returns the list of symbols to trade THIS cycle (may differ from bot's original list).
+    """
+    if not bot_config.get('intelligentScanner', False):
+        return bot_config.get('symbols', ['EURUSDm'])
+    
+    account_id = bot_config.get('accountId', '')
+    risk_per_trade = bot_config.get('riskPerTrade', 10)
+    max_positions = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions', 2)
+    
+    # 1. SCAN all symbols for opportunities
+    opportunities = scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold)
+    
+    if opportunities:
+        top_3 = ', '.join([f"{o['symbol']}:{o['strength']:.0f}" for o in opportunities[:3]])
+        logger.info(f"🧠 Bot {bot_id} SCANNER: Top opportunities: {top_3} (of {len(opportunities)} qualifying)")
+    else:
+        logger.info(f"🧠 Bot {bot_id} SCANNER: No qualifying opportunities across {len(VALID_SYMBOLS)} symbols")
+        return bot_config.get('symbols', ['EURUSDm'])
+    
+    # 2. EVALUATE open positions for potential reallocation
+    tickets_to_close, replacement_symbols = evaluate_open_positions_for_reallocation(
+        bot_config, opportunities, active_conn, is_mt5, signal_threshold
+    )
+    
+    # 3. CLOSE underperformers
+    for ticket in tickets_to_close:
+        tracked_pos = bot_config.get('open_positions', {}).get(ticket, {})
+        symbol = tracked_pos.get('symbol', '?')
+        profit = tracked_pos.get('profit', 0)
+        
+        logger.info(f"🧠 Bot {bot_id}: CLOSING underperformer {symbol} (ticket {ticket}, P&L: ${profit:.2f}) — better opportunity found")
+        
+        try:
+            if is_mt5 and mt5_conn:
+                result = mt5_conn.close_position(ticket)
+            elif active_conn:
+                result = active_conn.close_position(ticket)
+            else:
+                result = {'success': False, 'error': 'No connection'}
+            
+            if result.get('success'):
+                logger.info(f"🧠 Bot {bot_id}: ✅ Closed {symbol} (ticket {ticket}) for reallocation")
+                # Update trade in database
+                try:
+                    realloc_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                    realloc_cursor = realloc_conn.cursor()
+                    realloc_cursor.execute('''
+                        UPDATE trades SET profit = ?, status = 'closed', time_close = ?,
+                        trade_data = json_set(COALESCE(trade_data, '{}'), '$.closeReason', 'INTELLIGENT_REALLOCATION'),
+                        updated_at = ?
+                        WHERE ticket = ? AND bot_id = ? AND status = 'open'
+                    ''', (profit, datetime.now().isoformat(), datetime.now().isoformat(), str(ticket), bot_id))
+                    realloc_conn.commit()
+                    realloc_conn.close()
+                except Exception as db_e:
+                    logger.warning(f"Bot {bot_id}: DB update after realloc close: {db_e}")
+                
+                # Remove from tracked positions
+                if ticket in bot_config.get('open_positions', {}):
+                    del bot_config['open_positions'][ticket]
+            else:
+                logger.warning(f"🧠 Bot {bot_id}: Failed to close {symbol}: {result.get('error')}")
+        except Exception as e:
+            logger.error(f"🧠 Bot {bot_id}: Exception closing {symbol}: {e}")
+    
+    # 4. BUILD optimal symbol list for this cycle
+    # Start with existing open positions (don't duplicate), then add best new opportunities
+    current_open_symbols = set(p.get('symbol', '') for p in bot_config.get('open_positions', {}).values())
+    
+    cycle_symbols = list(current_open_symbols)  # Keep existing positions' symbols
+    
+    # Add top opportunities (up to max_positions total)
+    for opp in opportunities:
+        if len(cycle_symbols) >= max_positions:
+            break
+        if opp['symbol'] not in current_open_symbols:
+            cycle_symbols.append(opp['symbol'])
+    
+    # If we still have slots, add the bot's original symbols as fallback
+    for s in bot_config.get('symbols', ['EURUSDm']):
+        if len(cycle_symbols) >= max_positions:
+            break
+        if s not in cycle_symbols:
+            cycle_symbols.append(s)
+    
+    if set(cycle_symbols) != set(bot_config.get('symbols', [])):
+        logger.info(f"🧠 Bot {bot_id}: Cycle symbols REALLOCATED: {cycle_symbols} (was: {bot_config.get('symbols', [])})")
+    
+    # Store scanner state for the API / UI
+    bot_config['lastScanResults'] = {
+        'timestamp': datetime.now().isoformat(),
+        'totalScanned': len(VALID_SYMBOLS),
+        'qualifyingOpportunities': len(opportunities),
+        'topOpportunities': [{'symbol': o['symbol'], 'strength': o['strength'], 'signal': o['signal'], 'trend': o['trend']} for o in opportunities[:5]],
+        'closedForReallocation': len(tickets_to_close),
+        'cycleSymbols': cycle_symbols,
+    }
+    
+    return cycle_symbols
+
 # ==================== AUTO-INITIALIZE DEMO BOTS ====================
 def initialize_demo_bots():
     """Auto-initialize demo trading bots on startup using VALID_SYMBOLS"""
@@ -8928,6 +9162,9 @@ PERSISTED_BOT_STATE_FIELDS = {
     'totalProfit',
     'totalTrades',
     'tradeHistory',
+    'tradeAmount',
+    'intelligentScanner',
+    'lastScanResults',
     'user_id',
     'volatilityLevel',
     'winningTrades',
@@ -9432,6 +9669,96 @@ def get_position_sizing_metrics(bot_id):
         }), 200
     except Exception as e:
         logger.error(f"Error getting position sizing metrics: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== INTELLIGENT SCANNER API ENDPOINTS ====================
+
+@app.route('/api/bots/scanner/<bot_id>/enable', methods=['POST'])
+@require_api_key
+def enable_scanner(bot_id):
+    """Enable or disable the intelligent opportunity scanner for a bot.
+    
+    Body: { "enabled": true/false }
+    """
+    try:
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        data = request.get_json() or {}
+        enabled = bool(data.get('enabled', True))
+        active_bots[bot_id]['intelligentScanner'] = enabled
+        persist_bot_runtime_state(bot_id)
+        
+        status = 'ENABLED' if enabled else 'DISABLED'
+        logger.info(f"🧠 Bot {bot_id}: Intelligent Scanner {status}")
+        
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'intelligentScanner': enabled,
+            'message': f'Intelligent scanner {status.lower()} for bot {bot_id}. '
+                       f'Bot will now {"scan all symbols and auto-reallocate to best opportunities" if enabled else "trade only its assigned symbols"}.',
+        }), 200
+    except Exception as e:
+        logger.error(f"Error toggling scanner: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bots/scanner/<bot_id>/status', methods=['GET'])
+@require_api_key
+def get_scanner_status(bot_id):
+    """Get the latest scanner results for a bot"""
+    try:
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+        
+        bot = active_bots[bot_id]
+        scan_results = bot.get('lastScanResults', {})
+        
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'intelligentScanner': bot.get('intelligentScanner', False),
+            'lastScan': scan_results,
+            'currentSymbols': bot.get('symbols', []),
+            'openPositions': len(bot.get('open_positions', {})),
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting scanner status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bots/scanner/scan-now', methods=['POST'])
+@require_api_key  
+def scan_all_markets_now():
+    """Run an immediate scan of all symbols and return opportunities (read-only, does not trade)"""
+    try:
+        data = request.get_json() or {}
+        strategy_name = data.get('strategy', 'Trend Following')
+        threshold = int(data.get('signalThreshold', 60))
+        
+        strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
+        opportunities = scan_all_opportunities(strategy_func, 'scan_preview', 10, threshold)
+        
+        return jsonify({
+            'success': True,
+            'totalScanned': len(VALID_SYMBOLS),
+            'qualifying': len(opportunities),
+            'opportunities': [
+                {
+                    'symbol': o['symbol'],
+                    'strength': o['strength'],
+                    'signal': o['signal'],
+                    'trend': o['trend'],
+                    'rsi': o['rsi'],
+                }
+                for o in opportunities[:10]
+            ],
+            'timestamp': datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        logger.error(f"Error scanning markets: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -11808,6 +12135,7 @@ def create_bot():
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
+                'intelligentScanner': bool(data.get('intelligentScanner', False)),  # Auto-scan all symbols & reallocate
                 'maxOpenPositions': max_open_positions,
                 'maxPositionsPerSymbol': max_positions_per_symbol,
                 'basePositionSize': data.get('basePositionSize', 1.0),
@@ -12539,6 +12867,14 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     signal_summary.append(f"{eval_symbol}:{signal_score:.0f}")
                 
                 logger.info(f"📊 Bot {bot_id} Cycle #{trade_cycle}: Signal check: {' | '.join(signal_summary)} (threshold: {signal_threshold}/100)")
+                
+                # ==================== INTELLIGENT SCANNER & REALLOCATION ====================
+                # If enabled, scan ALL symbols, close weak positions, and trade the best ones
+                if bot_config.get('intelligentScanner', False):
+                    symbols = execute_intelligent_reallocation(
+                        bot_id, bot_config, active_conn, is_mt5, mt5_conn,
+                        strategy_func, signal_threshold, broker_type
+                    )
                 
                 trades_this_cycle = 0
                 for symbol in symbols:

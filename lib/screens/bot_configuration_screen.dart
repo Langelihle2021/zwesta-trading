@@ -24,6 +24,8 @@ class BotConfigurationScreen extends StatefulWidget {
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   // Volatility filter toggle
   bool _volatilityFilterEnabled = true;
+  // Intelligent scanner: auto-scan all markets & reallocate to best opportunities
+  bool _intelligentScanner = false;
   static const List<Map<String, String>> _binanceSymbols = [
     // --- Tier 1: Large Cap ---
     {'symbol': 'BTCUSDT',  'name': '₿ Bitcoin / Tether',     'category': 'Large Cap'},
@@ -831,6 +833,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         },
         'enabled': true,
         'volatilityFilterEnabled': _volatilityFilterEnabled,
+        'intelligentScanner': _intelligentScanner,
         'autoWithdrawal': _enableAutoWithdrawal ? {
           'enabled': true,
           'withdrawalMode': _withdrawalMode,
@@ -1690,6 +1693,50 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     title: const Text('Enable Volatility Filter'),
                     subtitle: const Text('If disabled, bot will trade regardless of market volatility.'),
                     contentPadding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Intelligent Scanner Toggle
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: _intelligentScanner
+                            ? [Colors.purple.withOpacity(0.2), Colors.blue.withOpacity(0.2)]
+                            : [Colors.grey.withOpacity(0.1), Colors.grey.withOpacity(0.1)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _intelligentScanner ? Colors.purpleAccent : Colors.grey.withOpacity(0.3),
+                      ),
+                    ),
+                    child: SwitchListTile(
+                      value: _intelligentScanner,
+                      onChanged: (val) {
+                        setState(() => _intelligentScanner = val);
+                      },
+                      title: Row(
+                        children: [
+                          Icon(
+                            Icons.psychology,
+                            color: _intelligentScanner ? Colors.purpleAccent : Colors.grey,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text('Intelligent Scanner'),
+                        ],
+                      ),
+                      subtitle: Text(
+                        _intelligentScanner
+                            ? 'ON — Bot scans ALL markets every cycle, closes weak trades, and reallocates to the best opportunities automatically.'
+                            : 'OFF — Bot only trades its assigned symbols.',
+                        style: TextStyle(
+                          color: _intelligentScanner ? Colors.purpleAccent.withOpacity(0.8) : Colors.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                      contentPadding: EdgeInsets.zero,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   // Currency Selection
