@@ -5667,7 +5667,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
@@ -5693,7 +5693,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
@@ -5719,7 +5719,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 70,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
@@ -5745,7 +5745,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 1,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
@@ -5771,7 +5771,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': False,
         'dynamicSizing': True,
         'basePositionSize': 0.01,
@@ -8958,7 +8958,7 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'profitLock': 80.0,
         'drawdownPausePercent': 5.0,
         'drawdownPauseHours': 6.0,
-        'allowedVolatility': ['Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
         'managementMode': 'assisted',
@@ -9641,7 +9641,7 @@ def should_trade_today(bot_config, symbol):
             return False
 
     # 5. Volatility Filter: Only trade if volatility is allowed
-    allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Very Low', 'Low', 'Medium'])
+    allowed_vol = bot_config.get('effectiveAllowedVolatility') or bot_config.get('allowedVolatility', ['Very Low', 'Low', 'Medium', 'High'])
     # Get current volatility for symbol
     vol = commodity_market_data.get(symbol, {}).get('volatility', 'Medium')
     if allowed_vol and vol not in allowed_vol:
@@ -11246,7 +11246,7 @@ BOT_MANAGEMENT_PROFILES = {
         'maxOpenPositions': 2,        # Max 2 trades open at once
         'maxPositionsPerSymbol': 1,   # 1 trade per symbol
         'signalThreshold': 75,        # Only high-quality signals
-        'allowedVolatility': ['Very Low', 'Low', 'Medium'],  # No high volatility
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],  # Allow High (crypto/gold are naturally High spread)
         'autoSwitch': False,          # Stick to swing trend strategy
         'dynamicSizing': True,        # Scale with equity
     },
@@ -11259,7 +11259,7 @@ BOT_MANAGEMENT_PROFILES = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 70,
-        'allowedVolatility': ['Low'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -11272,7 +11272,7 @@ BOT_MANAGEMENT_PROFILES = {
         'maxOpenPositions': 3,
         'maxPositionsPerSymbol': 2,
         'signalThreshold': 60,
-        'allowedVolatility': ['Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -11285,7 +11285,7 @@ BOT_MANAGEMENT_PROFILES = {
         'maxOpenPositions': 5,
         'maxPositionsPerSymbol': 2,
         'signalThreshold': 50,
-        'allowedVolatility': ['Low', 'Medium'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -11390,7 +11390,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
             effective['signalThreshold'] = min(85, effective['signalThreshold'] + 10)
             effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 1 if profile == 'beginner' else 2)
             effective['maxPositionsPerSymbol'] = 1
-            effective['allowedVolatility'] = ['Low']
+            effective['allowedVolatility'] = ['Very Low', 'Low', 'Medium']  # Tighten but still allow trading
             bot_config['managementState'] = 'recovery'
         else:
             bot_config['managementState'] = 'normal'

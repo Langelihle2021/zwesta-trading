@@ -178,6 +178,135 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   // Currency & Settings
   String _currencyChoice = 'USD'; // 'USD' or 'ZAR' (Rand)
   
+  // Small Account Presets
+  String? _selectedPreset;
+  
+  static const Map<String, Map<String, dynamic>> _smallAccountPresets = {
+    'crypto': {
+      'name': 'Crypto',
+      'icon': '₿',
+      'description': 'DCA into BTC/ETH with swing trend entries. Best for \$10-\$1000 crypto accounts.',
+      'symbols': ['BTCUSDm', 'ETHUSDm'],
+      'strategy': 'Swing Trend DCA',
+      'managementProfile': 'small_account',
+      'riskPercent': 5.0,
+      'maxDailyLoss': 20.0,
+      'maxOpenTrades': 2,
+      'maxDrawdownPercent': 15.0,
+      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'tips': [
+        'DCA weekly: buy fixed amount regardless of price',
+        'Only spot or max 2-5x leverage',
+        'Stick to BTC + ETH (majors only)',
+        'Expect 5-8% monthly net on a good run',
+      ],
+    },
+    'forex': {
+      'name': 'Forex',
+      'icon': '💱',
+      'description': 'Swing trend following on major pairs with micro lots. Best for \$10-\$1000 forex accounts.',
+      'symbols': ['EURUSDm'],
+      'strategy': 'Swing Trend DCA',
+      'managementProfile': 'small_account',
+      'riskPercent': 5.0,
+      'maxDailyLoss': 20.0,
+      'maxOpenTrades': 2,
+      'maxDrawdownPercent': 15.0,
+      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'tips': [
+        'Use cent/micro account (0.01 lots)',
+        'Only EUR/USD and GBP/USD (tightest spreads)',
+        'Trade during London/NY overlap (15:00-19:00 SAST)',
+        'Target 1:2 or 1:3 risk-reward minimum',
+      ],
+    },
+    'stocks': {
+      'name': 'Stocks',
+      'icon': '📈',
+      'description': 'Swing pullback entries on blue-chip stocks/ETFs. Best for \$50-\$1000 stock accounts.',
+      'symbols': ['NVDAm', 'AAPLm', 'MSFTm'],
+      'strategy': 'Swing Trend DCA',
+      'managementProfile': 'small_account',
+      'riskPercent': 5.0,
+      'maxDailyLoss': 20.0,
+      'maxOpenTrades': 2,
+      'maxDrawdownPercent': 15.0,
+      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'tips': [
+        'Use fractional shares or CFDs for small sizing',
+        'Focus on mega-cap tech (NVDA, AAPL, MSFT)',
+        'Check earnings calendar — avoid holding through earnings',
+        'Trail stop with 50 SMA on daily chart',
+      ],
+    },
+    'commodities': {
+      'name': 'Gold',
+      'icon': '🥇',
+      'description': 'Swing trend following on gold (XAU/USD). Best for \$100-\$1000 commodity accounts.',
+      'symbols': ['XAUUSDm'],
+      'strategy': 'Swing Trend DCA',
+      'managementProfile': 'small_account',
+      'riskPercent': 5.0,
+      'maxDailyLoss': 20.0,
+      'maxOpenTrades': 1,
+      'maxDrawdownPercent': 15.0,
+      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'tips': [
+        'Gold is volatile — use wider stops (1.5-2x ATR)',
+        'Only trade with the daily trend',
+        'Avoid trading on FOMC / NFP days',
+        'CFDs keep position sizes minimal',
+      ],
+    },
+    'mixed': {
+      'name': 'Mixed',
+      'icon': '🎯',
+      'description': 'Diversified swing trading across forex, crypto, and gold. Best all-rounder for \$100-\$1000.',
+      'symbols': ['EURUSDm', 'BTCUSDm', 'XAUUSDm'],
+      'strategy': 'Swing Trend DCA',
+      'managementProfile': 'small_account',
+      'riskPercent': 5.0,
+      'maxDailyLoss': 20.0,
+      'maxOpenTrades': 2,
+      'maxDrawdownPercent': 15.0,
+      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'tips': [
+        'Max 3 assets — keeps risk manageable',
+        'Gold hedges crypto drops',
+        'Forex provides steady base returns',
+        'Rebalance monthly based on performance',
+      ],
+    },
+  };
+
+  void _applySmallAccountPreset(String presetKey) {
+    final preset = _smallAccountPresets[presetKey];
+    if (preset == null) return;
+    
+    setState(() {
+      _selectedPreset = presetKey;
+      _selectedStrategy = preset['strategy'] as String;
+      _managementProfile = preset['managementProfile'] as String;
+      _riskPercent = (preset['riskPercent'] as num).toDouble();
+      _maxOpenTrades = preset['maxOpenTrades'] as int;
+      _maxDrawdownPercent = (preset['maxDrawdownPercent'] as num).toDouble();
+      _allowedVolatility = List<String>.from(preset['allowedVolatility'] as List);
+      
+      // Apply symbols if not Binance broker (Binance uses its own symbol list)
+      if (!_isBinanceBroker) {
+        _selectedSymbols = List<String>.from(preset['symbols'] as List);
+      }
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${preset['name']} preset applied!'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   // Broker integration
   late BrokerCredentialsService _brokerService;
   late CommissionService _commissionService;
@@ -416,6 +545,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         _minProfit = 5;
         _maxProfit = 50;
         _winRateMin = 50;
+      } else if (profile == 'small_account') {
+        _maxOpenTrades = 2;
+        _riskPercent = 5.0;
+        _maxDrawdownPercent = 15.0;
+        _allowedVolatility = ['Very Low', 'Low', 'Medium', 'High'];
       } else {
         _allowedVolatility = ['Low', 'Medium'];
       }
@@ -460,6 +594,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     'Mean Reversion',
     'Range Trading',
     'Breakout Trading',
+    'Swing Trend DCA',
   ];
 
   @override
@@ -663,7 +798,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       print('   Account: ${credential.accountNumber}');
 
       final internalRiskPerTrade = (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
-      final recommendedVolatility = _recommendedAllowedVolatility();
       final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
       final signalThreshold = _recommendedSignalThreshold();
 
@@ -684,7 +818,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         if (_investmentAmountController.text.isNotEmpty)
           'tradeAmount': double.tryParse(_investmentAmountController.text),
         'displayCurrency': _currencyCode(context.read<CurrencyProvider>().currency),
-        'allowedVolatility': recommendedVolatility,
+        'allowedVolatility': _allowedVolatility,
         'autoSwitch': true,
         'dynamicSizing': true,
         'managementProfile': _managementProfile,
@@ -1000,6 +1134,130 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     style: TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ========== SMALL ACCOUNT PRESETS ==========
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.amber.withOpacity(0.12),
+                  Colors.orange.withOpacity(0.08),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: Border.all(color: Colors.amber.withOpacity(0.5)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.rocket_launch, color: Colors.amber, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Small Account Presets',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber,
+                            ),
+                          ),
+                          Text(
+                            'One-tap setup for \$10 - \$1,000 accounts',
+                            style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_selectedPreset != null)
+                      IconButton(
+                        icon: const Icon(Icons.clear, size: 18, color: Colors.grey),
+                        onPressed: () => setState(() => _selectedPreset = null),
+                        tooltip: 'Clear preset',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _smallAccountPresets.entries.map((entry) {
+                    final key = entry.key;
+                    final preset = entry.value;
+                    final isSelected = _selectedPreset == key;
+                    return ActionChip(
+                      avatar: Text(
+                        preset['icon'] as String,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      label: Text(
+                        preset['name'] as String,
+                        style: TextStyle(
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: isSelected ? Colors.amber : Colors.white70,
+                        ),
+                      ),
+                      backgroundColor: isSelected
+                          ? Colors.amber.withOpacity(0.25)
+                          : Colors.grey[800]?.withOpacity(0.6),
+                      side: BorderSide(
+                        color: isSelected ? Colors.amber : Colors.grey.withOpacity(0.3),
+                        width: isSelected ? 2 : 1,
+                      ),
+                      onPressed: () => _applySmallAccountPreset(key),
+                    );
+                  }).toList(),
+                ),
+                if (_selectedPreset != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.black26,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _smallAccountPresets[_selectedPreset]!['description'] as String,
+                          style: const TextStyle(fontSize: 12, color: Colors.white70),
+                        ),
+                        const SizedBox(height: 8),
+                        ...(_smallAccountPresets[_selectedPreset]!['tips'] as List).map(
+                          (tip) => Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('• ', style: TextStyle(color: Colors.amber, fontSize: 11)),
+                                Expanded(
+                                  child: Text(
+                                    tip as String,
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[300]),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1552,6 +1810,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   backgroundColor: Colors.orange.withOpacity(0.15),
                                   labelStyle: const TextStyle(color: Colors.orange),
                                 ),
+                                if (_selectedPreset != null)
+                                  ChoiceChip(
+                                    label: const Text('Small Account'),
+                                    selected: _managementProfile == 'small_account',
+                                    onSelected: (_) => _applyManagementProfile('small_account'),
+                                    backgroundColor: Colors.amber.withOpacity(0.15),
+                                    labelStyle: const TextStyle(color: Colors.amber),
+                                  ),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -1562,7 +1828,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                       ? 'Moderate automation: controlled stacking with medium-volatility access.'
                                       : _managementProfile == 'fast_growth'
                                           ? 'Fast Growth: For small accounts. Aggressive but capped risk, more trades, tighter SL/TP, and quick compounding.'
-                                          : 'Keeps intelligent protections on while allowing broader execution settings.',
+                                          : _managementProfile == 'small_account'
+                                              ? 'Small Account: Optimized for \$10-\$1000. Micro lots, swing entries, all volatility levels allowed.'
+                                              : 'Keeps intelligent protections on while allowing broader execution settings.',
                               style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                             ),
                           ],
