@@ -1387,7 +1387,7 @@ def init_database():
             daily_profit REAL DEFAULT 0,
             total_profit REAL DEFAULT 0,
             broker_account_id TEXT,
-            symbols TEXT DEFAULT 'EURUSDm',
+            symbols TEXT DEFAULT 'EURUSD',
             created_at TEXT,
             updated_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -2689,7 +2689,7 @@ class MT5Connection(BrokerConnection):
                 logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: account_info OK (balance=${account_info.balance})")
                 
                 # STEP 2: Check symbol availability and data
-                test_symbol = "EURUSDm"  # Use actual Exness symbol with "m" suffix
+                test_symbol = "EURUSD"  # Exness Standard account (no 'm' suffix)
                 if not self.mt5.symbol_select(test_symbol, True):
                     logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: symbol_select({test_symbol}) failed")
                     time.sleep(check_interval)
@@ -3053,11 +3053,11 @@ class MT5Connection(BrokerConnection):
         for symbol in sorted(VALID_SYMBOLS):
             if self.is_symbol_available(symbol):
                 return symbol
-        return "EURUSDm"  # Last resort fallback
+        return "EURUSD"  # Last resort fallback
     
     def wait_for_critical_symbols(self, symbols: list, timeout_seconds: int = 30) -> bool:
         """
-        Wait for critical symbols (like ETHUSDm, BTCUSDm) to be loaded and available.
+        Wait for critical symbols (like ETHUSD, BTCUSD) to be loaded and available.
         Critical symbols require special handling because:
         - They fail fast if not available (no fallback)
         - They trade 24/7 but need different subscription patterns
@@ -3065,7 +3065,7 @@ class MT5Connection(BrokerConnection):
         
         Returns True if all critical symbols are available, False on timeout
         """
-        critical_symbols = {'BTCUSDm', 'ETHUSDm'}  # Define critical symbols that MUST be available
+        critical_symbols = {'BTCUSD', 'ETHUSD'}  # Define critical symbols that MUST be available
         symbols_to_wait = [s for s in symbols if s in critical_symbols]
         
         if not symbols_to_wait:
@@ -3146,7 +3146,7 @@ class MT5Connection(BrokerConnection):
                     
                     # ❌ CRITICAL FIX: Don't silently fall back for important symbols like BTC/ETH
                     # This was causing BTC trades to execute as EUR/USD instead
-                    critical_symbols = {'BTCUSDm', 'ETHUSDm'}  # High-value symbols that must execute correctly
+                    critical_symbols = {'BTCUSD', 'ETHUSD'}  # High-value symbols that must execute correctly
                     if symbol in critical_symbols:
                         logger.error(f"❌ CRITICAL: {symbol} requested but NOT available - refusing to fall back to another symbol")
                         logger.error(f"   User requested {symbol}, but system would execute on wrong symbol if we fell back")
@@ -3174,8 +3174,8 @@ class MT5Connection(BrokerConnection):
                 'OILK': 1.0,
                 'XAUUSD': 0.01,
                 'XAGUSD': 0.1,
-                'XAUUSDm': 0.01,
-                'XAGUSDm': 0.1,
+                'XAUUSD': 0.01,
+                'XAGUSD': 0.1,
             }
             min_volume = float(getattr(sym_info, 'volume_min', 0.0) or fallback_min_volumes.get(symbol, 0.01))
             max_volume = float(getattr(sym_info, 'volume_max', 0.0) or 0.0)
@@ -5656,7 +5656,7 @@ SMALL_ACCOUNT_PRESETS = {
     'crypto': {
         'name': 'Crypto Small Account (DCA + Swing)',
         'description': 'DCA into BTC/ETH with swing trend entries. Best for $10-$1000 crypto accounts.',
-        'symbols': ['BTCUSDm', 'ETHUSDm'],
+        'symbols': ['BTCUSD', 'ETHUSD'],
         'strategy': 'Swing Trend DCA',
         'managementProfile': 'small_account',
         'riskPerTrade': 5.0,
@@ -5683,7 +5683,7 @@ SMALL_ACCOUNT_PRESETS = {
     'forex': {
         'name': 'Forex Small Account (Swing Trend)',
         'description': 'Swing trend following on major pairs with micro lots. Best for $10-$1000 forex accounts.',
-        'symbols': ['EURUSDm'],
+        'symbols': ['EURUSD'],
         'strategy': 'Swing Trend DCA',
         'managementProfile': 'small_account',
         'riskPerTrade': 5.0,
@@ -5710,7 +5710,7 @@ SMALL_ACCOUNT_PRESETS = {
     'stocks': {
         'name': 'Stocks Small Account (Swing Pullback)',
         'description': 'Swing pullback entries on blue-chip stocks/ETFs. Best for $50-$1000 stock accounts.',
-        'symbols': ['NVDAm', 'AAPLm', 'MSFTm'],
+        'symbols': ['NVDA', 'AAPL', 'MSFT'],
         'strategy': 'Swing Trend DCA',
         'managementProfile': 'small_account',
         'riskPerTrade': 5.0,
@@ -5737,7 +5737,7 @@ SMALL_ACCOUNT_PRESETS = {
     'commodities': {
         'name': 'Commodities Small Account (Gold Swing)',
         'description': 'Swing trend following on gold (XAU/USD). Best for $100-$1000 commodity accounts.',
-        'symbols': ['XAUUSDm'],
+        'symbols': ['XAUUSD'],
         'strategy': 'Swing Trend DCA',
         'managementProfile': 'small_account',
         'riskPerTrade': 5.0,
@@ -5764,7 +5764,7 @@ SMALL_ACCOUNT_PRESETS = {
     'mixed': {
         'name': 'Mixed Small Account (Diversified)',
         'description': 'Diversified swing trading across forex, crypto, and gold. Best all-rounder for $100-$1000.',
-        'symbols': ['EURUSDm', 'BTCUSDm', 'XAUUSDm'],
+        'symbols': ['EURUSD', 'BTCUSD', 'XAUUSD'],
         'strategy': 'Swing Trend DCA',
         'managementProfile': 'small_account',
         'riskPerTrade': 5.0,
@@ -7033,7 +7033,7 @@ def list_commodities():
             # 1. Flat dictionary for UI market data lookup (by symbol)
             # 2. Categorized list for symbol selection
             
-            flat_market_data = {}  # {EURUSDm: {signal, trend, etc}, BTCUSDm: {signal, trend, etc}, ...}
+            flat_market_data = {}  # {EURUSD: {signal, trend, etc}, BTCUSD: {signal, trend, etc}, ...}
             categorized = {
                 'forex': [],
                 'crypto': [],
@@ -7043,50 +7043,51 @@ def list_commodities():
                 'stocks': []
             }
             
-            # Exness symbols verified in MT5 Market Watch for the current account/server.
+            # Exness Standard account symbols (NO 'm' suffix — 'm' is for Standard Cent only)
+            # Verified from user's Exness terminal Market Watch: BTC, XAU/USD, XAG/USD, ETH, USOIL, USD/JPY, EUR/USD, USTEC
             symbol_config = {
                 'forex': [
-                    {'symbol': 'EURUSDm', 'name': '💱 Euro vs US Dollar', 'min_price': 1.08, 'max_price': 1.12},
-                    {'symbol': 'GBPUSDm', 'name': '💱 British Pound vs US Dollar', 'min_price': 1.26, 'max_price': 1.30},
-                    {'symbol': 'USDJPYm', 'name': '💱 US Dollar vs Japanese Yen', 'min_price': 148.0, 'max_price': 152.0},
-                    {'symbol': 'AUDUSDm', 'name': '💱 Australian Dollar vs US Dollar', 'min_price': 0.64, 'max_price': 0.68},
-                    {'symbol': 'USDCADm', 'name': '💱 US Dollar vs Canadian Dollar', 'min_price': 1.34, 'max_price': 1.38},
-                    {'symbol': 'USDCHFm', 'name': '💱 US Dollar vs Swiss Franc', 'min_price': 0.87, 'max_price': 0.91},
-                    {'symbol': 'NZDUSDm', 'name': '💱 New Zealand Dollar vs US Dollar', 'min_price': 0.60, 'max_price': 0.64},
-                    {'symbol': 'EURGBPm', 'name': '💱 Euro vs British Pound', 'min_price': 0.83, 'max_price': 0.87},
-                    {'symbol': 'EURJPYm', 'name': '💱 Euro vs Japanese Yen', 'min_price': 160.0, 'max_price': 166.0},
-                    {'symbol': 'GBPJPYm', 'name': '💱 British Pound vs Japanese Yen', 'min_price': 188.0, 'max_price': 196.0},
+                    {'symbol': 'EURUSD', 'name': '💱 Euro vs US Dollar', 'min_price': 1.08, 'max_price': 1.12},
+                    {'symbol': 'GBPUSD', 'name': '💱 British Pound vs US Dollar', 'min_price': 1.26, 'max_price': 1.30},
+                    {'symbol': 'USDJPY', 'name': '💱 US Dollar vs Japanese Yen', 'min_price': 148.0, 'max_price': 160.0},
+                    {'symbol': 'AUDUSD', 'name': '💱 Australian Dollar vs US Dollar', 'min_price': 0.64, 'max_price': 0.68},
+                    {'symbol': 'USDCAD', 'name': '💱 US Dollar vs Canadian Dollar', 'min_price': 1.34, 'max_price': 1.38},
+                    {'symbol': 'USDCHF', 'name': '💱 US Dollar vs Swiss Franc', 'min_price': 0.87, 'max_price': 0.91},
+                    {'symbol': 'NZDUSD', 'name': '💱 New Zealand Dollar vs US Dollar', 'min_price': 0.60, 'max_price': 0.64},
+                    {'symbol': 'EURGBP', 'name': '💱 Euro vs British Pound', 'min_price': 0.83, 'max_price': 0.87},
+                    {'symbol': 'EURJPY', 'name': '💱 Euro vs Japanese Yen', 'min_price': 160.0, 'max_price': 166.0},
+                    {'symbol': 'GBPJPY', 'name': '💱 British Pound vs Japanese Yen', 'min_price': 188.0, 'max_price': 196.0},
                 ],
                 'precious_metals': [
-                    {'symbol': 'XAUUSDm', 'name': '🥇 Gold (XAU/USD)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 3200},
-                    {'symbol': 'XAGUSDm', 'name': '🥈 Silver (XAG/USD)', 'type': 'Metal', 'min_price': 22, 'max_price': 35},
+                    {'symbol': 'XAUUSD', 'name': '🥇 Gold (XAU/USD)', 'type': 'Metal', 'lucrative': True, 'min_price': 2000, 'max_price': 5000},
+                    {'symbol': 'XAGUSD', 'name': '🥈 Silver (XAG/USD)', 'type': 'Metal', 'min_price': 22, 'max_price': 35},
                 ],
                 'energy': [
-                    {'symbol': 'USOILm', 'name': '🛢️ Crude Oil (WTI)', 'type': 'Energy', 'min_price': 65, 'max_price': 90},
-                    {'symbol': 'UKOILm', 'name': '🛢️ Brent Crude Oil', 'type': 'Energy', 'min_price': 70, 'max_price': 95},
+                    {'symbol': 'USOIL', 'name': '🛢️ Crude Oil (WTI)', 'type': 'Energy', 'min_price': 65, 'max_price': 90},
+                    {'symbol': 'UKOIL', 'name': '🛢️ Brent Crude Oil', 'type': 'Energy', 'min_price': 70, 'max_price': 95},
                 ],
                 'indices': [
-                    {'symbol': 'US30m', 'name': '📊 Dow Jones 30 (US30)', 'type': 'Index CFD', 'min_price': 38000, 'max_price': 42000},
-                    {'symbol': 'US500m', 'name': '📊 S&P 500 (US500)', 'type': 'Index CFD', 'min_price': 5000, 'max_price': 5800},
-                    {'symbol': 'USTECm', 'name': '📊 Nasdaq 100 (USTEC)', 'type': 'Index CFD', 'min_price': 17000, 'max_price': 20000},
+                    {'symbol': 'US30', 'name': '📊 Dow Jones 30 (US30)', 'type': 'Index CFD', 'min_price': 38000, 'max_price': 42000},
+                    {'symbol': 'US500', 'name': '📊 S&P 500 (US500)', 'type': 'Index CFD', 'min_price': 5000, 'max_price': 5800},
+                    {'symbol': 'USTEC', 'name': '📊 Nasdaq 100 (USTEC)', 'type': 'Index CFD', 'min_price': 17000, 'max_price': 24000},
                 ],
                 'crypto': [
-                    {'symbol': 'BTCUSDm', 'name': '₿ Bitcoin (BTC/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 40000, 'max_price': 100000},
-                    {'symbol': 'ETHUSDm', 'name': 'Ξ Ethereum (ETH/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 2000, 'max_price': 5000},
+                    {'symbol': 'BTCUSD', 'name': '₿ Bitcoin (BTC/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 40000, 'max_price': 100000},
+                    {'symbol': 'ETHUSD', 'name': 'Ξ Ethereum (ETH/USD)', 'type': 'Crypto', 'lucrative': True, 'min_price': 2000, 'max_price': 5000},
                 ],
                 'stocks': [
-                    {'symbol': 'AAPLm', 'name': '📈 Apple Inc.', 'type': 'Stock CFD', 'min_price': 180, 'max_price': 260},
-                    {'symbol': 'AMDm', 'name': '📈 Advanced Micro Devices', 'type': 'Stock CFD', 'min_price': 120, 'max_price': 230},
-                    {'symbol': 'MSFTm', 'name': '📈 Microsoft Corporation', 'type': 'Stock CFD', 'min_price': 380, 'max_price': 520},
-                    {'symbol': 'NVDAm', 'name': '📈 NVIDIA Corporation', 'type': 'Stock CFD', 'min_price': 700, 'max_price': 1100},
-                    {'symbol': 'GOOGLm', 'name': '📈 Alphabet Inc.', 'type': 'Stock CFD', 'min_price': 130, 'max_price': 230},
-                    {'symbol': 'METAm', 'name': '📈 META Platforms', 'type': 'Stock CFD', 'min_price': 350, 'max_price': 700},
-                    {'symbol': 'TSLAm', 'name': '📈 Tesla Inc.', 'type': 'Stock CFD', 'min_price': 150, 'max_price': 350},
-                    {'symbol': 'JPMm', 'name': '📈 JPMorgan Chase', 'type': 'Stock CFD', 'min_price': 170, 'max_price': 280},
-                    {'symbol': 'BACm', 'name': '📈 Bank of America', 'type': 'Stock CFD', 'min_price': 28, 'max_price': 55},
-                    {'symbol': 'WFCm', 'name': '📈 Wells Fargo', 'type': 'Stock CFD', 'min_price': 45, 'max_price': 85},
-                    {'symbol': 'ORCLm', 'name': '📈 Oracle Corporation', 'type': 'Stock CFD', 'min_price': 100, 'max_price': 220},
-                    {'symbol': 'TSMm', 'name': '📈 TSMC', 'type': 'Stock CFD', 'min_price': 110, 'max_price': 240},
+                    {'symbol': 'AAPL', 'name': '📈 Apple Inc.', 'type': 'Stock CFD', 'min_price': 180, 'max_price': 260},
+                    {'symbol': 'AMD', 'name': '📈 Advanced Micro Devices', 'type': 'Stock CFD', 'min_price': 120, 'max_price': 230},
+                    {'symbol': 'MSFT', 'name': '📈 Microsoft Corporation', 'type': 'Stock CFD', 'min_price': 380, 'max_price': 520},
+                    {'symbol': 'NVDA', 'name': '📈 NVIDIA Corporation', 'type': 'Stock CFD', 'min_price': 700, 'max_price': 1100},
+                    {'symbol': 'GOOGL', 'name': '📈 Alphabet Inc.', 'type': 'Stock CFD', 'min_price': 130, 'max_price': 230},
+                    {'symbol': 'META', 'name': '📈 META Platforms', 'type': 'Stock CFD', 'min_price': 350, 'max_price': 700},
+                    {'symbol': 'TSLA', 'name': '📈 Tesla Inc.', 'type': 'Stock CFD', 'min_price': 150, 'max_price': 350},
+                    {'symbol': 'JPM', 'name': '📈 JPMorgan Chase', 'type': 'Stock CFD', 'min_price': 170, 'max_price': 280},
+                    {'symbol': 'BAC', 'name': '📈 Bank of America', 'type': 'Stock CFD', 'min_price': 28, 'max_price': 55},
+                    {'symbol': 'WFC', 'name': '📈 Wells Fargo', 'type': 'Stock CFD', 'min_price': 45, 'max_price': 85},
+                    {'symbol': 'ORCL', 'name': '📈 Oracle Corporation', 'type': 'Stock CFD', 'min_price': 100, 'max_price': 220},
+                    {'symbol': 'TSM', 'name': '📈 TSMC', 'type': 'Stock CFD', 'min_price': 110, 'max_price': 240},
                 ]
             }
             
@@ -7095,18 +7096,21 @@ def list_commodities():
                 for item_config in items:
                     symbol = item_config['symbol']
                     # Get live market data for this symbol (from the updater thread)
+                    # Try exact match, then try with 'm' suffix (backward compat with cached data)
                     live_data = commodity_market_data.get(symbol, {})
-                    # Merge config + live data
-                    merged_item = {**item_config, **live_data}
+                    if not live_data:
+                        live_data = commodity_market_data.get(symbol + 'm', {})
+                    # Merge config + live data, but config symbol always wins
+                    merged_item = {**item_config, **live_data, 'symbol': symbol}
                     categorized[category].append(merged_item)
                     # Also store in flat dict for easy lookup by symbol
                     flat_market_data[symbol] = live_data
             
             # Log sample signals for debugging
-            eurusd_signal = flat_market_data.get('EURUSDm', {}).get('signal', 'NO DATA')
-            btc_signal = flat_market_data.get('BTCUSDm', {}).get('signal', 'NO DATA')
+            eurusd_signal = flat_market_data.get('EURUSD', {}).get('signal', 'NO DATA')
+            btc_signal = flat_market_data.get('BTCUSD', {}).get('signal', 'NO DATA')
             total_symbols = sum(len(items) for items in categorized.values())
-            logger.info(f"[/api/commodities/list] Returning {total_symbols} Exness symbols: EURUSDm={eurusd_signal}, BTCUSDm={btc_signal}")
+            logger.info(f"[/api/commodities/list] Returning {total_symbols} Exness symbols: EURUSD={eurusd_signal}, BTCUSD={btc_signal}")
             
             return jsonify({
                 'success': True,
@@ -7753,21 +7757,21 @@ def get_account_performance():
 # ==================== SYMBOL VALIDATION & CORRECTION ====================
 # Maps old/unavailable symbols to new valid MetaQuotes-Demo symbols
 VALID_SYMBOLS = {
-    # Verified Exness/MT5 symbols with "m" suffix (micro accounts)
+    # Exness Standard account symbols (NO 'm' suffix)
     # ===== FOREX =====
-    'EURUSDm', 'GBPUSDm', 'USDJPYm', 'AUDUSDm', 'USDCADm',
-    'USDCHFm', 'NZDUSDm', 'EURGBPm', 'EURJPYm', 'GBPJPYm',
+    'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD',
+    'USDCHF', 'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY',
     # ===== CRYPTO =====
-    'BTCUSDm', 'ETHUSDm',
+    'BTCUSD', 'ETHUSD',
     # ===== PRECIOUS METALS =====
-    'XAUUSDm', 'XAGUSDm',
+    'XAUUSD', 'XAGUSD',
     # ===== ENERGY =====
-    'USOILm', 'UKOILm',
+    'USOIL', 'UKOIL',
     # ===== INDICES =====
-    'US30m', 'US500m', 'USTECm',
+    'US30', 'US500', 'USTEC',
     # ===== STOCKS =====
-    'AAPLm', 'AMDm', 'MSFTm', 'NVDAm', 'GOOGLm', 'METAm',
-    'TSLAm', 'JPMm', 'BACm', 'WFCm', 'ORCLm', 'TSMm',
+    'AAPL', 'AMD', 'MSFT', 'NVDA', 'GOOGL', 'META',
+    'TSLA', 'JPM', 'BAC', 'WFC', 'ORCL', 'TSM',
 }
 
 BINANCE_VALID_SYMBOLS = {
@@ -7790,72 +7794,53 @@ PXBT_VALID_SYMBOLS = {
 }
 
 SYMBOL_MAPPING = {
-    # Exness "m" suffix mappings (symbols received without "m" need to map to "m" version)
-    'BTCUSD': 'BTCUSDm',
-    'ETHUSD': 'ETHUSDm',
-    'EURUSD': 'EURUSDm',
-    'USDJPY': 'USDJPYm',
-    'XAUUSD': 'XAUUSDm',
-    'AAPL': 'AAPLm',
-    'AMD': 'AMDm',
-    'MSFT': 'MSFTm',
-    'NVDA': 'NVDAm',
-    'JPM': 'JPMm',
-    'BAC': 'BACm',
-    'WFC': 'WFCm',
-    'GOOGL': 'GOOGLm',
-    'META': 'METAm',
-    'ORCL': 'ORCLm',
-    'TSM': 'TSMm',
+    # Backward compatibility: map OLD 'm' suffix symbols to Standard account symbols
+    'BTCUSDm': 'BTCUSD', 'ETHUSDm': 'ETHUSD',
+    'EURUSDm': 'EURUSD', 'GBPUSDm': 'GBPUSD', 'USDJPYm': 'USDJPY',
+    'AUDUSDm': 'AUDUSD', 'USDCADm': 'USDCAD', 'USDCHFm': 'USDCHF',
+    'NZDUSDm': 'NZDUSD', 'EURGBPm': 'EURGBP', 'EURJPYm': 'EURJPY', 'GBPJPYm': 'GBPJPY',
+    'XAUUSDm': 'XAUUSD', 'XAGUSDm': 'XAGUSD',
+    'USOILm': 'USOIL', 'UKOILm': 'UKOIL',
+    'US30m': 'US30', 'US500m': 'US500', 'USTECm': 'USTEC',
+    'AAPLm': 'AAPL', 'AMDm': 'AMD', 'MSFTm': 'MSFT', 'NVDAm': 'NVDA',
+    'GOOGLm': 'GOOGL', 'METAm': 'META', 'TSLAm': 'TSLA',
+    'JPMm': 'JPM', 'BACm': 'BAC', 'WFCm': 'WFC', 'ORCLm': 'ORCL', 'TSMm': 'TSM',
     
-    # OLD -> NEW SYMBOL CORRECTIONS
+    # Common name aliases -> Exness Standard symbols
     # Metals
-    'GOLD': 'XAUUSDm', 'XAGUSD': 'XAGUSDm',
-    'SILVER': 'XAGUSDm',
-    'PLATINUM': 'XAUUSDm',
-    'PALLADIUM': 'XAUUSDm',
-    'COPPER': 'XAUUSDm',
+    'GOLD': 'XAUUSD', 'SILVER': 'XAGUSD',
+    'PLATINUM': 'XAUUSD', 'PALLADIUM': 'XAUUSD', 'COPPER': 'XAUUSD',
     
-    # Energy — map to Exness oil symbols
-    'WTIUSD': 'USOILm', 'CRUDE_OIL': 'USOILm', 'OIL': 'USOILm',
-    'BRENTUSD': 'UKOILm', 'BRENT': 'UKOILm',
-    'NATGASUS': 'USOILm', 'NATURAL_GAS': 'USOILm',
-    'OILK': 'USOILm',
+    # Energy
+    'WTIUSD': 'USOIL', 'CRUDE_OIL': 'USOIL', 'OIL': 'USOIL',
+    'BRENTUSD': 'UKOIL', 'BRENT': 'UKOIL',
+    'NATGASUS': 'USOIL', 'NATURAL_GAS': 'USOIL', 'OILK': 'USOIL',
     
-    # Agriculture (not available on Exness — map to gold)
-    'CORNUSD': 'XAUUSDm', 'CORN': 'XAUUSDm',
-    'WHEATUSD': 'XAUUSDm', 'WHEAT': 'XAUUSDm',
-    'SOYBEANSUSD': 'XAUUSDm', 'SOYBEANS': 'XAUUSDm',
-    'COFFEEUSD': 'XAUUSDm', 'COFFEE': 'XAUUSDm',
-    'COCOAUSD': 'XAUUSDm', 'COCOA': 'XAUUSDm',
-    'SUGARUSD': 'XAUUSDm', 'SUGAR': 'XAUUSDm',
+    # Agriculture (not on Exness — map to gold)
+    'CORNUSD': 'XAUUSD', 'CORN': 'XAUUSD',
+    'WHEATUSD': 'XAUUSD', 'WHEAT': 'XAUUSD',
+    'SOYBEANSUSD': 'XAUUSD', 'SOYBEANS': 'XAUUSD',
+    'COFFEEUSD': 'XAUUSD', 'COFFEE': 'XAUUSD',
+    'COCOAUSD': 'XAUUSD', 'COCOA': 'XAUUSD',
+    'SUGARUSD': 'XAUUSD', 'SUGAR': 'XAUUSD',
     
-    # Indices — map to Exness index symbols
-    'SPX500': 'US500m', 'S&P500': 'US500m', 'SP500': 'US500m', 'SP500m': 'US500m',
-    'NASDAQ': 'USTECm', 'US100': 'USTECm', 'USTEC': 'USTECm',
-    'DOW': 'US30m', 'US30': 'US30m', 'DJIA': 'US30m',
-    'DAX40': 'US500m', 'GDAX': 'US500m', 'DAX': 'US500m',
-    'FTSE100': 'US500m', 'FTSE': 'US500m',
-    'CAC40': 'US500m',
-    'NIKKEI225': 'US500m', 'NIKKEI': 'US500m', 'NIKL': 'US500m',
+    # Indices
+    'SPX500': 'US500', 'S&P500': 'US500', 'SP500': 'US500', 'SP500m': 'US500',
+    'NASDAQ': 'USTEC', 'US100': 'USTEC',
+    'DOW': 'US30', 'DJIA': 'US30',
+    'DAX40': 'US500', 'GDAX': 'US500', 'DAX': 'US500',
+    'FTSE100': 'US500', 'FTSE': 'US500',
+    'CAC40': 'US500',
+    'NIKKEI225': 'US500', 'NIKKEI': 'US500', 'NIKL': 'US500',
     
-    # Forex aliases without m suffix
-    'GBPUSD': 'GBPUSDm', 'AUDUSD': 'AUDUSDm', 'USDCAD': 'USDCADm',
-    'USDCHF': 'USDCHFm', 'NZDUSD': 'NZDUSDm', 'EURGBP': 'EURGBPm',
-    'EURJPY': 'EURJPYm', 'GBPJPY': 'GBPJPYm',
-    'XAUUSD': 'XAUUSDm', 'XAGUSD': 'XAGUSDm',
-    'USOIL': 'USOILm', 'UKOIL': 'UKOILm',
-    
-    # Stocks aliases
-    'APPLE': 'AAPLm', 'TSLA': 'TSLAm', 'TESLA': 'TSLAm',
-    'ALPHABET': 'GOOGLm',
-    'GOOGLE': 'GOOGLm',
-    'MICROSOFT': 'MSFTm',
-    'NVIDIA': 'NVDAm',
+    # Stock aliases
+    'APPLE': 'AAPL', 'TESLA': 'TSLA',
+    'ALPHABET': 'GOOGL', 'GOOGLE': 'GOOGL',
+    'MICROSOFT': 'MSFT', 'NVIDIA': 'NVDA',
     
     # Crypto variants
-    'BITCOIN': 'BTCUSDm', 'BTC': 'BTCUSDm',
-    'ETHEREUM': 'ETHUSDm', 'ETH': 'ETHUSDm',
+    'BITCOIN': 'BTCUSD', 'BTC': 'BTCUSD',
+    'ETHEREUM': 'ETHUSD', 'ETH': 'ETHUSD',
 }
 
 def validate_and_correct_symbols(symbols, broker_name=None):
@@ -7994,35 +7979,173 @@ def validate_and_correct_symbols(symbols, broker_name=None):
 # ==================== SYMBOL-SPECIFIC TRADING PARAMETERS ====================
 SYMBOL_PARAMETERS = {
     # FOREX PAIRS - High liquidity, tight spreads
-    'EURUSDm': {
-        'atr_multiplier': 1.2,  # Tighter stops for liquid pairs
+    'EURUSD': {
+        'atr_multiplier': 1.2,
         'stop_loss_pips': 8,
         'take_profit_pips': 15,
         'max_slippage': 0.0005,
-        'min_signal_strength': 50,
-        'volatility_high': 0.15,  # 0.15% is high volatility for FX
+        'min_signal_strength': 55,
+        'volatility_high': 0.15,
         'volatility_low': 0.02,
     },
-    'USDJPYm': {
+    'GBPUSD': {
+        'atr_multiplier': 1.3,
+        'stop_loss_pips': 10,
+        'take_profit_pips': 20,
+        'max_slippage': 0.0006,
+        'min_signal_strength': 55,
+        'volatility_high': 0.20,
+        'volatility_low': 0.03,
+    },
+    'USDJPY': {
         'atr_multiplier': 1.2,
         'stop_loss_pips': 8,
         'take_profit_pips': 16,
         'max_slippage': 0.0006,
-        'min_signal_strength': 50,
+        'min_signal_strength': 55,
         'volatility_high': 0.12,
         'volatility_low': 0.02,
     },
-    # STOCKS - Higher volatility, wider spreads
-    'AAPLm': {
+    'AUDUSD': {
+        'atr_multiplier': 1.2,
+        'stop_loss_pips': 9,
+        'take_profit_pips': 17,
+        'max_slippage': 0.0005,
+        'min_signal_strength': 55,
+        'volatility_high': 0.18,
+        'volatility_low': 0.03,
+    },
+    'USDCAD': {
+        'atr_multiplier': 1.2,
+        'stop_loss_pips': 9,
+        'take_profit_pips': 17,
+        'max_slippage': 0.0005,
+        'min_signal_strength': 55,
+        'volatility_high': 0.15,
+        'volatility_low': 0.02,
+    },
+    'USDCHF': {
+        'atr_multiplier': 1.2,
+        'stop_loss_pips': 8,
+        'take_profit_pips': 15,
+        'max_slippage': 0.0005,
+        'min_signal_strength': 55,
+        'volatility_high': 0.14,
+        'volatility_low': 0.02,
+    },
+    'NZDUSD': {
+        'atr_multiplier': 1.2,
+        'stop_loss_pips': 9,
+        'take_profit_pips': 17,
+        'max_slippage': 0.0006,
+        'min_signal_strength': 55,
+        'volatility_high': 0.18,
+        'volatility_low': 0.03,
+    },
+    'EURGBP': {
+        'atr_multiplier': 1.2,
+        'stop_loss_pips': 7,
+        'take_profit_pips': 14,
+        'max_slippage': 0.0005,
+        'min_signal_strength': 55,
+        'volatility_high': 0.10,
+        'volatility_low': 0.02,
+    },
+    'EURJPY': {
+        'atr_multiplier': 1.3,
+        'stop_loss_pips': 10,
+        'take_profit_pips': 20,
+        'max_slippage': 0.0006,
+        'min_signal_strength': 55,
+        'volatility_high': 0.18,
+        'volatility_low': 0.03,
+    },
+    'GBPJPY': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 14,
+        'take_profit_pips': 28,
+        'max_slippage': 0.0008,
+        'min_signal_strength': 60,
+        'volatility_high': 0.25,
+        'volatility_low': 0.05,
+    },
+    # PRECIOUS METALS
+    'XAUUSD': {
+        'atr_multiplier': 1.6,
+        'stop_loss_pips': 12,
+        'take_profit_pips': 25,
+        'max_slippage': 0.001,
+        'min_signal_strength': 58,
+        'volatility_high': 1.5,
+        'volatility_low': 0.3,
+    },
+    'XAGUSD': {
+        'atr_multiplier': 1.7,
+        'stop_loss_pips': 15,
+        'take_profit_pips': 30,
+        'max_slippage': 0.001,
+        'min_signal_strength': 58,
+        'volatility_high': 2.0,
+        'volatility_low': 0.4,
+    },
+    # ENERGY
+    'USOIL': {
+        'atr_multiplier': 1.6,
+        'stop_loss_pips': 15,
+        'take_profit_pips': 30,
+        'max_slippage': 0.001,
+        'min_signal_strength': 58,
+        'volatility_high': 2.0,
+        'volatility_low': 0.5,
+    },
+    'UKOIL': {
+        'atr_multiplier': 1.6,
+        'stop_loss_pips': 15,
+        'take_profit_pips': 30,
+        'max_slippage': 0.001,
+        'min_signal_strength': 58,
+        'volatility_high': 2.0,
+        'volatility_low': 0.5,
+    },
+    # INDICES
+    'US30': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 20,
+        'take_profit_pips': 40,
+        'max_slippage': 0.001,
+        'min_signal_strength': 60,
+        'volatility_high': 1.0,
+        'volatility_low': 0.2,
+    },
+    'US500': {
         'atr_multiplier': 1.5,
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
         'min_signal_strength': 60,
+        'volatility_high': 0.8,
+        'volatility_low': 0.15,
+    },
+    'USTEC': {
+        'atr_multiplier': 1.6,
+        'stop_loss_pips': 18,
+        'take_profit_pips': 36,
+        'max_slippage': 0.001,
+        'min_signal_strength': 60,
+        'volatility_high': 1.2,
+        'volatility_low': 0.2,
+    },
+    # STOCKS - Higher volatility, wider spreads
+    'AAPL': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 15,
+        'take_profit_pips': 30,
+        'max_slippage': 0.001,
+        'min_signal_strength': 62,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
-    'AMDm': {  # Semiconductor - highly volatile
+    'AMD': {
         'atr_multiplier': 1.8,
         'stop_loss_pips': 20,
         'take_profit_pips': 40,
@@ -8031,68 +8154,112 @@ SYMBOL_PARAMETERS = {
         'volatility_high': 3.0,
         'volatility_low': 1.0,
     },
-    'TSMm': {  # Semiconductor - highly volatile
-        'atr_multiplier': 1.8,
-        'stop_loss_pips': 20,
-        'take_profit_pips': 40,
+    'MSFT': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 14,
+        'take_profit_pips': 28,
+        'max_slippage': 0.0012,
+        'min_signal_strength': 62,
+        'volatility_high': 1.8,
+        'volatility_low': 0.6,
+    },
+    'NVDA': {
+        'atr_multiplier': 1.7,
+        'stop_loss_pips': 18,
+        'take_profit_pips': 36,
         'max_slippage': 0.0015,
         'min_signal_strength': 65,
-        'volatility_high': 3.0,
+        'volatility_high': 2.8,
+        'volatility_low': 0.9,
+    },
+    'GOOGL': {
+        'atr_multiplier': 1.5,
+        'stop_loss_pips': 15,
+        'take_profit_pips': 30,
+        'max_slippage': 0.0012,
+        'min_signal_strength': 62,
+        'volatility_high': 2.0,
+        'volatility_low': 0.5,
+    },
+    'META': {
+        'atr_multiplier': 1.6,
+        'stop_loss_pips': 16,
+        'take_profit_pips': 32,
+        'max_slippage': 0.0013,
+        'min_signal_strength': 62,
+        'volatility_high': 2.5,
+        'volatility_low': 0.7,
+    },
+    'TSLA': {
+        'atr_multiplier': 2.0,
+        'stop_loss_pips': 25,
+        'take_profit_pips': 50,
+        'max_slippage': 0.002,
+        'min_signal_strength': 65,
+        'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
-    'MSFTm': {  # Tech mega-cap - moderate volatility
+    'JPM': {
+        'atr_multiplier': 1.4,
+        'stop_loss_pips': 12,
+        'take_profit_pips': 24,
+        'max_slippage': 0.001,
+        'min_signal_strength': 60,
+        'volatility_high': 1.5,
+        'volatility_low': 0.4,
+    },
+    'BAC': {
+        'atr_multiplier': 1.4,
+        'stop_loss_pips': 12,
+        'take_profit_pips': 24,
+        'max_slippage': 0.001,
+        'min_signal_strength': 60,
+        'volatility_high': 1.6,
+        'volatility_low': 0.4,
+    },
+    'WFC': {
+        'atr_multiplier': 1.4,
+        'stop_loss_pips': 12,
+        'take_profit_pips': 24,
+        'max_slippage': 0.001,
+        'min_signal_strength': 60,
+        'volatility_high': 1.5,
+        'volatility_low': 0.4,
+    },
+    'ORCL': {
         'atr_multiplier': 1.5,
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0012,
         'min_signal_strength': 60,
         'volatility_high': 1.8,
-        'volatility_low': 0.6,
+        'volatility_low': 0.5,
     },
-    'NVDAm': {  # GPU leader - high volatility
-        'atr_multiplier': 1.7,
-        'stop_loss_pips': 18,
-        'take_profit_pips': 36,
+    'TSM': {
+        'atr_multiplier': 1.8,
+        'stop_loss_pips': 20,
+        'take_profit_pips': 40,
         'max_slippage': 0.0015,
-        'min_signal_strength': 63,
-        'volatility_high': 2.8,
-        'volatility_low': 0.9,
-    },
-    'BACm': {  # Bank of America - moderate volatility
-        'atr_multiplier': 1.4,
-        'stop_loss_pips': 12,
-        'take_profit_pips': 24,
-        'max_slippage': 0.001,
-        'min_signal_strength': 58,
-        'volatility_high': 1.6,
-        'volatility_low': 0.4,
-    },
-    # PRECIOUS METALS - High volatility
-    'XAUUSDm': {
-        'atr_multiplier': 1.6,
-        'stop_loss_pips': 12,
-        'take_profit_pips': 25,
-        'max_slippage': 0.001,
-        'min_signal_strength': 55,
-        'volatility_high': 1.5,
-        'volatility_low': 0.3,
+        'min_signal_strength': 65,
+        'volatility_high': 3.0,
+        'volatility_low': 1.0,
     },
     # CRYPTOCURRENCIES - Extreme volatility
-    'BTCUSDm': {
-        'atr_multiplier': 2.0,  # Wide stops for crypto
+    'BTCUSD': {
+        'atr_multiplier': 2.0,
         'stop_loss_pips': 50000,
         'take_profit_pips': 100000,
         'max_slippage': 0.002,
-        'min_signal_strength': 40,
+        'min_signal_strength': 65,
         'volatility_high': 5.0,
         'volatility_low': 1.0,
     },
-    'ETHUSDm': {
+    'ETHUSD': {
         'atr_multiplier': 2.0,
         'stop_loss_pips': 2000,
         'take_profit_pips': 5000,
         'max_slippage': 0.002,
-        'min_signal_strength': 40,
+        'min_signal_strength': 65,
         'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
@@ -8142,23 +8309,42 @@ def calculate_rsi(prices, period=14):
 
 
 def calculate_macd(prices, fast=12, slow=26, signal=9):
-    """Calculate MACD (Moving Average Convergence Divergence)
-    
+    """Calculate MACD (Moving Average Convergence Divergence) using proper EMA.
+
     Returns: (macd_line, signal_line, histogram)
     - MACD > Signal = BUY signal
     - MACD < Signal = SELL signal
     """
-    if len(prices) < slow + signal:
-        return 0, 0, 0
-    
-    # Calculate exponential moving averages
-    ema_fast = sum(prices[-fast:]) / fast
-    ema_slow = sum(prices[-slow:]) / slow
-    
-    macd_line = ema_fast - ema_slow
-    signal_line = (macd_line + sum([prices[i] - prices[i-1] for i in range(-signal, 0)]) / signal) / 2
+    def _ema(data, period):
+        """True EMA: seed with SMA of first `period` values, then smooth."""
+        if len(data) < period:
+            return data[-1] if data else 0.0
+        alpha = 2.0 / (period + 1)
+        ema_val = sum(data[:period]) / period  # SMA seed
+        for price in data[period:]:
+            ema_val = alpha * price + (1.0 - alpha) * ema_val
+        return ema_val
+
+    min_len = slow + signal
+    if len(prices) < min_len:
+        return 0.0, 0.0, 0.0
+
+    # Build a series of MACD values over the last `signal` windows so we can
+    # compute a proper EMA signal line instead of a single-sample approximation.
+    macd_series = []
+    for offset in range(signal, 0, -1):
+        sub = prices[:-offset]
+        if len(sub) >= slow:
+            macd_series.append(_ema(sub, fast) - _ema(sub, slow))
+
+    # Current MACD value
+    macd_line = _ema(prices, fast) - _ema(prices, slow)
+    macd_series.append(macd_line)
+
+    # Signal line = EMA(9) of the MACD series
+    signal_line = _ema(macd_series, min(signal, len(macd_series)))
     histogram = macd_line - signal_line
-    
+
     return macd_line, signal_line, histogram
 
 
@@ -8352,7 +8538,7 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
             entry_reason.append('High volatility - reduced confidence')
         
         # Debug logging for signal evaluation
-        if symbol in ['ETHUSDm', 'BTCUSDm', 'XAUUSDm']:
+        if symbol in ['ETHUSD', 'BTCUSD', 'XAUUSD']:
             logger.info(f"[SIGNAL-DBG] {symbol}: rsi={rsi:.1f} macd_h={histogram:.6f} trend={trend} vol={volatility} sig={signal} str={strength} ma_diff={ma_diff_pct:.4f}% reasons={entry_reason}")
         
         # Determine signal strength category
@@ -8506,8 +8692,8 @@ def mean_reversion_strategy(symbol, account_id, risk_amount, market_data=None):
     if signal_eval['strength'] < params['min_signal_strength'] - 5:
         return None
     
-    # Trade against the extreme
-    order_type = 'BUY' if signal_eval['rsi'] > 70 else 'SELL'
+    # Trade AGAINST the extreme — sell overbought, buy oversold (mean reversion)
+    order_type = 'SELL' if signal_eval['rsi'] > 70 else 'BUY'
     
     return {
         'symbol': symbol,
@@ -10026,15 +10212,21 @@ def get_live_prices_from_mt5():
         live_prices = {}
         
         # Fetch prices for all valid symbols
+        # Try symbol as-is first, then with 'm' suffix (for demo/Standard Cent accounts)
         for symbol in VALID_SYMBOLS:
             try:
-                # Ensure symbol is available in MT5
+                # Try the standard symbol name first
+                mt5_symbol = symbol
                 if not mt5.symbol_select(symbol, True):
-                    logger.debug(f"Symbol {symbol} not available in MT5")
-                    continue
+                    # Fallback: try with 'm' suffix for Standard Cent / demo accounts
+                    mt5_symbol_m = symbol + 'm'
+                    if not mt5.symbol_select(mt5_symbol_m, True):
+                        logger.debug(f"Symbol {symbol} (and {mt5_symbol_m}) not available in MT5")
+                        continue
+                    mt5_symbol = mt5_symbol_m
                 
                 # Get current tick data (price)
-                tick = mt5.symbol_info_tick(symbol)
+                tick = mt5.symbol_info_tick(mt5_symbol)
                 if tick is None:
                     logger.debug(f"Could not get tick for {symbol}")
                     continue
@@ -10194,7 +10386,7 @@ def get_live_prices_from_mt5():
                 }
                 
                 # Log signals for key forex/commodities to debug signal visibility
-                if symbol in ['EURUSDm', 'XAUUSDm', 'BTCUSDm', 'ETHUSDm']:
+                if symbol in ['EURUSD', 'XAUUSD', 'BTCUSD', 'ETHUSD']:
                     logger.debug(f"[SIGNAL] {symbol}: price={current_price:.5f}, change={price_change:.6f}%, trend={trend}, signal={signal}")
                 
             except Exception as e:
@@ -10223,7 +10415,12 @@ def live_market_data_updater():
         import MetaTrader5 as _mt5_hist
         for symbol in list(commodity_market_data.keys()):
             try:
+                # Try standard symbol, fallback to 'm' suffix for demo accounts
+                mt5_sym = symbol
                 rates = _mt5_hist.copy_rates_from_pos(symbol, _mt5_hist.TIMEFRAME_M5, 0, 50)
+                if rates is None or len(rates) <= 5:
+                    mt5_sym = symbol + 'm'
+                    rates = _mt5_hist.copy_rates_from_pos(mt5_sym, _mt5_hist.TIMEFRAME_M5, 0, 50)
                 if rates is not None and len(rates) > 5:
                     price_history = [float(r[4]) for r in rates]  # close prices
                     commodity_market_data[symbol]['price_history'] = price_history
@@ -10266,6 +10463,8 @@ def live_market_data_updater():
                             for symbol in list(commodity_market_data.keys()):
                                 try:
                                     rates = _mt5_reseed.copy_rates_from_pos(symbol, _mt5_reseed.TIMEFRAME_M5, 0, 50)
+                                    if rates is None or len(rates) <= 5:
+                                        rates = _mt5_reseed.copy_rates_from_pos(symbol + 'm', _mt5_reseed.TIMEFRAME_M5, 0, 50)
                                     if rates is not None and len(rates) > 5:
                                         commodity_market_data[symbol]['price_history'] = [float(r[4]) for r in rates]
                                 except Exception:
@@ -10301,23 +10500,23 @@ def live_market_data_updater():
 # Commodity Market Sentiment Data
 # Tracks price trends, volatility, and trading signals
 commodity_market_data = {
-    # ===== EXNESS / MT5 MARKET DATA DEFAULTS =====
-    'EURUSDm': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.65},
-    'USDJPYm': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.62},
-    'XAUUSDm': {'price': 2076.44, 'change': 0.68, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Gold strong uptrend - excellent profitability', 'profitability_score': 0.88},
-    'BTCUSDm': {'price': 43560.00, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Bitcoin volatile with strong momentum', 'profitability_score': 0.85},
-    'ETHUSDm': {'price': 2280.45, 'change': 1.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Ethereum strong uptrend - excellent opportunity', 'profitability_score': 0.82},
-    'AAPLm': {'price': 215.40, 'change': 0.84, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Steady technology momentum with manageable volatility', 'profitability_score': 0.66},
-    'AMDm': {'price': 182.30, 'change': 1.28, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Semiconductor strength but watch volatility around news', 'profitability_score': 0.71},
-    'MSFTm': {'price': 428.15, 'change': 0.61, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Large-cap trend remains constructive', 'profitability_score': 0.68},
-    'NVDAm': {'price': 932.75, 'change': 1.96, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong trend but keep tighter risk controls', 'profitability_score': 0.79},
-    'JPMm': {'price': 198.60, 'change': 0.39, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Stable financial sector momentum', 'profitability_score': 0.61},
-    'BACm': {'price': 41.80, 'change': 0.22, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Lower-priced financial stock with moderate momentum', 'profitability_score': 0.58},
-    'WFCm': {'price': 58.40, 'change': 0.31, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Financial sector remains constructive', 'profitability_score': 0.57},
-    'GOOGLm': {'price': 176.20, 'change': 0.73, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Large-cap tech trend remains favorable', 'profitability_score': 0.67},
-    'METAm': {'price': 498.35, 'change': 1.12, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Growth momentum is strong but reactive to earnings', 'profitability_score': 0.72},
-    'ORCLm': {'price': 144.70, 'change': 0.48, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Cloud and enterprise trend remains positive', 'profitability_score': 0.62},
-    'TSMm': {'price': 162.25, 'change': 0.95, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Semiconductor leader with strong directional bias', 'profitability_score': 0.69},
+    # ===== EXNESS STANDARD ACCOUNT MARKET DATA DEFAULTS (no 'm' suffix) =====
+    'EURUSD': {'price': 1.0890, 'change': 0.42, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.65},
+    'USDJPY': {'price': 149.50, 'change': 0.52, 'trend': 'UP', 'volatility': 'Low', 'signal': '🟢 BUY', 'recommendation': 'Positive momentum - good entry point', 'profitability_score': 0.62},
+    'XAUUSD': {'price': 2076.44, 'change': 0.68, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Gold strong uptrend - excellent profitability', 'profitability_score': 0.88},
+    'BTCUSD': {'price': 43560.00, 'change': 2.15, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Bitcoin volatile with strong momentum', 'profitability_score': 0.85},
+    'ETHUSD': {'price': 2280.45, 'change': 1.75, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Ethereum strong uptrend - excellent opportunity', 'profitability_score': 0.82},
+    'AAPL': {'price': 215.40, 'change': 0.84, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Steady technology momentum with manageable volatility', 'profitability_score': 0.66},
+    'AMD': {'price': 182.30, 'change': 1.28, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Semiconductor strength but watch volatility around news', 'profitability_score': 0.71},
+    'MSFT': {'price': 428.15, 'change': 0.61, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Large-cap trend remains constructive', 'profitability_score': 0.68},
+    'NVDA': {'price': 932.75, 'change': 1.96, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 STRONG BUY', 'recommendation': 'Strong trend but keep tighter risk controls', 'profitability_score': 0.79},
+    'JPM': {'price': 198.60, 'change': 0.39, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Stable financial sector momentum', 'profitability_score': 0.61},
+    'BAC': {'price': 41.80, 'change': 0.22, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Lower-priced financial stock with moderate momentum', 'profitability_score': 0.58},
+    'WFC': {'price': 58.40, 'change': 0.31, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Financial sector remains constructive', 'profitability_score': 0.57},
+    'GOOGL': {'price': 176.20, 'change': 0.73, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Large-cap tech trend remains favorable', 'profitability_score': 0.67},
+    'META': {'price': 498.35, 'change': 1.12, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Growth momentum is strong but reactive to earnings', 'profitability_score': 0.72},
+    'ORCL': {'price': 144.70, 'change': 0.48, 'trend': 'UP', 'volatility': 'Medium', 'signal': '🟢 BUY', 'recommendation': 'Cloud and enterprise trend remains positive', 'profitability_score': 0.62},
+    'TSM': {'price': 162.25, 'change': 0.95, 'trend': 'UP', 'volatility': 'High', 'signal': '🟢 BUY', 'recommendation': 'Semiconductor leader with strong directional bias', 'profitability_score': 0.69},
 }
 
 # Store active bots configuration
