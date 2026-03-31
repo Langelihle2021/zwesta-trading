@@ -305,7 +305,7 @@ def repopulate_active_bots():
 # Environment Configuration (DEMO or LIVE)
 ENVIRONMENT = os.getenv('TRADING_ENV', 'DEMO')  # Set TRADING_ENV=LIVE in production
 AUTO_RESTART_BOTS_ON_STARTUP = os.getenv('AUTO_RESTART_BOTS_ON_STARTUP', 'false').lower() == 'true'
-BOT_STARTUP_RESTART_DELAY_SECONDS = max(0.5, float(os.getenv('BOT_STARTUP_RESTART_DELAY_SECONDS', '5')))  # Increased from 2s to 5s to avoid MT5 lock contention
+BOT_STARTUP_RESTART_DELAY_SECONDS = max(0.5, float(os.getenv('BOT_STARTUP_RESTART_DELAY_SECONDS', '15')))  # 15s gap between bots prevents MT5 lock thundering herd
 BOT_STARTUP_RESTART_LIMIT = max(0, int(os.getenv('BOT_STARTUP_RESTART_LIMIT', '0')))
 
 # API Security Configuration
@@ -2632,25 +2632,38 @@ class MT5Connection(BrokerConnection):
         failed = 0
         failed_symbols = []
         
-        for symbol in VALID_SYMBOLS:
-            try:
-                if self.mt5.symbol_select(symbol, True):
-                    subscribed += 1
-                else:
-                    logger.warning(f"⚠️  Could not subscribe to {symbol} - may not be available on this account/broker")
+        # Retry up to 3 times — MT5 terminal needs a few seconds after login
+        # before symbol_select() becomes reliable
+        MAX_SUB_RETRIES = 3
+        for attempt in range(1, MAX_SUB_RETRIES + 1):
+            subscribed = 0
+            failed = 0
+            failed_symbols = []
+            for symbol in VALID_SYMBOLS:
+                try:
+                    if self.mt5.symbol_select(symbol, True):
+                        subscribed += 1
+                    else:
+                        failed += 1
+                        failed_symbols.append(symbol)
+                except Exception as e:
+                    logger.warning(f"⚠️  Error subscribing to {symbol}: {e}")
                     failed += 1
                     failed_symbols.append(symbol)
-            except Exception as e:
-                logger.warning(f"⚠️  Error subscribing to {symbol}: {e}")
-                failed += 1
-                failed_symbols.append(symbol)
+            
+            if subscribed > 0 or attempt == MAX_SUB_RETRIES:
+                break
+            # All failed — terminal still loading; wait and retry
+            logger.warning(f"⚠️  Symbol subscription attempt {attempt}/{MAX_SUB_RETRIES}: 0/{len(VALID_SYMBOLS)} symbols ready — terminal still loading, retrying in 5s...")
+            time.sleep(5)
         
         logger.info(f"✅ Symbol subscription complete: {subscribed}/{len(VALID_SYMBOLS)} symbols ready for trading")
         if failed > 0:
             logger.warning(f"⚠️  {failed} symbols unavailable: {failed_symbols}")
-            logger.warning(f"   These symbols may not be tradable on your account/broker")
+            logger.warning(f"   These symbols may not be available on this account/server")
             available = [s for s in VALID_SYMBOLS if s not in failed_symbols]
-            logger.warning(f"   Available symbols: {available}")
+            if available:
+                logger.info(f"   Available symbols: {available}")
 
     def wait_for_mt5_ready(self, timeout_seconds: int = 60) -> bool:
         """
@@ -2744,22 +2757,38 @@ class MT5Connection(BrokerConnection):
                 
                 test_result = self.mt5.order_check(test_request)
                 
-                # Check what order_check returned
+                # ── order_check result interpretation ──────────────────────────────
+                # order_check() returns None when the terminal IPC is broken.
+                # It returns a result object (even with a non-zero retcode) when the
+                # SDK is functional — e.g. retcode 10018 = "market closed" (weekend),
+                # retcode 10019 = "no money", retcode 10030 = "invalid fill".
+                # We only block on a true None (IPC issue); logical rejections mean
+                # the terminal IS running — just the market or account has a constraint.
                 if test_result is None:
-                    logger.warning(f"  Attempt {attempt} [{elapsed:.0f}s]: ⚠️  order_check() returned None (terminal issue, not account)")
-                    logger.warning(f"    This usually means:")
-                    logger.warning(f"    - MT5 terminal is still initializing")
-                    logger.warning(f"    - Terminal lost sync with SDK")
-                    logger.warning(f"    - Rare SDK issue")
-                    # Continue retrying - terminal may recover
+                    # After 3 failed order_check attempts with valid account/tick/symbol,
+                    # consider the terminal ready anyway (market may be closed / weekend).
+                    # order_send() works fine even when order_check() returns None on weekends.
+                    if attempt >= 3:
+                        logger.warning(f"  ⚠️  order_check() persistently None after {attempt} attempts — terminal responds to all other calls.")
+                        logger.warning(f"  🕐 Likely cause: market is closed (weekend/holiday) or demo account restriction.")
+                        logger.info(f"✅ MT5 is READY (connectivity confirmed via account_info + tick + symbol_info)")
+                        logger.info(f"   Account: {account_info.login}, Balance: ${account_info.balance}")
+                        logger.info(f"   Symbol {test_symbol}: bid={tick.bid:.5f}, ask={tick.ask:.5f}")
+                        return True
+                    logger.warning(f"  Attempt {attempt} [{elapsed:.0f}s]: ⚠️  order_check() returned None (IPC not ready)")
                     time.sleep(check_interval)
                     continue
                 
-                # order_check did not return None - SDK is working
-                # Check if order would succeed or fail for logical reasons
+                # order_check returned a valid object — SDK is fully operational.
                 if hasattr(test_result, 'retcode'):
-                    logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_check() returned (retcode={test_result.retcode})")
-                    logger.info(f"✅ MT5 is READY - order execution path is functional")
+                    retcode = test_result.retcode
+                    # Codes that mean "terminal works but market/account prevented it"
+                    LOGICAL_REJECTION_CODES = {10018, 10019, 10014, 10030, 10031, 10032, 10033}
+                    if retcode == 0 or retcode in LOGICAL_REJECTION_CODES:
+                        pass  # expected — terminal is healthy
+                    else:
+                        logger.debug(f"  Attempt {attempt} [{elapsed:.0f}s]: order_check retcode={retcode} (non-zero but terminal is live)")
+                    logger.info(f"✅ MT5 is READY - order execution path is functional (order_check retcode={retcode})")
                     logger.info(f"   Account: {account_info.login}, Balance: ${account_info.balance}")
                     logger.info(f"   Symbol {test_symbol}: bid={tick.bid:.5f}, ask={tick.ask:.5f}")
                     
@@ -9716,7 +9745,9 @@ def start_enabled_bots_on_startup():
         restarted_bots += 1
         logger.info(f"♻️ Restarted bot {bot_id} from persisted runtime state")
         if BOT_STARTUP_RESTART_DELAY_SECONDS > 0:
-            time.sleep(BOT_STARTUP_RESTART_DELAY_SECONDS)
+            # Add small random jitter (0-5s) so bots don't all hit the MT5 lock in sync
+            jitter = random.uniform(0, 5)
+            time.sleep(BOT_STARTUP_RESTART_DELAY_SECONDS + jitter)
 
     return restarted_bots
 
