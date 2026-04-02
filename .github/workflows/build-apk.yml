@@ -1,33 +1,3 @@
-                  - name: Manually install Flutter 3.41.4
-                    run: |
-                      wget https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.41.4-stable.tar.xz
-                      tar xf flutter_linux_3.41.4-stable.tar.xz
-                      echo "$GITHUB_WORKSPACE/flutter/bin" >> $GITHUB_PATH
-                      export PATH="$GITHUB_WORKSPACE/flutter/bin:$PATH"
-                      flutter --version
-                      dart --version
-            - name: Force PATH update and print which flutter/dart
-              run: |
-                export PATH="$HOME/.pub-cache/bin:$PATH"
-                echo $PATH
-                which flutter
-                which dart
-                flutter --version
-                dart --version
-      - name: Remove preinstalled Flutter/Dart (if any)
-        run: |
-          sudo rm -rf /opt/hostedtoolcache/flutter
-          sudo rm -rf /usr/local/bin/flutter
-          sudo rm -rf /usr/local/bin/dart
-          which flutter || true
-          which dart || true
-
-      - name: List all flutter/dart binaries and print PATH
-        run: |
-          find / -type f -name flutter 2>/dev/null || true
-          find / -type f -name dart 2>/dev/null || true
-          echo $PATH
-
 name: Build APK Release
 
 on:
@@ -46,8 +16,8 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '11'
+          distribution: 'temurin'
+          java-version: '17'
       
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -60,9 +30,11 @@ jobs:
           flutter --version
           dart --version
       
-      - name: Clear dependency cache
+      - name: Clear all caches
         run: |
           rm -f pubspec.lock
+          rm -rf ~/.gradle
+          rm -rf android/.gradle
           flutter clean
           flutter pub cache clean --all
       
@@ -70,7 +42,7 @@ jobs:
         run: flutter pub get
       
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --verbose
       
       - name: Get commit info
         id: commit
@@ -139,6 +111,7 @@ jobs:
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zwesta-trading-apk-build-${{ github.run_number }}
-          path: build/app/outputs/flutter-app-release.apk
+          name: zwesta-trading-apk-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 60
+
