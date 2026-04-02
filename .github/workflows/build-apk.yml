@@ -39,10 +39,10 @@ jobs:
           flutter pub cache clean --all
       
       - name: Get dependencies
-        run: flutter pub get
+        run: 'flutter pub get'
       
       - name: Build APK
-        run: flutter build apk --release --verbose
+        run: 'flutter build apk --release --verbose'
       
       - name: Get commit info
         id: commit
@@ -56,54 +56,7 @@ jobs:
         with:
           files: build/app/outputs/flutter-apk/app-release.apk
           tag_name: apk-${{ github.run_number }}
-          body: |
-            ## Zwesta Trading System - Production APK
-            
-            **Build #:** ${{ github.run_number }}
-            **Commit SHA:** ${{ steps.commit.outputs.short_sha }}
-            **Author:** ${{ steps.commit.outputs.author }}
-            **Branch:** main
-            
-            ### What's Included
-            ✅ Multi-tenant data isolation system
-            ✅ User-specific session authentication
-            ✅ Referral code generation (8-char unique codes)
-            ✅ Real backend API integration
-            ✅ Improved UI with styled logo container
-            ✅ Referral code storage and display
-            ✅ App title: "ZWESTA TRADING SYSTEM"
-            
-            ### Installation Instructions
-            1. Download `flutter-app-release.apk` from the files below
-            2. On your Android device, go to **Settings > Security > Unknown Sources** (enable)
-            3. Open the APK file and install
-            4. Launch the app
-            
-            ### First Time Setup
-            1. Click **Register** at login
-            2. Fill in: Name, Email, Username, Password
-            3. Click **Register** → You'll see your unique 8-character referral code
-            4. Save your code to share with others
-            5. Click **Login** to access the dashboard
-            
-            ### Key Features
-            - **Referral System:** Get 5% commission from user profits
-            - **Multi-Tenant:** Each user sees only their own data
-            - **Session Security:** All API calls require valid session token
-            - **Cross-User Protection:** 403 error if trying to access other users' data
-            
-            ### Backend Requirements
-            The app requires the Zwesta Trading backend running on port 9000:
-            ```bash
-            python multi_broker_backend_updated.py
-            ```
-            
-            Configure API URL in: `lib/utils/environment_config.dart`
-            
-            ### Support
-            - Backend must be running and accessible
-            - Ensure `environment_config.dart` points to correct backend URL
-            - Check app logs for any connection errors
+          body: Build ${{ github.run_number }} - Zwesta Trading System APK
           makeLatest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
