@@ -1,16 +1,17 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class PxbtSessionManager extends StatefulWidget {
-  final VoidCallback onStatusChanged;
 
   const PxbtSessionManager({
-    Key? key,
-    required this.onStatusChanged,
+    required this.onStatusChanged, Key? key,
   }) : super(key: key);
+  final VoidCallback onStatusChanged;
 
   @override
   State<PxbtSessionManager> createState() => _PxbtSessionManagerState();
@@ -161,9 +162,9 @@ class _PxbtSessionManagerState extends State<PxbtSessionManager> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
+                    const Text(
                       'PXBT Connection',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -171,7 +172,7 @@ class _PxbtSessionManagerState extends State<PxbtSessionManager> {
                   ],
                 ),
                 if (_isChecking)
-                  SizedBox(
+                  const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
@@ -305,7 +306,7 @@ class _PxbtSessionManagerState extends State<PxbtSessionManager> {
                           ),
                         )
                         else if (_isLoading)
-                          SizedBox(
+                          const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(

@@ -1,8 +1,9 @@
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:intl/intl.dart';
-import '../models/statement.dart';
+
 import '../models/account.dart';
+import '../models/statement.dart';
 
 class PdfExportService {
   static Future<pw.Document> generateStatementPdf(
@@ -166,8 +167,7 @@ class PdfExportService {
     Statement statement,
     DateFormat dateFormat,
     NumberFormat currencyFormat,
-  ) {
-    return pw.Table(
+  ) => pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey300,
         width: 0.5,
@@ -198,13 +198,11 @@ class PdfExportService {
         ),
       ],
     );
-  }
 
   static pw.Widget _buildSummaryTable(
     Statement statement,
     NumberFormat currencyFormat,
-  ) {
-    return pw.Table(
+  ) => pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey300,
         width: 0.5,
@@ -235,13 +233,11 @@ class PdfExportService {
         ),
       ],
     );
-  }
 
   static pw.Widget _buildPerformanceTable(
     Statement statement,
     NumberFormat currencyFormat,
-  ) {
-    return pw.Table(
+  ) => pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey300,
         width: 0.5,
@@ -299,13 +295,11 @@ class PdfExportService {
         ),
       ],
     );
-  }
 
   static pw.Widget _buildTradeTable(
     Statement statement,
     NumberFormat currencyFormat,
-  ) {
-    return pw.Table(
+  ) => pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey300,
         width: 0.5,
@@ -338,7 +332,7 @@ class PdfExportService {
             children: [
               _buildTableCell(trade.symbol),
               _buildTableCell(trade.type.toUpperCase()),
-              _buildTableCell('${trade.quantity.toStringAsFixed(0)}'),
+              _buildTableCell(trade.quantity.toStringAsFixed(0)),
               _buildTableCell(trade.entryPrice.toStringAsFixed(4)),
               _buildTableCell(trade.exitPrice.toStringAsFixed(4)),
               pw.Container(
@@ -357,13 +351,11 @@ class PdfExportService {
               ),
             ],
           );
-        }).toList(),
+        }),
       ],
     );
-  }
 
-  static pw.Widget _buildTableCell(String text, {bool isBold = false}) {
-    return pw.Container(
+  static pw.Widget _buildTableCell(String text, {bool isBold = false}) => pw.Container(
       padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       child: pw.Text(
         text,
@@ -374,5 +366,4 @@ class PdfExportService {
         ),
       ),
     );
-  }
 }

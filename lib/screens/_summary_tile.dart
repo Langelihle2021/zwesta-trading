@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 
 class _SummaryTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
 
   const _SummaryTile({
     required this.label,
@@ -13,10 +9,13 @@ class _SummaryTile extends StatelessWidget {
     required this.color,
     Key? key,
   }) : super(key: key);
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
+  Widget build(BuildContext context) => Column(
       children: [
         CircleAvatar(
           backgroundColor: color.withOpacity(0.15),
@@ -33,5 +32,4 @@ class _SummaryTile extends StatelessWidget {
         ),
       ],
     );
-  }
 }

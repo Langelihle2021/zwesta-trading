@@ -1,44 +1,45 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:fl_chart/fl_chart.dart';
-import '../l10n/app_localizations.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
-import 'package:http/http.dart' as http;
-import '../services/auth_service.dart';
-import '../services/trading_service.dart';
-import '../services/bot_service.dart';
 
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../l10n/app_localizations.dart';
 import '../providers/fallback_status_provider.dart';
+import '../services/auth_service.dart';
+import '../services/bot_service.dart';
+import '../services/trading_service.dart';
 import '../utils/environment_config.dart';
-import 'trades_screen.dart';
-import 'trade_analysis_screen.dart';
-import 'account_management_screen.dart';
-import 'bot_dashboard_screen.dart';
-import 'bot_configuration_screen.dart';
-import 'broker_integration_screen.dart';
-import 'financials_screen.dart';
-import 'rentals_and_features_screen.dart';
-import 'multi_account_management_screen.dart';
-import 'consolidated_reports_screen.dart';
-import 'referral_dashboard_screen.dart';
-import 'admin_dashboard_screen.dart';
-import 'commission_config_screen.dart';
-import 'multi_broker_management_screen.dart';
-import 'enhanced_dashboard_screen.dart';
-import 'commission_dashboard_screen.dart';
-import 'broker_analytics_dashboard.dart';
-import 'oanda_withdrawal_screen.dart';
-import 'fxcm_withdrawal_screen.dart';
-import 'binance_withdrawal_screen.dart';
-import 'admin_withdrawal_verification_screen.dart';
-import 'user_wallet_screen.dart';
-import 'unified_broker_dashboard_screen.dart';
-import 'crypto_strategies_screen.dart';
 import '../widgets/logo_widget.dart';
+import 'account_management_screen.dart';
+import 'admin_dashboard_screen.dart';
+import 'admin_withdrawal_verification_screen.dart';
+import 'binance_withdrawal_screen.dart';
+import 'bot_configuration_screen.dart';
+import 'bot_dashboard_screen.dart';
+import 'broker_analytics_dashboard.dart';
+import 'broker_integration_screen.dart';
+import 'commission_config_screen.dart';
+import 'commission_dashboard_screen.dart';
+import 'consolidated_reports_screen.dart';
+import 'crypto_strategies_screen.dart';
+import 'enhanced_dashboard_screen.dart';
+import 'financials_screen.dart';
+import 'fxcm_withdrawal_screen.dart';
+import 'multi_account_management_screen.dart';
+import 'multi_broker_management_screen.dart';
+import 'oanda_withdrawal_screen.dart';
+import 'referral_dashboard_screen.dart';
+import 'rentals_and_features_screen.dart';
+import 'trade_analysis_screen.dart';
+import 'trades_screen.dart';
+import 'unified_broker_dashboard_screen.dart';
+import 'user_wallet_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -56,11 +57,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Convert currency code to symbol (e.g., ZAR → R, USD → $, EUR → €)
   String _currencySymbol(String code) {
     const symbols = {
-      'USD': '\$', 'EUR': '€', 'GBP': '£', 'ZAR': 'R',
-      'JPY': '¥', 'CHF': 'CHF', 'AUD': 'A\$', 'CAD': 'C\$',
-      'NZD': 'NZ\$', 'SGD': 'S\$', 'HKD': 'HK\$', 'CNY': '¥',
-      'INR': '₹', 'BRL': 'R\$', 'KRW': '₩', 'TRY': '₺',
-      'MXN': 'MX\$', 'PLN': 'zł', 'SEK': 'kr', 'NOK': 'kr',
+      'USD': r'$', 'EUR': '€', 'GBP': '£', 'ZAR': 'R',
+      'JPY': '¥', 'CHF': 'CHF', 'AUD': r'A$', 'CAD': r'C$',
+      'NZD': r'NZ$', 'SGD': r'S$', 'HKD': r'HK$', 'CNY': '¥',
+      'INR': '₹', 'BRL': r'R$', 'KRW': '₩', 'TRY': '₺',
+      'MXN': r'MX$', 'PLN': 'zł', 'SEK': 'kr', 'NOK': 'kr',
       'NGN': '₦', 'KES': 'KSh', 'GHS': 'GH₵', 'USDT': 'USDT',
     };
     return symbols[code.toUpperCase()] ?? code;
@@ -77,7 +78,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Balance tracking for increases/decreases
   // _sessionStartBalances is set ONCE on first fetch and never updated,
   // so balanceChange = currentBalance - sessionStart = total change this session.
-  Map<String, double> _sessionStartBalances = {};
+  final Map<String, double> _sessionStartBalances = {};
   Map<String, double> _balanceChanges = {};
 
   // Withdrawal data
@@ -122,8 +123,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final data = jsonDecode(response.body);
         if (data['success'] == true && mounted) {
           // Calculate balance changes vs session start (set once, never overwritten)
-          Map<String, double> newChanges = {};
-          for (var account in (data['accounts'] ?? [])) {
+          final newChanges = <String, double>{};
+          for (final account in (data['accounts'] ?? [])) {
             final key = '${account['broker']}_${account['accountNumber']}';
             final currentBalance = (account['balance'] as num?)?.toDouble() ?? 0;
             // Only record the starting balance the very first time we see this account
@@ -244,6 +245,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _pushScreen(Widget screen) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
+
+  void _openFinancials() {
+    final tradingService = context.read<TradingService>();
+    if (tradingService.primaryAccount != null) {
+      _pushScreen(FinancialsScreen(account: tradingService.primaryAccount!));
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No account available for financial reports')),
+    );
+  }
+
+  void _openReferralDashboard() {
+    final userId = context.read<AuthService>().currentUser?.id ?? '0';
+    _pushScreen(ReferralDashboardScreen(userId: userId));
+  }
+
   /// Get the current screen based on selected index
   Widget _getScreenForIndex(int index) {
     switch (index) {
@@ -254,7 +276,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case 2:
         return const AccountManagementScreen();
       case 3:
-        return const BotDashboardScreen();
+        return const BotDashboardScreen(embedded: true);
+      case 4:
+        return _buildFeatureHubTab();
       default:
         return _buildDashboardTab();
     }
@@ -288,7 +312,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final balance = (connected['balance'] as num?)?.toDouble() ?? 0.0;
           final equity = (connected['equity'] as num?)?.toDouble() ?? 0.0;
           final currency = connected['currency'] ?? 'USD';
-          final key = '${broker}_${accountNum}';
+          final key = '${broker}_$accountNum';
           final balanceChange = _balanceChanges[key] ?? 0.0;
           final isIncreasing = balanceChange >= 0;
           final accountWithdrawals = _recentWithdrawals
@@ -303,7 +327,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  isIncreasing ? const Color(0xFF1B5E20).withOpacity(0.3) : const Color(0xFF4A235A).withOpacity(0.3),
+                  if (isIncreasing) const Color(0xFF1B5E20).withOpacity(0.3) else const Color(0xFF4A235A).withOpacity(0.3),
                   Colors.transparent,
                 ],
               ),
@@ -473,13 +497,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ],
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                 ],
               ),
             ),
           );
-        }).toList(),
+        }),
       ],
     );
   }
@@ -535,7 +559,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ...activeBots.take(5).map((bot) {
             final botId = bot['botId']?.toString() ?? 'Unknown Bot';
             final strategy = bot['strategy']?.toString() ?? 'Unknown';
-            final profit = (double.tryParse(bot['totalProfit']?.toString() ?? '0') ?? 0);
+            final profit = double.tryParse(bot['totalProfit']?.toString() ?? '0') ?? 0;
             final isProfitable = profit > 0;
             
             return Padding(
@@ -593,8 +617,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         // Start button
                         Expanded(
                           child: Consumer<BotService>(
-                            builder: (context, botService, _) {
-                              return InkWell(
+                            builder: (context, botService, _) => InkWell(
                                 onTap: () async {
                                   try {
                                     await botService.startBotTrading(botId);
@@ -624,8 +647,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     ],
                                   ),
                                 ),
-                              );
-                            },
+                              ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -731,15 +753,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );
   }
 
   // ── GLASS CARD HELPER ──
-  Widget _glassCard({required Widget child, LinearGradient? gradient}) {
-    return Container(
+  Widget _glassCard({required Widget child, LinearGradient? gradient}) => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: gradient,
@@ -756,11 +777,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: child,
     );
-  }
 
   /// Build the dashboard tab - Modern premium layout
-  Widget _buildDashboardTab() {
-    return Container(
+  Widget _buildDashboardTab() => Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -827,11 +846,175 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
-  }
+
+  Widget _buildFeatureHubTab() => Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0A0E21), Color(0xFF151A30), Color(0xFF0A0E21)],
+        ),
+      ),
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _glassCard(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF1A237E), Color(0xFF283593), Color(0xFF006064)],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Feature Hub',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Mobile now exposes the same major operating areas as the web flow: reports, commissions, wallet, broker tools, portfolio views, and automation controls.',
+                    style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _buildFeatureSection(
+              title: 'Reports & Money',
+              subtitle: 'Reporting, earnings, wallet, and financial tracking',
+              actions: [
+                _FeatureAction('Reports', Icons.assessment, const Color(0xFFFF6E40), () => _pushScreen(const ConsolidatedReportsScreen())),
+                _FeatureAction('Financials', Icons.attach_money, const Color(0xFF26C6DA), _openFinancials),
+                _FeatureAction('Commissions', Icons.monetization_on, const Color(0xFF69F0AE), () => _pushScreen(const CommissionDashboardScreen())),
+                _FeatureAction('Wallet', Icons.account_balance_wallet, const Color(0xFFF0B90B), () => _pushScreen(const UserWalletScreen())),
+                _FeatureAction('Referrals', Icons.group_add, const Color(0xFF66BB6A), _openReferralDashboard),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildFeatureSection(
+              title: 'Broker & Portfolio',
+              subtitle: 'Connected accounts, analytics, portfolio, and broker operations',
+              actions: [
+                _FeatureAction('Portfolio', Icons.dashboard_customize, const Color(0xFF5C6BC0), () => _pushScreen(const UnifiedBrokerDashboardScreen())),
+                _FeatureAction('Broker Setup', Icons.account_tree, const Color(0xFF7C4DFF), () => _pushScreen(const BrokerIntegrationScreen())),
+                _FeatureAction('Multi-Broker', Icons.business_center, const Color(0xFFB388FF), () => _pushScreen(const MultiBrokerManagementScreen())),
+                _FeatureAction('Accounts', Icons.people, const Color(0xFF00E5FF), () => _pushScreen(const MultiAccountManagementScreen())),
+                _FeatureAction('Analytics', Icons.speed, const Color(0xFFFFD600), () => _pushScreen(const BrokerAnalyticsDashboard())),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildFeatureSection(
+              title: 'Automation & Trading',
+              subtitle: 'Bot creation, monitoring, strategy tools, and analysis',
+              actions: [
+                _FeatureAction('Create Bot', Icons.add_circle, const Color(0xFF00C853), () => _pushScreen(const BotConfigurationScreen())),
+                _FeatureAction('Bot Monitor', Icons.smart_toy_outlined, const Color(0xFFFFB74D), () => _pushScreen(const BotDashboardScreen())),
+                _FeatureAction('Trade Analysis', Icons.analytics_outlined, const Color(0xFF00E5FF), () => _pushScreen(const TradeAnalysisScreen())),
+                _FeatureAction('Crypto', Icons.currency_bitcoin, const Color(0xFFF3BA2F), () => _pushScreen(const CryptoStrategiesScreen())),
+                _FeatureAction('Trading View', Icons.analytics, const Color(0xFF7C4DFF), () => _pushScreen(const EnhancedDashboardScreen())),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildFeatureSection(
+              title: 'Operations',
+              subtitle: 'Features, payouts, and admin-facing operations screens',
+              actions: [
+                _FeatureAction('Rentals', Icons.card_giftcard, Colors.orangeAccent, () => _pushScreen(const RentalsAndFeaturesScreen())),
+                _FeatureAction('OANDA Out', Icons.account_balance_wallet, const Color(0xFF4CAF50), () => _pushScreen(const OandaWithdrawalScreen())),
+                _FeatureAction('FXCM Out', Icons.account_balance_wallet, const Color(0xFF7C4DFF), () => _pushScreen(const FxcmWithdrawalScreen())),
+                _FeatureAction('Binance Out', Icons.currency_bitcoin, const Color(0xFFF0B90B), () => _pushScreen(const BinanceWithdrawalScreen())),
+                _FeatureAction('Verify', Icons.admin_panel_settings, const Color(0xFFE74C3C), () => _pushScreen(const AdminWithdrawalVerificationScreen())),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+  Widget _buildFeatureSection({
+    required String title,
+    required String subtitle,
+    required List<_FeatureAction> actions,
+  }) => _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
+          ),
+          const SizedBox(height: 14),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.45,
+            ),
+            itemCount: actions.length,
+            itemBuilder: (context, index) {
+              final action = actions[index];
+              return InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: action.onTap,
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        action.color.withOpacity(0.22),
+                        action.color.withOpacity(0.08),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: action.color.withOpacity(0.28)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: action.color.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(action.icon, color: action.color, size: 22),
+                      ),
+                      Text(
+                        action.label,
+                        style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
 
   // ── PREMIUM WELCOME CARD ──
-  Widget _buildPremiumWelcomeCard() {
-    return Consumer<AuthService>(
+  Widget _buildPremiumWelcomeCard() => Consumer<AuthService>(
       builder: (context, authService, _) {
         final name = authService.currentUser?.firstName ?? 'Trader';
         final hour = DateTime.now().hour;
@@ -851,9 +1034,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Container(
                     width: 50,
                     height: 50,
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: const LinearGradient(
+                      gradient: LinearGradient(
                         colors: [Color(0xFF00E5FF), Color(0xFF7C4DFF)],
                       ),
                     ),
@@ -981,15 +1164,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500, letterSpacing: 1.2),
                         ),
                         const SizedBox(height: 4),
-                        _brokerBalancesLoading && _totalBrokerBalance == 0
-                            ? Row(
+                        if (_brokerBalancesLoading && _totalBrokerBalance == 0) Row(
                                 children: [
-                                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF00E5FF))),
+                                  const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF00E5FF))),
                                   const SizedBox(width: 10),
                                   Text('Loading...', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 14)),
                                 ],
-                              )
-                            : Text(
+                              ) else Text(
                                 '\$${filteredTotal.toStringAsFixed(2)}',
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
@@ -1015,7 +1196,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
-  }
 
   // ── BROKER ACCOUNTS CARD ──
   Widget _buildBrokerAccountsCard() {
@@ -1142,8 +1322,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildStatPill(IconData icon, String value, String label, Color color) {
-    return _glassCard(
+  Widget _buildStatPill(IconData icon, String value, String label, Color color) => _glassCard(
       child: Column(
         children: [
           Container(
@@ -1171,7 +1350,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
-  }
 
   // ── PROFIT OVERVIEW ──
   Widget _buildProfitOverviewCard() {
@@ -1313,7 +1491,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 sections: entries.asMap().entries.map((e) {
                   final i = e.key;
                   final pair = e.value;
-                  final pct = (pair.value / total * 100);
+                  final pct = pair.value / total * 100;
                   final color = chartColors[i % chartColors.length];
                   return PieChartSectionData(
                     value: pair.value,
@@ -1439,19 +1617,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _chartLegendItem(Color color, String label, int count) {
-    return Row(
+  Widget _chartLegendItem(Color color, String label, int count) => Row(
       children: [
         Container(width: 12, height: 12, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
         const SizedBox(width: 8),
         Text('$label ($count)', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12)),
       ],
     );
-  }
 
   /// Build individual metric card for account dashboard
-  Widget _buildMetricCard(String label, String value, Color valueColor, Color accentColor) {
-    return Container(
+  Widget _buildMetricCard(String label, String value, Color valueColor, Color accentColor) => Container(
       decoration: BoxDecoration(
         border: Border.all(color: accentColor.withOpacity(0.3), width: 1.5),
         borderRadius: BorderRadius.circular(12),
@@ -1491,14 +1666,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
-  }
 
   // ── PROFIT TREND LINE CHART ──
   Widget _buildProfitLineChart() {
     // Gather profit per bot as data points
     final profitPoints = <FlSpot>[];
     double cumulative = 0;
-    for (int i = 0; i < _realBotsList.length; i++) {
+    for (var i = 0; i < _realBotsList.length; i++) {
       final profit = double.tryParse(_realBotsList[i]['profit']?.toString() ?? '0') ?? 0;
       cumulative += profit;
       profitPoints.add(FlSpot(i.toDouble(), cumulative));
@@ -1545,7 +1719,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   drawVerticalLine: false,
                   horizontalInterval: range > 0 ? range / 4 : 5,
                   getDrawingHorizontalLine: (value) =>
-                      FlLine(color: Colors.white10, strokeWidth: 1),
+                      const FlLine(color: Colors.white10, strokeWidth: 1),
                 ),
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
@@ -1610,7 +1784,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         end: Alignment.bottomCenter,
                         colors: [
                           const Color(0xFF00E5FF).withOpacity(0.25),
-                          const Color(0xFF00E5FF).withOpacity(0.0),
+                          const Color(0xFF00E5FF).withOpacity(0),
                         ],
                       ),
                     ),
@@ -1618,18 +1792,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((spot) {
-                        return LineTooltipItem(
+                    getTooltipItems: (touchedSpots) => touchedSpots.map((spot) => LineTooltipItem(
                           '\$${spot.y.toStringAsFixed(2)}',
                           GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
-                        );
-                      }).toList();
-                    },
+                        )).toList(),
                   ),
                 ),
               ),
@@ -1641,8 +1811,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ── TRADE ANALYSIS PREVIEW ──
-  Widget _buildTradeAnalysisPreview() {
-    return GestureDetector(
+  Widget _buildTradeAnalysisPreview() => GestureDetector(
       onTap: () {
         Navigator.push(context, MaterialPageRoute(builder: (_) => const TradeAnalysisScreen()));
       },
@@ -1684,7 +1853,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
-  }
 
   // ── TOP PAIRS ──
   Widget _buildTopPairsCard() {
@@ -1901,43 +2069,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'label': 'Create\nBot',
         'icon': Icons.add_circle,
         'color': const Color(0xFF00C853),
-        'route': '/bot-configuration',
-        'screen': const BotConfigurationScreen(),
+        'onTap': () => _pushScreen(const BotConfigurationScreen()),
       },
       {
         'label': 'Bot\nMonitor',
         'icon': Icons.trending_up,
         'color': const Color(0xFFFFB74D),
-        'route': '/bot-dashboard',
-        'screen': const BotDashboardScreen(),
+        'onTap': () => _pushScreen(const BotDashboardScreen()),
       },
       {
         'label': 'Trade\nAnalysis',
-        'icon': Icons.bar_chart,
+        'icon': Icons.analytics_outlined,
         'color': const Color(0xFF00E5FF),
-        'route': '/trade-analysis',
-        'screen': const TradeAnalysisScreen(),
+        'onTap': () => _pushScreen(const TradeAnalysisScreen()),
       },
       {
         'label': 'Broker\nSetup',
-        'icon': Icons.settings,
+        'icon': Icons.account_tree,
         'color': const Color(0xFF7C4DFF),
-        'route': '/broker-integration',
-        'screen': const BrokerIntegrationScreen(),
+        'onTap': () => _pushScreen(const BrokerIntegrationScreen()),
       },
       {
-        'label': 'Bot\nManager',
-        'icon': Icons.cloud,
+        'label': 'Multi\nBroker',
+        'icon': Icons.business_center,
         'color': const Color(0xFFB388FF),
-        'route': '/multi-broker-management',
-        'screen': const MultiBrokerManagementScreen(),
+        'onTap': () => _pushScreen(const MultiBrokerManagementScreen()),
+      },
+      {
+        'label': 'Reports',
+        'icon': Icons.assessment,
+        'color': const Color(0xFFFF6E40),
+        'onTap': () => _pushScreen(const ConsolidatedReportsScreen()),
       },
       {
         'label': 'Financials',
         'icon': Icons.attach_money,
-        'color': const Color(0xFFFF6E40),
-        'route': '/financials',
-        'screen': null,
+        'color': const Color(0xFF26C6DA),
+        'onTap': _openFinancials,
+      },
+      {
+        'label': 'Commissions',
+        'icon': Icons.monetization_on,
+        'color': const Color(0xFF69F0AE),
+        'onTap': () => _pushScreen(const CommissionDashboardScreen()),
+      },
+      {
+        'label': 'Wallet',
+        'icon': Icons.account_balance_wallet,
+        'color': const Color(0xFFF0B90B),
+        'onTap': () => _pushScreen(const UserWalletScreen()),
+      },
+      {
+        'label': 'Portfolio',
+        'icon': Icons.dashboard_customize,
+        'color': const Color(0xFF5C6BC0),
+        'onTap': () => _pushScreen(const UnifiedBrokerDashboardScreen()),
+      },
+      {
+        'label': 'Broker\nIntel',
+        'icon': Icons.speed,
+        'color': const Color(0xFFFFD600),
+        'onTap': () => _pushScreen(const BrokerAnalyticsDashboard()),
+      },
+      {
+        'label': 'Referrals',
+        'icon': Icons.group_add,
+        'color': const Color(0xFF66BB6A),
+        'onTap': _openReferralDashboard,
       },
     ];
 
@@ -1945,8 +2143,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Quick Actions',
+          'Mobile Command Center',
           style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Reports, wallet, commissions, analytics, and trading controls are all available here on mobile.',
+          style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
         ),
         const SizedBox(height: 14),
         GridView.builder(
@@ -1956,34 +2159,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             crossAxisCount: 3,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.0,
+            childAspectRatio: 1,
           ),
           itemCount: actions.length,
           itemBuilder: (context, index) {
             final action = actions[index];
-            final label = action['label'] as String;
-            final icon = action['icon'] as IconData;
-            final color = action['color'] as Color;
-            final screen = action['screen'] as Widget?;
-            final route = action['route'] as String;
+            final label = action['label']! as String;
+            final icon = action['icon']! as IconData;
+            final color = action['color']! as Color;
+            final onTap = action['onTap']! as VoidCallback;
 
             return InkWell(
-              onTap: () {
-                if (screen != null) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => screen),
-                  );
-                } else if (route == '/financials') {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Go to Accounts tab to manage financial reports', 
-                        style: GoogleFonts.poppins(color: Colors.white)),
-                      backgroundColor: const Color(0xFFFF6E40),
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              },
+              onTap: onTap,
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
@@ -2107,8 +2294,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  BottomNavigationBar _buildBottomNavigationBar(AppLocalizations loc) {
-    return BottomNavigationBar(
+  BottomNavigationBar _buildBottomNavigationBar(AppLocalizations loc) => BottomNavigationBar(
       currentIndex: _selectedIndex,
       type: BottomNavigationBarType.fixed,
       backgroundColor: const Color(0xFF111633),
@@ -2121,6 +2307,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         BottomNavigationBarItem(icon: Icon(Icons.swap_horiz_rounded), label: 'Trades'),
         BottomNavigationBarItem(icon: Icon(Icons.account_circle_rounded), label: 'Accounts'),
         BottomNavigationBarItem(icon: Icon(Icons.smart_toy_outlined), label: 'Bots'),
+        BottomNavigationBarItem(icon: Icon(Icons.widgets_rounded), label: 'Hub'),
       ],
       onTap: (index) {
         setState(() {
@@ -2128,10 +2315,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
       },
     );
-  }
 
-  Widget _buildDrawerMenu(AppLocalizations loc) {
-    return Drawer(
+  Widget _buildDrawerMenu(AppLocalizations loc) => Drawer(
       backgroundColor: const Color(0xFF111633),
       child: ListView(
         padding: EdgeInsets.zero,
@@ -2199,6 +2384,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               Navigator.pop(context);
               setState(() => _selectedIndex = 3);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.widgets_rounded, color: Color(0xFF00E5FF)),
+            title: const Text('Feature Hub', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('All web-version modules in one place', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            onTap: () {
+              Navigator.pop(context);
+              setState(() => _selectedIndex = 4);
             },
           ),
           ListTile(
@@ -2483,5 +2677,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
-  }
+}
+
+class _FeatureAction {
+  const _FeatureAction(this.label, this.icon, this.color, this.onTap);
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
 }

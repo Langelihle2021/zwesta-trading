@@ -1,9 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
 
@@ -63,8 +64,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
@@ -93,7 +93,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
+                  const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
                   const SizedBox(height: 16),
                   Text(_error!, style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14)),
                   const SizedBox(height: 24),
@@ -144,7 +144,6 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
               ),
             ),
     );
-  }
 
   Widget _buildSummaryCards() {
     final stats = _dashboardStats;
@@ -190,7 +189,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
             Expanded(
               child: _buildStatsCard(
                 'Active Trades',
-                '${_botsSummary.fold<int>(0, (int sum, bot) => sum + ((bot['trades'] ?? 0) as int))}',
+                '${_botsSummary.fold<int>(0, (sum, bot) => sum + ((bot['trades'] ?? 0) as int))}',
                 Icons.swap_horiz,
                 Colors.orangeAccent,
               ),
@@ -201,8 +200,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     );
   }
 
-  Widget _buildStatsCard(String title, String value, IconData icon, Color color) {
-    return Container(
+  Widget _buildStatsCard(String title, String value, IconData icon, Color color) => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF111633),
@@ -234,7 +232,6 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
         ],
       ),
     );
-  }
 
   Widget _buildBotCard(int index) {
     final bot = _botsSummary[index];
@@ -367,8 +364,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     );
   }
 
-  Widget _buildQuickStat(String label, String value, Color color) {
-    return Column(
+  Widget _buildQuickStat(String label, String value, Color color) => Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(label,
@@ -380,11 +376,9 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
         ),
       ],
     );
-  }
 
-  Widget _buildBotDetailedView(Map<String, dynamic> bot) {
-    return Container(
-      decoration: BoxDecoration(
+  Widget _buildBotDetailedView(Map<String, dynamic> bot) => Container(
+      decoration: const BoxDecoration(
         border: Border(
           top: BorderSide(color: Colors.white12),
         ),
@@ -454,10 +448,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
         ),
       ),
     );
-  }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
+  Widget _buildDetailRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -471,7 +463,6 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
         ],
       ),
     );
-  }
 
   void _showBotDetails(Map<String, dynamic> bot) {
     showDialog(
@@ -576,8 +567,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     );
   }
 
-  Widget _dialogDetailRow(String label, String? value) {
-    return Padding(
+  Widget _dialogDetailRow(String label, String? value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -596,5 +586,4 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
         ],
       ),
     );
-  }
 }

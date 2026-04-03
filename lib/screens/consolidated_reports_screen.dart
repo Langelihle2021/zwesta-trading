@@ -1,8 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
-import '../services/pdf_export_service.dart';
+import '../widgets/logo_widget.dart';
 
 class ConsolidatedReportsScreen extends StatefulWidget {
   const ConsolidatedReportsScreen({Key? key}) : super(key: key);
@@ -13,7 +15,7 @@ class ConsolidatedReportsScreen extends StatefulWidget {
 }
 
 class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
-  late String _apiUrl = EnvironmentConfig.apiUrl;
+  late final String _apiUrl = EnvironmentConfig.apiUrl;
 
   Map<String, dynamic> _reportData = {};
   bool _isLoading = false;
@@ -75,9 +77,23 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
     final reports = _reportData['reports'] as Map<String, dynamic>? ?? {};
 
     return Scaffold(
+      backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
-        title: const Text('Consolidated Reports'),
+        backgroundColor: const Color(0xFF111633),
+        elevation: 0,
+        title: const Row(
+          children: [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Consolidated Reports'),
+          ],
+        ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadReports,
@@ -90,37 +106,50 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00E5FF)))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                    ),
+                    child: const Text(
+                      'This report center mirrors the web summary flow. Use the dashboard Hub tab for deeper broker, wallet, and automation modules.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   if (_errorMessage != null)
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        border: Border.all(color: Colors.red),
+                        color: Colors.red.withOpacity(0.15),
+                        border: Border.all(color: Colors.redAccent),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
+                        style: const TextStyle(color: Colors.redAccent),
                       ),
                     ),
                   const SizedBox(height: 16),
                   if (reports.isEmpty)
-                    Center(
+                    const Center(
                       child: Column(
                         children: [
                           Icon(
                             Icons.assessment,
                             size: 64,
-                            color: Colors.grey[300],
+                            color: Colors.white24,
                           ),
-                          const SizedBox(height: 16),
-                          const Text('No reports available'),
+                          SizedBox(height: 16),
+                          Text('No reports available', style: TextStyle(color: Colors.white70)),
                         ],
                       ),
                     )
@@ -147,7 +176,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
     double totalTrades = 0;
     double totalWins = 0;
     double totalProfit = 0;
-    int accountCount = 0;
+    var accountCount = 0;
     double totalWinRate = 0;
 
     reports.forEach((key, report) {
@@ -220,8 +249,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
     );
   }
 
-  Widget _buildSummaryStatistic(String label, String value, Color color) {
-    return Column(
+  Widget _buildSummaryStatistic(String label, String value, Color color) => Column(
       children: [
         Text(
           label,
@@ -241,16 +269,13 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
         ),
       ],
     );
-  }
 
-  List<Widget> _buildAccountReports(Map<String, dynamic> reports) {
-    return reports.entries.map((entry) {
+  List<Widget> _buildAccountReports(Map<String, dynamic> reports) => reports.entries.map((entry) {
       final accountId = entry.key;
       final report = entry.value as Map<String, dynamic>;
 
       return _buildAccountReportCard(accountId, report);
     }).toList();
-  }
 
   Widget _buildAccountReportCard(String accountId, Map<String, dynamic> report) {
     final netProfit = report['netProfit'] as double? ?? 0;
@@ -361,8 +386,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
     );
   }
 
-  Widget _buildReportRow(String label, String value, {Color? color}) {
-    return Padding(
+  Widget _buildReportRow(String label, String value, {Color? color}) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -378,5 +402,4 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
         ],
       ),
     );
-  }
 }

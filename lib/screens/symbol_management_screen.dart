@@ -56,8 +56,8 @@ class _SymbolManagementScreenState extends State<SymbolManagementScreen> {
 
   void _applyFilters() {
     _filteredSymbols = _symbols.where((symbol) {
-      bool matchesType = _selectedType == 'All' || symbol['symbol_type'] == _selectedType;
-      bool matchesSearch = _searchQuery.isEmpty ||
+      final matchesType = _selectedType == 'All' || symbol['symbol_type'] == _selectedType;
+      final matchesSearch = _searchQuery.isEmpty ||
           symbol['symbol'].toString().toLowerCase().contains(_searchQuery.toLowerCase()) ||
           symbol['name'].toString().toLowerCase().contains(_searchQuery.toLowerCase());
       return matchesType && matchesSearch;
@@ -73,7 +73,7 @@ class _SymbolManagementScreenState extends State<SymbolManagementScreen> {
 
     await showDialog(
       context: context,
-      builder: (BuildContext context) => Dialog(
+      builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -239,11 +239,10 @@ class _SymbolManagementScreenState extends State<SymbolManagementScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Symbol Management'),
@@ -281,7 +280,7 @@ class _SymbolManagementScreenState extends State<SymbolManagementScreen> {
                         scrollDirection: Axis.horizontal,
                         child: Row(
                           children: _symbolTypes.map((type) {
-                            bool isSelected = _selectedType == type;
+                            final isSelected = _selectedType == type;
                             return Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 5),
                               child: FilterChip(
@@ -353,5 +352,4 @@ class _SymbolManagementScreenState extends State<SymbolManagementScreen> {
         child: const Icon(Icons.add),
       ),
     );
-  }
 }

@@ -1,20 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
-import '../services/auth_service.dart';
+
 import '../services/trading_service.dart';
-import '../services/bot_service.dart';
-import '../services/pdf_service.dart';
-import '../models/account.dart';
-import '../utils/constants.dart';
-import '../widgets/custom_widgets.dart';
-import '../widgets/logo_widget.dart';
-import 'trades_screen.dart';
-import 'account_management_screen.dart';
-import 'bot_dashboard_screen.dart';
-import 'bot_configuration_screen.dart';
-import 'broker_integration_screen.dart';
-import 'financials_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -24,7 +11,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  int _selectedIndex = 0;
+  final int _selectedIndex = 0;
 
   @override
   void initState() {
@@ -33,25 +20,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: _buildAppBar(),
       body: _buildDashboardView(),
       bottomNavigationBar: _buildBottomNavigationBar(),
     );
-  }
 
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
+  PreferredSizeWidget _buildAppBar() => AppBar(
       title: const Text('Zwesta Trading System'),
       elevation: 0,
     );
-  }
 
-  Widget _buildDashboardView() {
-    return Consumer<TradingService>(
-      builder: (context, tradingService, _) {
-        return SingleChildScrollView(
+  Widget _buildDashboardView() => Consumer<TradingService>(
+      builder: (context, tradingService, _) => SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -150,13 +131,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
             ],
           ),
-        );
-      },
+        ),
     );
-  }
 
-  BottomNavigationBar _buildBottomNavigationBar() {
-    return BottomNavigationBar(
+  BottomNavigationBar _buildBottomNavigationBar() => BottomNavigationBar(
       currentIndex: 0,
       type: BottomNavigationBarType.fixed,
       backgroundColor: Colors.blue,
@@ -170,6 +148,5 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ],
     );
-  }
 }
 

@@ -89,13 +89,12 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Unified Portfolio'),
@@ -127,7 +126,6 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
                   ),
                 ),
     );
-  }
 
   Widget _buildTotalCard() {
     final bal = _portfolio['total_balance'] ?? 0;
@@ -201,15 +199,13 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
     );
   }
 
-  Widget _totalStat(String label, String value, Color color) {
-    return Column(
+  Widget _totalStat(String label, String value, Color color) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11)),
         Text(value, style: GoogleFonts.poppins(color: color, fontSize: 15, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 
   Widget _buildBrokerCards() {
     final brokerColors = {
@@ -302,18 +298,15 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
     );
   }
 
-  Widget _brokerStat(String label, String value, Color color) {
-    return Column(
+  Widget _brokerStat(String label, String value, Color color) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: GoogleFonts.poppins(color: Colors.white30, fontSize: 9)),
         Text(value, style: GoogleFonts.poppins(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 
-  Widget _buildPositionsSection() {
-    return Column(
+  Widget _buildPositionsSection() => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
@@ -347,10 +340,9 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
             ]),
           )
         else
-          ...List<Widget>.from(_positions.map((p) => _buildPositionCard(p))),
+          ...List<Widget>.from(_positions.map(_buildPositionCard)),
       ],
     );
-  }
 
   Widget _buildPositionCard(dynamic p) {
     final broker = p['broker'] ?? 'Unknown';
@@ -416,7 +408,7 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
 
   String _fmt(dynamic value) {
     if (value == null) return '0.00';
-    final num v = value is num ? value : double.tryParse(value.toString()) ?? 0;
+    final v = value is num ? value : double.tryParse(value.toString()) ?? 0;
     if (v.abs() >= 1000000) return '${(v / 1000000).toStringAsFixed(2)}M';
     if (v.abs() >= 1000) return '${(v / 1000).toStringAsFixed(2)}K';
     return v.toStringAsFixed(2);

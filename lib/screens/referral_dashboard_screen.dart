@@ -1,19 +1,20 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
-import '../utils/constants.dart';
 import '../widgets/logo_widget.dart';
+import 'commission_dashboard_screen.dart';
 
 class ReferralDashboardScreen extends StatefulWidget {
-  final String userId;
 
   const ReferralDashboardScreen({
-    Key? key,
-    required this.userId,
+    required this.userId, Key? key,
   }) : super(key: key);
+  final String userId;
 
   @override
   State<ReferralDashboardScreen> createState() =>
@@ -188,9 +189,9 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
   }
 
   void _showWithdrawalDialog(double availableBalance) {
-    TextEditingController amountController = TextEditingController();
-    TextEditingController methodController = TextEditingController();
-    String selectedMethod = 'Bank Transfer';
+    final amountController = TextEditingController();
+    final methodController = TextEditingController();
+    var selectedMethod = 'Bank Transfer';
 
     showDialog(
       context: context,
@@ -219,7 +220,7 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  prefixText: '\$ ',
+                  prefixText: r'$ ',
                 ),
               ),
               const SizedBox(height: 16),
@@ -279,7 +280,7 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
               final amount = double.tryParse(amountController.text) ?? 0;
               if (amount < 10) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Minimum withdrawal is \$10')),
+                  const SnackBar(content: Text(r'Minimum withdrawal is $10')),
                 );
               } else if (amount > availableBalance) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -396,11 +397,10 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Referral Program'),
@@ -408,6 +408,20 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
         ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.monetization_on_outlined),
+            tooltip: 'Commissions',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const CommissionDashboardScreen()));
+            },
+          ),
+        ],
       ),
       backgroundColor: Colors.grey[850],
       body: SingleChildScrollView(
@@ -633,7 +647,7 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
                       child: Center(
                         child: Column(
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.people_outline,
                               size: 48,
                               color: Colors.grey,
@@ -709,9 +723,9 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 2),
-                                    Text(
+                                    const Text(
                                       'Earning',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 10,
                                         color: Colors.grey,
                                       ),
@@ -748,39 +762,39 @@ class _ReferralDashboardScreenState extends State<ReferralDashboardScreen> {
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: Colors.grey[900],
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
+        backgroundColor: const Color(0xFF111633),
+        selectedItemColor: const Color(0xFF00E5FF),
+        unselectedItemColor: Colors.white38,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.home),
+            icon: Icon(Icons.dashboard_rounded),
             label: 'Home',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.people),
-            label: 'Referral',
+            icon: Icon(Icons.monetization_on_outlined),
+            label: 'Commissions',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
+            icon: Icon(Icons.people_rounded),
+            label: 'Referral',
           ),
         ],
-        currentIndex: 1,
+        currentIndex: 2,
         onTap: (index) {
           if (index == 0) {
             Navigator.of(context).popUntil((route) => route.isFirst);
+          } else if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (context) => const CommissionDashboardScreen()),
+            );
           }
         },
       ),
     );
-  }
 }
 
 class _EarningsTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final IconData icon;
 
   const _EarningsTile({
     required this.label,
@@ -788,10 +802,13 @@ class _EarningsTile extends StatelessWidget {
     required this.color,
     required this.icon,
   });
+  final String label;
+  final String value;
+  final Color color;
+  final IconData icon;
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
+  Widget build(BuildContext context) => Card(
       color: Colors.grey[800],
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -822,5 +839,4 @@ class _EarningsTile extends StatelessWidget {
         ),
       ),
     );
-  }
 }

@@ -1,20 +1,20 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class TradingModeSwitcher extends StatefulWidget {
+
+  const TradingModeSwitcher({
+    required this.currentMode, required this.onModeChanged, Key? key,
+    this.isCompact = false,
+  }) : super(key: key);
   final String currentMode;
   final Function(String) onModeChanged;
   final bool isCompact;
-
-  const TradingModeSwitcher({
-    Key? key,
-    required this.currentMode,
-    required this.onModeChanged,
-    this.isCompact = false,
-  }) : super(key: key);
 
   @override
   State<TradingModeSwitcher> createState() => _TradingModeSwitcherState();
@@ -133,8 +133,8 @@ class _TradingModeSwitcherState extends State<TradingModeSwitcher> {
               ],
             ),
             if (_isLoading)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
                 child: SizedBox(
                   height: 20,
                   width: 20,

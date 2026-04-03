@@ -3,8 +3,8 @@ import 'package:http/http.dart' as http;
 import '../utils/environment_config.dart';
 
 class BackendStatusIndicator extends StatefulWidget {
-  final double size;
   const BackendStatusIndicator({Key? key, this.size = 16}) : super(key: key);
+  final double size;
 
   @override
   State<BackendStatusIndicator> createState() => _BackendStatusIndicatorState();

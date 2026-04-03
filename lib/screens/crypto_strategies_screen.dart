@@ -59,7 +59,7 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
     final params = Map<String, dynamic>.from(strategy['configurable_params'] ?? {});
     final pairController = TextEditingController(text: (strategy['supported_pairs'] as List?)?.first ?? 'BTCUSDT');
     final paramControllers = <String, TextEditingController>{};
-    for (var key in params.keys) {
+    for (final key in params.keys) {
       paramControllers[key] = TextEditingController(text: params[key]['default'].toString());
     }
 
@@ -106,7 +106,7 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
     if (confirmed != true) return;
 
     final configParams = <String, dynamic>{};
-    for (var e in paramControllers.entries) {
+    for (final e in paramControllers.entries) {
       configParams[e.key] = double.tryParse(e.value.text) ?? e.value.text;
     }
 
@@ -140,8 +140,7 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
     if (result['success'] == true) _loadActive();
   }
 
-  Widget _dialogField(String label, TextEditingController ctrl, {String? hint}) {
-    return TextField(
+  Widget _dialogField(String label, TextEditingController ctrl, {String? hint}) => TextField(
       controller: ctrl,
       style: GoogleFonts.poppins(color: Colors.white, fontSize: 13),
       decoration: InputDecoration(
@@ -155,11 +154,9 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
     );
-  }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: _bg,
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
@@ -179,7 +176,6 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
         children: [_buildCatalog(), _buildActive()],
       ),
     );
-  }
 
   Widget _buildCatalog() {
     if (_loadingCatalog) return const Center(child: CircularProgressIndicator(color: _gold));
@@ -204,8 +200,8 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [const Color(0xFF1A1F3A), const Color(0xFF111633)],
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A1F3A), Color(0xFF111633)],
           begin: Alignment.topLeft, end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
@@ -270,13 +266,11 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
     );
   }
 
-  Widget _chip(String text, Color color) {
-    return Container(
+  Widget _chip(String text, Color color) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
       child: Text(text, style: GoogleFonts.poppins(color: color, fontSize: 10, fontWeight: FontWeight.w500)),
     );
-  }
 
   Widget _buildActive() {
     if (_loadingActive) return const Center(child: CircularProgressIndicator(color: _gold));
@@ -361,13 +355,11 @@ class _CryptoStrategiesScreenState extends State<CryptoStrategiesScreen> with Si
     );
   }
 
-  Widget _activeStat(String label, String value, Color color) {
-    return Column(
+  Widget _activeStat(String label, String value, Color color) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: GoogleFonts.poppins(color: Colors.white30, fontSize: 10)),
         Text(value, style: GoogleFonts.poppins(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 }

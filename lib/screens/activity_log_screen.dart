@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../services/activity_log_service.dart';
 
 class ActivityLogScreen extends StatefulWidget {
@@ -33,8 +32,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(title: const Text('Activity Log')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -45,7 +43,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                   itemBuilder: (context, i) {
                     final log = _logs[i];
                     return ListTile(
-                      leading: Icon(Icons.event_note, color: Colors.blue),
+                      leading: const Icon(Icons.event_note, color: Colors.blue),
                       title: Text(log.title),
                       subtitle: Text(log.description),
                       trailing: Text(log.timestamp),
@@ -53,5 +51,4 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                   },
                 ),
     );
-  }
 }

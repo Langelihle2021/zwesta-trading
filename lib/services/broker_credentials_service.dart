@@ -1,18 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class BrokerCredential {
-  final String credentialId;
-  final String broker;
-  final String accountNumber;
-  final String server;
-  final bool isLive;
-  final bool isActive;
-  final DateTime createdAt;
-  final String? apiKey;
 
   BrokerCredential({
     required this.credentialId,
@@ -25,8 +19,7 @@ class BrokerCredential {
     this.apiKey,
   });
 
-  factory BrokerCredential.fromJson(Map<String, dynamic> json) {
-    return BrokerCredential(
+  factory BrokerCredential.fromJson(Map<String, dynamic> json) => BrokerCredential(
       credentialId: json['credential_id'] ?? '',
       broker: json['broker'] ?? '',
       accountNumber: json['account_number'] ?? '',
@@ -36,7 +29,14 @@ class BrokerCredential {
       createdAt: DateTime.parse(json['created_at'] ?? DateTime.now().toString()),
       apiKey: json['api_key'],
     );
-  }
+  final String credentialId;
+  final String broker;
+  final String accountNumber;
+  final String server;
+  final bool isLive;
+  final bool isActive;
+  final DateTime createdAt;
+  final String? apiKey;
 
   Map<String, dynamic> toJson() => {
     'credential_id': credentialId,
@@ -50,6 +50,11 @@ class BrokerCredential {
 }
 
 class BrokerCredentialsService extends ChangeNotifier {
+
+  BrokerCredentialsService() {
+    _apiUrl = EnvironmentConfig.apiUrl;
+    _loadSavedCredentials();
+  }
   List<BrokerCredential> _credentials = [];
   BrokerCredential? _activeCredential;
   bool _isLoading = false;
@@ -60,11 +65,6 @@ class BrokerCredentialsService extends ChangeNotifier {
   BrokerCredential? get activeCredential => _activeCredential;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
-
-  BrokerCredentialsService() {
-    _apiUrl = EnvironmentConfig.apiUrl;
-    _loadSavedCredentials();
-  }
 
   /// Load credentials from backend
   Future<void> fetchCredentials() async {
@@ -101,8 +101,8 @@ class BrokerCredentialsService extends ChangeNotifier {
             .toList();
 
         // Deduplicate: keep only latest credential for each broker+account combo
-        final Map<String, BrokerCredential> deduped = {};
-        for (var cred in credentialsList) {
+        final deduped = <String, BrokerCredential>{};
+        for (final cred in credentialsList) {
           final key = '${cred.broker}_${cred.accountNumber}';
           // Compare by createdAt - keep the more recent one
           if (!deduped.containsKey(key) || 
@@ -199,7 +199,7 @@ class BrokerCredentialsService extends ChangeNotifier {
       } else {
         final errorData = jsonDecode(response.body);
         _errorMessage = errorData['error'] ?? 'Failed to save credential';
-        print('❌ Error: ${response.statusCode} - ${_errorMessage}');
+        print('❌ Error: ${response.statusCode} - $_errorMessage');
         _isLoading = false;
         notifyListeners();
         return false;
@@ -243,7 +243,7 @@ class BrokerCredentialsService extends ChangeNotifier {
       } else {
         final data = jsonDecode(response.body);
         _errorMessage = data['error'] ?? 'Connection test failed';
-        print('❌ Connection failed: ${_errorMessage}');
+        print('❌ Connection failed: $_errorMessage');
         return false;
       }
     } catch (e) {

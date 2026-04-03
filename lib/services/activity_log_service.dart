@@ -1,12 +1,11 @@
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../utils/environment_config.dart';
 
 class ActivityLogEntry {
-  final String title;
-  final String description;
-  final String timestamp;
 
   ActivityLogEntry({required this.title, required this.description, required this.timestamp});
 
@@ -15,6 +14,9 @@ class ActivityLogEntry {
         description: json['description'] ?? '',
         timestamp: json['timestamp'] ?? '',
       );
+  final String title;
+  final String description;
+  final String timestamp;
 }
 
 class ActivityLogService {

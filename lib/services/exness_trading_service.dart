@@ -1,18 +1,11 @@
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
 import '../utils/environment_config.dart';
 
 /// Represents an Exness trading account
 class ExnessAccount {
-  final String accountId;
-  final String accountType; // DEMO or LIVE
-  final double balance;
-  final double equity;
-  final double margin;
-  final double freeMargin;
-  final double marginLevel;
-  final List<String> availableSymbols;
-  final DateTime? fetchedAt;
 
   ExnessAccount({
     required this.accountId,
@@ -26,8 +19,7 @@ class ExnessAccount {
     this.fetchedAt,
   });
 
-  factory ExnessAccount.fromJson(Map<String, dynamic> json) {
-    return ExnessAccount(
+  factory ExnessAccount.fromJson(Map<String, dynamic> json) => ExnessAccount(
       accountId: json['accountId'] ?? '',
       accountType: json['accountType'] ?? 'DEMO',
       balance: (json['balance'] as num?)?.toDouble() ?? 0.0,
@@ -38,7 +30,15 @@ class ExnessAccount {
       availableSymbols: List<String>.from(json['symbols'] ?? []),
       fetchedAt: json['fetchedAt'] != null ? DateTime.parse(json['fetchedAt']) : null,
     );
-  }
+  final String accountId;
+  final String accountType; // DEMO or LIVE
+  final double balance;
+  final double equity;
+  final double margin;
+  final double freeMargin;
+  final double marginLevel;
+  final List<String> availableSymbols;
+  final DateTime? fetchedAt;
 
   Map<String, dynamic> toJson() => {
     'accountId': accountId,
@@ -60,18 +60,6 @@ class ExnessAccount {
 
 /// Represents a trade order
 class ExnessOrder {
-  final String orderId;
-  final String symbol;
-  final String side; // BUY or SELL
-  final double volume;
-  final double openPrice;
-  final double? stopLoss;
-  final double? takeProfit;
-  final double commission;
-  final double currentProfit;
-  final String status; // OPEN, CLOSED, PENDING
-  final DateTime openTime;
-  final DateTime? closeTime;
 
   ExnessOrder({
     required this.orderId,
@@ -79,17 +67,12 @@ class ExnessOrder {
     required this.side,
     required this.volume,
     required this.openPrice,
-    this.stopLoss,
+    required this.commission, required this.currentProfit, required this.status, required this.openTime, this.stopLoss,
     this.takeProfit,
-    required this.commission,
-    required this.currentProfit,
-    required this.status,
-    required this.openTime,
     this.closeTime,
   });
 
-  factory ExnessOrder.fromJson(Map<String, dynamic> json) {
-    return ExnessOrder(
+  factory ExnessOrder.fromJson(Map<String, dynamic> json) => ExnessOrder(
       orderId: json['orderId'] ?? '',
       symbol: json['symbol'] ?? '',
       side: json['side'] ?? 'BUY',
@@ -103,7 +86,18 @@ class ExnessOrder {
       openTime: DateTime.parse(json['openTime'] ?? DateTime.now().toIso8601String()),
       closeTime: json['closeTime'] != null ? DateTime.parse(json['closeTime']) : null,
     );
-  }
+  final String orderId;
+  final String symbol;
+  final String side; // BUY or SELL
+  final double volume;
+  final double openPrice;
+  final double? stopLoss;
+  final double? takeProfit;
+  final double commission;
+  final double currentProfit;
+  final String status; // OPEN, CLOSED, PENDING
+  final DateTime openTime;
+  final DateTime? closeTime;
 
   Map<String, dynamic> toJson() => {
     'orderId': orderId,
@@ -123,6 +117,13 @@ class ExnessOrder {
 
 /// Exness Trading Service - Handles MT5 trading operations
 class ExnessTradingService {
+
+  ExnessTradingService({
+    required this.accountId,
+    required this.password,
+    required this.server,
+    required this.isLive,
+  });
   final String accountId;
   final String password;
   final String server;
@@ -137,17 +138,10 @@ class ExnessTradingService {
 
   // ==================== SYSTEM DEFAULTS ====================
   /// Default Take Profit percentage for Exness MT5 (2%)
-  static const double defaultTakeProfitPercentage = 2.0;
+  static const double defaultTakeProfitPercentage = 2;
 
   /// Default Stop Loss percentage for Exness MT5 (1%)
-  static const double defaultStopLossPercentage = 1.0;
-
-  ExnessTradingService({
-    required this.accountId,
-    required this.password,
-    required this.server,
-    required this.isLive,
-  });
+  static const double defaultStopLossPercentage = 1;
 
   // ==================== GETTERS ====================
 
@@ -497,26 +491,24 @@ class ExnessTradingService {
   }
 
   /// Default Exness symbols (fallback)
-  static List<String> _getDefaultExnessSymbols() {
-    return [
-      'BTCUSDm',   // Bitcoin / USD
-      'ETHUSDm',   // Ethereum / USD
-      'EURUSDm',   // Euro / USD
-      'USDJPYm',   // USD / Japanese Yen
-      'XAUUSDm',   // Gold / USD
-      'AAPLm',
-      'AMDm',
-      'MSFTm',
-      'NVDAm',
-      'JPMm',
-      'BACm',
-      'WFCm',
-      'GOOGLm',
-      'METAm',
-      'ORCLm',
-      'TSMm',
+  static List<String> _getDefaultExnessSymbols() => [
+      'BTCUSD',   // Bitcoin / USD
+      'ETHUSD',   // Ethereum / USD
+      'EURUSD',   // Euro / USD
+      'USDJPY',   // USD / Japanese Yen
+      'XAUUSD',   // Gold / USD
+      'AAPL',
+      'AMD',
+      'MSFT',
+      'NVDA',
+      'JPM',
+      'BAC',
+      'WFC',
+      'GOOGL',
+      'META',
+      'ORCL',
+      'TSM',
     ];
-  }
 
   /// Get historical price data (simplified - returns last known data)
   Future<Map<String, dynamic>?> getSymbolData(String symbol) async {

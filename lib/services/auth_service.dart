@@ -1,12 +1,19 @@
-import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/user.dart';
-import '../utils/constants.dart';
 import '../utils/environment_config.dart';
 
 class AuthService extends ChangeNotifier {
+
+  AuthService() {
+    _token = null;
+    _currentUser = null;
+    _initializePreferences();
+  }
     // Clear error message and notify listeners
     void clearError() {
       _errorMessage = null;
@@ -20,23 +27,14 @@ class AuthService extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   String? _successMessage;
-  bool _isInitialized = false;
-
-  AuthService() {
-    _token = null;
-    _currentUser = null;
-    _initializePreferences();
-  }
 
   Future<void> _initializePreferences() async {
     try {
       _prefs = await SharedPreferences.getInstance();
       _loadFromStorage();
-      _isInitialized = true;
       notifyListeners();
     } catch (e) {
       debugPrint('SharedPreferences initialization error: $e');
-      _isInitialized = true;
       notifyListeners();
     }
   }

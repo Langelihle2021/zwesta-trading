@@ -1,21 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as status;
+import 'package:web_socket_channel/web_socket_channel.dart';
+
 import '../utils/environment_config.dart';
 
 /// Model for real-time price data
 class PriceUpdate {
-  final String symbol;
-  final double bid;
-  final double ask;
-  final double last;
-  final DateTime timestamp;
-  final double volume;
-  final double high24h;
-  final double low24h;
-  final double change24hPercent;
 
   PriceUpdate({
     required this.symbol,
@@ -56,6 +49,15 @@ class PriceUpdate {
       change24hPercent: (json['change24h_percent'] ?? 0).toDouble(),
     );
   }
+  final String symbol;
+  final double bid;
+  final double ask;
+  final double last;
+  final DateTime timestamp;
+  final double volume;
+  final double high24h;
+  final double low24h;
+  final double change24hPercent;
 
   double get spread => ask - bid;
   double get mid => (bid + ask) / 2;
@@ -380,9 +382,7 @@ class RealtimePriceWebSocketService {
   List<String> get subscribedSymbols => _priceCallbacks.keys.toList();
 
   /// Get number of listeners for a symbol
-  int getListenerCountForSymbol(String symbol) {
-    return _priceCallbacks[symbol]?.length ?? 0;
-  }
+  int getListenerCountForSymbol(String symbol) => _priceCallbacks[symbol]?.length ?? 0;
 }
 
 /// Singleton instance

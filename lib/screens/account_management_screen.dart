@@ -1,8 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+
 import '../services/auth_service.dart';
 import '../services/trading_service.dart';
 import '../utils/constants.dart';
@@ -21,8 +23,7 @@ class AccountManagementScreen extends StatefulWidget {
 class _AccountManagementScreenState extends State<AccountManagementScreen>
     with SingleTickerProviderStateMixin {
     // Glassmorphic card for settings (must be at class level)
-    Widget _glassSettingsCard({required Widget child}) {
-      return Container(
+    Widget _glassSettingsCard({required Widget child}) => Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.08),
@@ -38,7 +39,6 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         ),
         child: child,
       );
-    }
   late TabController _tabController;
 
   // Settings state
@@ -125,8 +125,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: CustomAppBar(
         title: 'Account Management',
         showBackButton: true,
@@ -149,12 +148,9 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         ],
       ),
     );
-  }
 
-  Widget _buildProfileTab() {
-    return Consumer<AuthService>(
-      builder: (context, authService, _) {
-        return SingleChildScrollView(
+  Widget _buildProfileTab() => Consumer<AuthService>(
+      builder: (context, authService, _) => SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -290,10 +286,8 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
               ),
             ],
           ),
-        );
-      },
+        ),
     );
-  }
 
   Widget _buildEditProfileForm(BuildContext context, AuthService authService) {
     final firstNameController =
@@ -347,8 +341,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         ),
         const SizedBox(height: AppSpacing.lg),
         Consumer<AuthService>(
-          builder: (context, authService, _) {
-            return ElevatedButton(
+          builder: (context, authService, _) => ElevatedButton(
               onPressed: authService.isLoading
                   ? null
                   : () async {
@@ -379,17 +372,14 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                       ),
                     )
                   : const Text('Update Profile'),
-            );
-          },
+            ),
         ),
       ],
     );
   }
 
-  Widget _buildAccountsTab() {
-    return Consumer<TradingService>(
-      builder: (context, tradingService, _) {
-        return ListView(
+  Widget _buildAccountsTab() => Consumer<TradingService>(
+      builder: (context, tradingService, _) => ListView(
           padding: const EdgeInsets.all(AppSpacing.md),
           children: [
             // Broker integration quick link with gradient
@@ -615,13 +605,10 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             );
           }),
           ],
-        );
-      },
+        ),
     );
-  }
 
-  Widget _buildSettingsTab() {
-    return SingleChildScrollView(
+  Widget _buildSettingsTab() => SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -653,7 +640,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
             color: Colors.blue,
             title: 'Change Password',
             subtitle: 'Update your password regularly',
-            onTap: () => _showChangePasswordDialog(),
+            onTap: _showChangePasswordDialog,
           ),
           const SizedBox(height: AppSpacing.md),
           _buildModernSettingsCard(
@@ -771,15 +758,14 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         ],
       ),
     );
-  }
 
   void _showChangePasswordDialog() {
     final oldPasswordController = TextEditingController();
     final newPasswordController = TextEditingController();
     final confirmPasswordController = TextEditingController();
-    bool obscureOld = true;
-    bool obscureNew = true;
-    bool obscureConfirm = true;
+    var obscureOld = true;
+    var obscureNew = true;
+    var obscureConfirm = true;
 
     showDialog(
       context: context,
@@ -849,8 +835,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
               child: const Text('Cancel'),
             ),
             Consumer<AuthService>(
-              builder: (context, authService, _) {
-                return ElevatedButton(
+              builder: (context, authService, _) => ElevatedButton(
                   onPressed: authService.isLoading
                       ? null
                       : () async {
@@ -891,8 +876,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                           ),
                         )
                       : const Text('Change Password'),
-                );
-              },
+                ),
             ),
           ],
         ),
@@ -900,8 +884,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
+  Widget _buildDetailRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -911,7 +894,6 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         ],
       ),
     );
-  }
 
   Widget _buildModernSettingsCard({
     required IconData icon,
@@ -920,8 +902,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
     required String subtitle,
     VoidCallback? onTap,
     Widget? trailing,
-  }) {
-    return Container(
+  }) => Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [color.withOpacity(0.15), color.withOpacity(0.05)],
@@ -984,7 +965,6 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
         ),
       ),
     );
-  }
 
   void _showDeleteAccountDialog() {
     showDialog<void>(

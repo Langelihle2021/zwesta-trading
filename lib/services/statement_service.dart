@@ -1,11 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
+import '../models/account.dart';
 import '../models/statement.dart';
 import '../models/trade.dart';
-import '../models/account.dart';
 
 class StatementService extends ChangeNotifier {
+  StatementService() {
+    // Initialize lazily when needed, not in constructor
+  }
   List<Statement> _statements = [];
   bool _isLoading = false;
   String? _errorMessage;
@@ -13,10 +18,6 @@ class StatementService extends ChangeNotifier {
   List<Statement> get statements => _statements;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
-
-  StatementService() {
-    // Initialize lazily when needed, not in constructor
-  }
 
   Future<void> _loadStatementsFromStorage() async {
     try {
@@ -45,53 +46,66 @@ class StatementService extends ChangeNotifier {
     try {
       // Filter trades by date range
       final tradesInPeriod = trades
-          .where((t) => t.closedAt != null && 
-              t.closedAt!.isAfter(startDate) && 
+          .where((t) =>
+              t.closedAt != null &&
+              t.closedAt!.isAfter(startDate) &&
               t.closedAt!.isBefore(endDate.add(const Duration(days: 1))))
           .toList();
 
       // Calculate statistics
-      final closedTrades = tradesInPeriod.where((t) => t.status == TradeStatus.closed).toList();
-      final winningTrades = closedTrades.where((t) => t.profit != null && t.profit! > 0).toList();
-      final losingTrades = closedTrades.where((t) => t.profit == null || t.profit! <= 0).toList();
+      final closedTrades =
+          tradesInPeriod.where((t) => t.status == TradeStatus.closed).toList();
+      final winningTrades =
+          closedTrades.where((t) => t.profit != null && t.profit! > 0).toList();
+      final losingTrades = closedTrades
+          .where((t) => t.profit == null || t.profit! <= 0)
+          .toList();
 
-      final totalProfit = winningTrades.fold(0.0, (sum, t) => sum + (t.profit ?? 0));
-      final totalLoss = losingTrades.fold(0.0, (sum, t) => sum + (t.profit ?? 0));
-      
-      final largestWin = winningTrades.isEmpty 
-          ? 0.0 
-          : winningTrades.map((t) => t.profit ?? 0).reduce((a, b) => a > b ? a : b);
-      final largestLoss = losingTrades.isEmpty 
-          ? 0.0 
-          : losingTrades.map((t) => t.profit ?? 0).reduce((a, b) => a < b ? a : b);
+      final totalProfit = winningTrades.fold<double>(
+        0.0,
+        (sum, t) => sum + (t.profit ?? 0),
+      );
+      final totalLoss = losingTrades.fold<double>(
+        0.0,
+        (sum, t) => sum + (t.profit ?? 0),
+      );
 
-      final averageWin = winningTrades.isEmpty 
-          ? 0.0 
-          : totalProfit / winningTrades.length;
-      final averageLoss = losingTrades.isEmpty 
-          ? 0.0 
-          : totalLoss / losingTrades.length;
+      final largestWin = winningTrades.isEmpty
+          ? 0.0
+          : winningTrades
+              .map((t) => t.profit ?? 0)
+              .reduce((a, b) => a > b ? a : b);
+      final largestLoss = losingTrades.isEmpty
+          ? 0.0
+          : losingTrades
+              .map((t) => t.profit ?? 0)
+              .reduce((a, b) => a < b ? a : b);
 
-      final winRate = closedTrades.isEmpty 
-          ? 0.0 
+      final averageWin =
+          winningTrades.isEmpty ? 0.0 : totalProfit / winningTrades.length;
+      final averageLoss =
+          losingTrades.isEmpty ? 0.0 : totalLoss / losingTrades.length;
+
+      final winRate = closedTrades.isEmpty
+          ? 0.0
           : (winningTrades.length / closedTrades.length) * 100;
 
       // Convert trades to statement trades
-      final statementTrades = tradesInPeriod.map((trade) {
-        return StatementTrade(
-          id: trade.id,
-          symbol: trade.symbol,
-          type: trade.type == TradeType.buy ? 'BUY' : 'SELL',
-          quantity: trade.quantity,
-          entryPrice: trade.entryPrice,
-          exitPrice: trade.currentPrice ?? trade.entryPrice,
-          openDate: trade.openedAt,
-          closeDate: trade.closedAt ?? DateTime.now(),
-          profit: trade.profit ?? 0,
-          profitPercentage: trade.profitPercentage ?? 0,
-          status: trade.status.toString().split('.').last,
-        );
-      }).toList();
+      final statementTrades = tradesInPeriod
+          .map((trade) => StatementTrade(
+                id: trade.id,
+                symbol: trade.symbol,
+                type: trade.type == TradeType.buy ? 'BUY' : 'SELL',
+                quantity: trade.quantity,
+                entryPrice: trade.entryPrice,
+                exitPrice: trade.currentPrice ?? trade.entryPrice,
+                openDate: trade.openedAt,
+                closeDate: trade.closedAt ?? DateTime.now(),
+                profit: trade.profit ?? 0,
+                profitPercentage: trade.profitPercentage ?? 0,
+                status: trade.status.toString().split('.').last,
+              ))
+          .toList();
 
       // Create statement
       final statement = Statement(
@@ -136,9 +150,8 @@ class StatementService extends ChangeNotifier {
   Future<void> _saveStatementsToStorage() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final statementsJson = _statements
-          .map((stmt) => jsonEncode(stmt.toJson()))
-          .toList();
+      final statementsJson =
+          _statements.map((stmt) => jsonEncode(stmt.toJson())).toList();
       await prefs.setStringList('statements', statementsJson);
     } catch (e) {
       _errorMessage = 'Failed to save statements: $e';

@@ -14,13 +14,6 @@ enum IGConnectionState {
 }
 
 class IGConnectionInfo {
-  final String accountId;
-  final String accountName;
-  final double balance;
-  final double profitLoss;
-  final String currency;
-  final bool isLive;
-  final DateTime connectedAt;
 
   IGConnectionInfo({
     required this.accountId,
@@ -32,8 +25,7 @@ class IGConnectionInfo {
     required this.connectedAt,
   });
 
-  factory IGConnectionInfo.fromJson(Map<String, dynamic> json) {
-    return IGConnectionInfo(
+  factory IGConnectionInfo.fromJson(Map<String, dynamic> json) => IGConnectionInfo(
       accountId: json['account_id'] ?? '',
       accountName: json['account_name'] ?? 'IG Account',
       balance: (json['balance'] ?? 0).toDouble(),
@@ -42,7 +34,13 @@ class IGConnectionInfo {
       isLive: json['is_live'] ?? false,
       connectedAt: DateTime.now(),
     );
-  }
+  final String accountId;
+  final String accountName;
+  final double balance;
+  final double profitLoss;
+  final String currency;
+  final bool isLive;
+  final DateTime connectedAt;
 }
 
 class IGAutoConnectService extends ChangeNotifier {

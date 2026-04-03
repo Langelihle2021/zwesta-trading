@@ -1,11 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
+import '../models/account.dart';
 import '../models/financial_statement.dart';
 import '../models/trade.dart';
-import '../models/account.dart';
 
 class FinancialService extends ChangeNotifier {
+  FinancialService() {
+    // Initialize lazily when needed, not in constructor
+  }
   List<FinancialStatement> _financialStatements = [];
   bool _isLoading = false;
   String? _errorMessage;
@@ -13,10 +18,6 @@ class FinancialService extends ChangeNotifier {
   List<FinancialStatement> get financialStatements => _financialStatements;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
-
-  FinancialService() {
-    // Initialize lazily when needed, not in constructor
-  }
 
   Future<void> _loadFinancialStatementsFromStorage() async {
     try {
@@ -55,64 +56,62 @@ class FinancialService extends ChangeNotifier {
           .toList();
 
       // ==================== CAPITAL & INVESTMENT ====================
-      final double capitalInvested = initialCapital ?? account.balance;
-      double additionalInvestments = 0.0; // Would come from deposit history
-      final double totalCapital = capitalInvested + additionalInvestments;
+      final capitalInvested = initialCapital ?? account.balance;
+      const additionalInvestments = 0.0; // Would come from deposit history
+      final totalCapital = capitalInvested + additionalInvestments;
 
       // ==================== REVENUE ====================
-      final closedTrades = tradesInPeriod
-          .where((t) => t.status == TradeStatus.closed)
+      final closedTrades =
+          tradesInPeriod.where((t) => t.status == TradeStatus.closed).toList();
+      final winningTrades =
+          closedTrades.where((t) => t.profit != null && t.profit! > 0).toList();
+      final losingTrades = closedTrades
+          .where((t) => t.profit == null || t.profit! <= 0)
           .toList();
-      final winningTrades = closedTrades.where((t) => t.profit != null && t.profit! > 0).toList();
-      final losingTrades = closedTrades.where((t) => t.profit == null || t.profit! <= 0).toList();
 
-      final double tradingProfit = winningTrades.fold(
-          0.0, (sum, t) => sum + (t.profit ?? 0));
-      const double dividends = 0.0; // Would come from dividend records
-      const double interest = 0.0; // Would come from interest records
-      const double otherIncome = 0.0;
-      final double totalRevenue =
-          tradingProfit + dividends + interest + otherIncome;
+      final tradingProfit = winningTrades.fold<double>(
+        0.0,
+        (sum, t) => sum + (t.profit ?? 0),
+      );
+      const dividends = 0.0; // Would come from dividend records
+      const interest = 0.0; // Would come from interest records
+      const otherIncome = 0.0;
+      final totalRevenue = tradingProfit + dividends + interest + otherIncome;
 
       // ==================== OPERATING COSTS ====================
       // Calculate commissions from trades
-      double commissions = 0.0;
+      var commissions = 0.0;
       for (final trade in tradesInPeriod) {
         final tradeValue = trade.quantity * trade.entryPrice;
-        commissions +=
-            tradeValue *
+        commissions += tradeValue *
             (commissionRate ?? 0.001); // Commission on entry and exit
-        commissions +=
-            tradeValue *
-            (commissionRate ?? 0.001);
+        commissions += tradeValue * (commissionRate ?? 0.001);
       }
 
-      double spreads = 0.0; // Average spread cost per trade
+      var spreads = 0.0; // Average spread cost per trade
       if (tradesInPeriod.isNotEmpty) {
         spreads = tradesInPeriod.length *
             2.0; // Approximate spread cost (varies by instrument)
       }
 
-      const double platformFees = 0.0; // Monthly platform fees
-      const double withdrawalFees = 0.0; // Withdrawal transaction fees
-      const double otherCosts = 0.0;
+      const platformFees = 0.0; // Monthly platform fees
+      const withdrawalFees = 0.0; // Withdrawal transaction fees
+      const otherCosts = 0.0;
 
-      final double totalCosts =
+      final totalCosts =
           commissions + spreads + platformFees + withdrawalFees + otherCosts;
 
       // ==================== NET PROFIT/LOSS ====================
-      final double grossProfit = tradingProfit;
-      final double operatingProfit = grossProfit - (commissions + spreads);
-      final double netProfit = totalRevenue - totalCosts;
-      final double profitMargin =
+      final grossProfit = tradingProfit;
+      final operatingProfit = grossProfit - (commissions + spreads);
+      final netProfit = totalRevenue - totalCosts;
+      final profitMargin =
           totalRevenue > 0 ? ((netProfit / totalRevenue) * 100) : 0.0;
-      final double roi = totalCapital > 0
-          ? ((netProfit / totalCapital) * 100)
-          : 0.0;
+      final roi = totalCapital > 0 ? ((netProfit / totalCapital) * 100) : 0.0;
 
       // ==================== CASH FLOW ====================
-      final List<CashFlowEntry> cashFlowIn = [];
-      final List<CashFlowEntry> cashFlowOut = [];
+      final cashFlowIn = <CashFlowEntry>[];
+      final cashFlowOut = <CashFlowEntry>[];
 
       // Add trade profits as cash flow
       for (final trade in winningTrades) {
@@ -181,16 +180,21 @@ class FinancialService extends ChangeNotifier {
         );
       }
 
-      final double totalCashIn = cashFlowIn.fold(0.0, (sum, e) => sum + e.amount);
-      final double totalCashOut =
-          cashFlowOut.fold(0.0, (sum, e) => sum + e.amount);
-      final double netCashFlow = totalCashIn - totalCashOut;
+      final totalCashIn = cashFlowIn.fold<double>(
+        0.0,
+        (sum, e) => sum + e.amount,
+      );
+      final totalCashOut = cashFlowOut.fold<double>(
+        0.0,
+        (sum, e) => sum + e.amount,
+      );
+      final netCashFlow = totalCashIn - totalCashOut;
 
       // ==================== ACCOUNT BALANCE ====================
-      final double openingBalance =
+      final openingBalance =
           account.balance - netProfit; // Reconstruct opening balance
-      final double closingBalance = account.balance;
-      final double balanceChange = closingBalance - openingBalance;
+      final closingBalance = account.balance;
+      final balanceChange = closingBalance - openingBalance;
 
       // Create financial statement
       final statement = FinancialStatement(

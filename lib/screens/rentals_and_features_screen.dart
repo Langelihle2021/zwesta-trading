@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../widgets/logo_widget.dart';
+import 'consolidated_reports_screen.dart';
 
 class RentalsAndFeaturesScreen extends StatefulWidget {
   const RentalsAndFeaturesScreen({Key? key}) : super(key: key);
@@ -37,20 +39,51 @@ class _RentalsAndFeaturesScreenState extends State<RentalsAndFeaturesScreen> {
   ];
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
+      backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
-        title: const Text('Rentals & Features'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+        backgroundColor: const Color(0xFF111633),
+        elevation: 0,
+        title: const Row(
+          children: [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Rentals & Features'),
+          ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
+              ),
+              child: const Text(
+                'Subscriptions and feature access are now aligned with the main mobile workflow.',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
             // Active Rentals
             Text(
               'Active Subscriptions',
@@ -61,6 +94,7 @@ class _RentalsAndFeaturesScreenState extends State<RentalsAndFeaturesScreen> {
                 .where((r) => r['status'] == 'Active')
                 .map(
                   (rental) => Card(
+                    color: const Color(0xFF1A1F3A),
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -144,7 +178,7 @@ class _RentalsAndFeaturesScreenState extends State<RentalsAndFeaturesScreen> {
                     ),
                   ),
                 )
-                .toList(),
+                ,
             const SizedBox(height: 24),
 
             // Expired/Available Features
@@ -157,6 +191,7 @@ class _RentalsAndFeaturesScreenState extends State<RentalsAndFeaturesScreen> {
                 .where((r) => r['status'] == 'Expired')
                 .map(
                   (rental) => Card(
+                    color: const Color(0xFF1A1F3A),
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -221,11 +256,10 @@ class _RentalsAndFeaturesScreenState extends State<RentalsAndFeaturesScreen> {
                     ),
                   ),
                 )
-                .toList(),
+                ,
             const SizedBox(height: 16),
           ],
         ),
       ),
     );
-  }
 }

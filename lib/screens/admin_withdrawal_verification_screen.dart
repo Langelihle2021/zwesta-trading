@@ -1,9 +1,12 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
+import 'consolidated_reports_screen.dart';
 
 class AdminWithdrawalVerificationScreen extends StatefulWidget {
   const AdminWithdrawalVerificationScreen({Key? key}) : super(key: key);
@@ -16,7 +19,7 @@ class AdminWithdrawalVerificationScreen extends StatefulWidget {
 class _AdminWithdrawalVerificationScreenState
     extends State<AdminWithdrawalVerificationScreen> {
   List<Map<String, dynamic>> _pendingWithdrawals = [];
-  List<Map<String, dynamic>> _verifiedWithdrawals = [];
+  final List<Map<String, dynamic>> _verifiedWithdrawals = [];
   bool _isLoading = true;
   String? _errorMessage;
   String? _successMessage;
@@ -120,20 +123,33 @@ class _AdminWithdrawalVerificationScreenState
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
+        title: const Row(
           children: [
-            const LogoWidget(size: 40, showText: false),
-            const SizedBox(width: 12),
-            const Expanded(
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Expanded(
               child: Text('Admin: Withdrawal Verification'),
             ),
           ],
         ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -257,17 +273,16 @@ class _AdminWithdrawalVerificationScreenState
         ],
       ),
     );
-  }
 
   Widget _buildPendingList() {
     if (_pendingWithdrawals.isEmpty) {
-      return Center(
+      return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.check_circle, size: 48, color: Colors.grey),
-            const SizedBox(height: 12),
-            const Text('No pending withdrawals'),
+            SizedBox(height: 12),
+            Text('No pending withdrawals'),
           ],
         ),
       );
@@ -424,13 +439,13 @@ class _AdminWithdrawalVerificationScreenState
 
   Widget _buildVerifiedList() {
     if (_verifiedWithdrawals.isEmpty) {
-      return Center(
+      return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.history, size: 48, color: Colors.grey),
-            const SizedBox(height: 12),
-            const Text('No verified withdrawals yet'),
+            SizedBox(height: 12),
+            Text('No verified withdrawals yet'),
           ],
         ),
       );

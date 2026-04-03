@@ -1,9 +1,15 @@
-import 'package:flutter/foundation.dart';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
 import '../utils/environment_config.dart';
 
 class PasswordResetService extends ChangeNotifier {
+
+  PasswordResetService() {
+    _apiUrl = EnvironmentConfig.apiUrl;
+  }
   String? _apiUrl;
   bool _isLoading = false;
   String? _errorMessage;
@@ -20,10 +26,6 @@ class PasswordResetService extends ChangeNotifier {
   String? get successMessage => _successMessage;
   bool get isOtpSent => _otpSent != null;
   String? get resetEmail => _resetEmail;
-
-  PasswordResetService() {
-    _apiUrl = EnvironmentConfig.apiUrl;
-  }
 
   /// Request password reset - sends OTP via email or WhatsApp
   Future<bool> requestPasswordReset({

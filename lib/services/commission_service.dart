@@ -1,18 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class Commission {
-  final String commissionId;
-  final String botId;
-  final double amount;
-  final String source; // 'trade' or 'referral'
-  final String status; // 'pending', 'completed', 'withdrawn'
-  final DateTime createdAt;
-  final String? referrerUserId; // If commission from referral
-  final String? referrerName;
 
   Commission({
     required this.commissionId,
@@ -25,8 +19,7 @@ class Commission {
     this.referrerName,
   });
 
-  factory Commission.fromJson(Map<String, dynamic> json) {
-    return Commission(
+  factory Commission.fromJson(Map<String, dynamic> json) => Commission(
       commissionId: json['commission_id'] ?? '',
       botId: json['bot_id'] ?? '',
       amount: (json['amount'] ?? 0).toDouble(),
@@ -36,15 +29,17 @@ class Commission {
       referrerUserId: json['referrer_user_id'],
       referrerName: json['referrer_name'],
     );
-  }
+  final String commissionId;
+  final String botId;
+  final double amount;
+  final String source; // 'trade' or 'referral'
+  final String status; // 'pending', 'completed', 'withdrawn'
+  final DateTime createdAt;
+  final String? referrerUserId; // If commission from referral
+  final String? referrerName;
 }
 
 class CommissionStats {
-  final double totalEarned;
-  final double totalPending;
-  final double totalWithdrawn;
-  final int tradeCommissions;
-  final int referralCommissions;
 
   CommissionStats({
     required this.totalEarned,
@@ -54,18 +49,26 @@ class CommissionStats {
     required this.referralCommissions,
   });
 
-  factory CommissionStats.fromJson(Map<String, dynamic> json) {
-    return CommissionStats(
+  factory CommissionStats.fromJson(Map<String, dynamic> json) => CommissionStats(
       totalEarned: (json['total_earned'] ?? 0).toDouble(),
       totalPending: (json['total_pending'] ?? 0).toDouble(),
       totalWithdrawn: (json['total_withdrawn'] ?? 0).toDouble(),
       tradeCommissions: json['trade_commissions'] ?? 0,
       referralCommissions: json['referral_commissions'] ?? 0,
     );
-  }
+  final double totalEarned;
+  final double totalPending;
+  final double totalWithdrawn;
+  final int tradeCommissions;
+  final int referralCommissions;
 }
 
 class CommissionService extends ChangeNotifier {
+
+  CommissionService() {
+    _apiUrl = EnvironmentConfig.apiUrl;
+    _loadSavedCommissions();
+  }
   List<Commission> _commissions = [];
   CommissionStats? _stats;
   bool _isLoading = false;
@@ -82,11 +85,6 @@ class CommissionService extends ChangeNotifier {
       (_summary?['top_earning_bots'] as List?)?.cast<Map<String, dynamic>>() ?? [];
   double get last30DaysEarned =>
       (_summary?['summary']?['last_30_days_earned'] ?? 0).toDouble();
-
-  CommissionService() {
-    _apiUrl = EnvironmentConfig.apiUrl;
-    _loadSavedCommissions();
-  }
 
   /// Fetch commission history and stats
   Future<void> fetchCommissions() async {
@@ -147,19 +145,13 @@ class CommissionService extends ChangeNotifier {
   }
 
   /// Get commissions by source
-  List<Commission> getCommissionsBySource(String source) {
-    return _commissions.where((c) => c.source == source).toList();
-  }
+  List<Commission> getCommissionsBySource(String source) => _commissions.where((c) => c.source == source).toList();
 
   /// Get commissions by status
-  List<Commission> getCommissionsByStatus(String status) {
-    return _commissions.where((c) => c.status == status).toList();
-  }
+  List<Commission> getCommissionsByStatus(String status) => _commissions.where((c) => c.status == status).toList();
 
   /// Get commissions for specific bot
-  List<Commission> getCommissionsForBot(String botId) {
-    return _commissions.where((c) => c.botId == botId).toList();
-  }
+  List<Commission> getCommissionsForBot(String botId) => _commissions.where((c) => c.botId == botId).toList();
 
   /// Request commission withdrawal
   Future<bool> requestWithdrawal(double amount) async {

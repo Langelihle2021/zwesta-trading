@@ -1,13 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class AccountDetailScreen extends StatefulWidget {
-  final Map<String, dynamic> account;
 
-  const AccountDetailScreen({Key? key, required this.account}) : super(key: key);
+  const AccountDetailScreen({required this.account, Key? key}) : super(key: key);
+  final Map<String, dynamic> account;
 
   @override
   State<AccountDetailScreen> createState() => _AccountDetailScreenState();
@@ -132,8 +134,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
     );
   }
 
-  Widget _buildError() {
-    return Center(
+  Widget _buildError() => Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -151,7 +152,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
         ),
       ),
     );
-  }
 
   Widget _buildContent(bool isLive) {
     final account = _details!['account'] ?? {};
@@ -222,7 +222,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Balance',
+                  const Text('Balance',
                       style: TextStyle(
                           color: Colors.white54, fontSize: 12)),
                   Text(_fmt(balance),
@@ -272,8 +272,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
     );
   }
 
-  Widget _headerStatBox(String label, String value, Color color) {
-    return Expanded(
+  Widget _headerStatBox(String label, String value, Color color) => Expanded(
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
@@ -296,7 +295,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
         ),
       ),
     );
-  }
 
   Widget _buildProfitSummaryBar(Map<String, dynamic> stats,
       Map<String, dynamic> withdrawals, Map<String, dynamic> commissions) {
@@ -323,8 +321,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
     );
   }
 
-  Widget _miniStat(String label, String value, Color color) {
-    return Expanded(
+  Widget _miniStat(String label, String value, Color color) => Expanded(
       child: Column(
         children: [
           Text(value,
@@ -337,12 +334,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
         ],
       ),
     );
-  }
 
-  Widget _divider() {
-    return Container(
+  Widget _divider() => Container(
         width: 1, height: 30, color: Colors.white.withOpacity(0.1));
-  }
 
   // --- TRADES TAB ---
   Widget _buildTradesTab(Map<String, dynamic> stats) {
@@ -474,7 +468,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
                 if (commission != 0 || swap != 0)
                   Text(
                     'Comm: ${_fmt(commission)}  Swap: ${_fmt(swap)}',
-                    style: TextStyle(
+                    style: const TextStyle(
                         color: Colors.white24, fontSize: 10),
                   ),
               ],
@@ -494,7 +488,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
               ),
               Text(
                 'net: ${_fmt(profit + commission + swap)}',
-                style: TextStyle(color: Colors.white30, fontSize: 10),
+                style: const TextStyle(color: Colors.white30, fontSize: 10),
               ),
             ],
           ),
@@ -652,8 +646,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
   Widget _buildSummaryTab(Map<String, dynamic> stats,
       Map<String, dynamic> withdrawals, Map<String, dynamic> commissions) {
     final grossProfit = stats['grossProfit'] ?? 0.0;
-    final totalComm = (stats['totalCommission'] ?? 0.0);
-    final totalSwap = (stats['totalSwap'] ?? 0.0);
+    final totalComm = stats['totalCommission'] ?? 0.0;
+    final totalSwap = stats['totalSwap'] ?? 0.0;
     final netProfit = stats['netProfit'] ?? 0.0;
     final totalWithdrawn = withdrawals['totalWithdrawn'] ?? 0.0;
     final commissionEarned = commissions['totalEarned'] ?? 0.0;
@@ -768,8 +762,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
   }
 
   Widget _summaryCard(
-      String title, IconData icon, Color color, List<Widget> children) {
-    return Container(
+      String title, IconData icon, Color color, List<Widget> children) => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.05),
@@ -795,11 +788,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
         ],
       ),
     );
-  }
 
   Widget _summaryRow(String label, String value, Color valueColor,
-      {bool bold = false, bool large = false}) {
-    return Padding(
+      {bool bold = false, bool large = false}) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -816,12 +807,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
         ],
       ),
     );
-  }
 
-  Widget _summaryDivider() {
-    return Padding(
+  Widget _summaryDivider() => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Divider(color: Colors.white.withOpacity(0.1), height: 1),
     );
-  }
 }

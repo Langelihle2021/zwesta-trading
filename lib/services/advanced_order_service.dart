@@ -18,6 +18,19 @@ enum OrderDirection {
 
 /// Model for advanced trading orders
 class AdvancedOrder {
+
+  AdvancedOrder({
+    required this.symbol,
+    required this.orderType,
+    required this.direction,
+    required this.quantity,
+    required this.brokerName, required this.accountId, required this.sessionToken, this.limitPrice,
+    this.stopPrice,
+    this.takeProfit,
+    this.stopLoss,
+    this.trailingStop = false,
+    this.trailingStopPips,
+  });
   final String symbol;
   final OrderType orderType;
   final OrderDirection direction;
@@ -31,22 +44,6 @@ class AdvancedOrder {
   final String brokerName;
   final String accountId;
   final String sessionToken;
-
-  AdvancedOrder({
-    required this.symbol,
-    required this.orderType,
-    required this.direction,
-    required this.quantity,
-    this.limitPrice,
-    this.stopPrice,
-    this.takeProfit,
-    this.stopLoss,
-    this.trailingStop = false,
-    this.trailingStopPips,
-    required this.brokerName,
-    required this.accountId,
-    required this.sessionToken,
-  });
 
   Map<String, dynamic> toJson() => {
     'symbol': symbol,

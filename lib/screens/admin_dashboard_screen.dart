@@ -1,11 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
+import 'bot_strategy_configuration_screen.dart';
+import 'consolidated_reports_screen.dart';
 import 'symbol_management_screen.dart';
 import 'user_account_management_screen.dart';
-import 'bot_strategy_configuration_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({Key? key}) : super(key: key);
@@ -46,19 +49,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
+        title: const Row(
           children: [
-            const LogoWidget(size: 40, showText: false),
-            const SizedBox(width: 12),
-            const Text('Admin Dashboard'),
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Text('Admin Dashboard'),
           ],
         ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _refresh,
@@ -146,7 +160,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '\$${(platformEarnings).toStringAsFixed(2)}',
+                                  '\$${platformEarnings.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
@@ -179,7 +193,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         const Divider(),
                         const SizedBox(height: 12),
                         const Text(
-                          'Revenue Model: \$100 profit → \$25 to platform, \$5 to referrer, \$70 to client',
+                          r'Revenue Model: $100 profit → $25 to platform, $5 to referrer, $70 to client',
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey,
@@ -255,9 +269,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 const SizedBox(height: 12),
                 if (users.isEmpty)
-                  Card(
+                  const Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: EdgeInsets.all(20),
                       child: Center(
                         child: Column(
                           children: [
@@ -266,8 +280,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               size: 48,
                               color: Colors.grey,
                             ),
-                            const SizedBox(height: 12),
-                            const Text('No active users yet'),
+                            SizedBox(height: 12),
+                            Text('No active users yet'),
                           ],
                         ),
                       ),
@@ -382,35 +396,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         },
       ),
       bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: Colors.grey[900],
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
+        backgroundColor: const Color(0xFF111633),
+        selectedItemColor: const Color(0xFF00E5FF),
+        unselectedItemColor: Colors.white38,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.home),
+            icon: Icon(Icons.dashboard_rounded),
             label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.assessment_outlined),
+            label: 'Reports',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.admin_panel_settings),
             label: 'Admin',
           ),
         ],
-        currentIndex: 1,
+        currentIndex: 2,
         onTap: (index) {
           if (index == 0) {
             Navigator.of(context).popUntil((route) => route.isFirst);
+          } else if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (context) => const ConsolidatedReportsScreen()),
+            );
           }
         },
       ),
     );
-  }
 }
 
 class _StatCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
 
   const _StatCard({
     required this.title,
@@ -418,10 +436,13 @@ class _StatCard extends StatelessWidget {
     required this.icon,
     required this.color,
   });
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
+  Widget build(BuildContext context) => Card(
       color: Colors.grey[800],
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -452,14 +473,9 @@ class _StatCard extends StatelessWidget {
         ),
       ),
     );
-  }
 }
 
 class _ManagementCard extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
 
   const _ManagementCard({
     required this.title,
@@ -467,10 +483,13 @@ class _ManagementCard extends StatelessWidget {
     required this.color,
     required this.onTap,
   });
+  final String title;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
+  Widget build(BuildContext context) => GestureDetector(
       onTap: onTap,
       child: Card(
         color: Colors.grey[800],
@@ -491,5 +510,4 @@ class _ManagementCard extends StatelessWidget {
         ),
       ),
     );
-  }
 }

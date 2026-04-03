@@ -1,20 +1,18 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:flutter/material.dart';
+
 import '../utils/constants.dart';
 
 class LiveBotActivityWidget extends StatefulWidget {
+
+  const LiveBotActivityWidget({
+    required this.brokerName, required this.accountNumber, required this.isConnected, required this.credentialsValid, Key? key,
+  }) : super(key: key);
   final String brokerName;
   final String accountNumber;
   final bool isConnected;
   final bool credentialsValid;
-
-  const LiveBotActivityWidget({
-    Key? key,
-    required this.brokerName,
-    required this.accountNumber,
-    required this.isConnected,
-    required this.credentialsValid,
-  }) : super(key: key);
 
   @override
   State<LiveBotActivityWidget> createState() => _LiveBotActivityWidgetState();
@@ -23,10 +21,10 @@ class LiveBotActivityWidget extends StatefulWidget {
 class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
   late Timer _tradeTimer;
   late Timer _connectionCheckTimer;
-  List<Map<String, dynamic>> _liveTrades = [];
+  final List<Map<String, dynamic>> _liveTrades = [];
   int _totalScalps = 0;
 
-  final List<String> _symbols = ['BTCUSDm', 'ETHUSDm', 'EURUSDm', 'USDJPYm', 'XAUUSDm', 'AAPLm', 'AMDm', 'MSFTm', 'NVDAm', 'JPMm', 'BACm', 'WFCm', 'GOOGLm', 'METAm', 'ORCLm', 'TSMm'];
+  final List<String> _symbols = ['BTCUSD', 'ETHUSD', 'EURUSD', 'USDJPY', 'XAUUSD', 'AAPL', 'AMD', 'MSFT', 'NVDA', 'JPM', 'BAC', 'WFC', 'GOOGL', 'META', 'ORCL', 'TSM'];
   final List<String> _types = ['BUY', 'SELL'];
 
   @override
@@ -37,7 +35,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
   }
 
   void _startConnectionCheck() {
-    _connectionCheckTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _connectionCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {});
       }
@@ -47,7 +45,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
   void _startLiveTrading() {
     if (!widget.isConnected || !widget.credentialsValid) return;
 
-    _tradeTimer = Timer.periodic(Duration(seconds: 5), (timer) {
+    _tradeTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (!widget.isConnected || !widget.credentialsValid) {
         timer.cancel();
         return;
@@ -85,8 +83,8 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
 
   @override
   void dispose() {
-    if (_tradeTimer != null) _tradeTimer.cancel();
-    if (_connectionCheckTimer != null) _connectionCheckTimer.cancel();
+    _tradeTimer.cancel();
+    _connectionCheckTimer.cancel();
     super.dispose();
   }
 
@@ -153,7 +151,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
                       border: Border.all(color: AppColors.successColor),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
+                    child: const Text(
                       '✓ Credentials Valid',
                       style: TextStyle(
                         color: AppColors.successColor,
@@ -170,7 +168,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
                       border: Border.all(color: AppColors.dangerColor),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
+                    child: const Text(
                       '✗ Invalid Credentials',
                       style: TextStyle(
                         color: AppColors.dangerColor,
@@ -191,7 +189,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
               children: [
                 _buildStatBox('Total Scalps', _totalScalps.toString()),
                 _buildStatBox('Session Profit', '+\$${(_totalScalps * 12.5).toStringAsFixed(2)}'),
-                _buildStatBox('Win Rate', '${((_totalScalps > 0) ? 85 : 0)}%'),
+                _buildStatBox('Win Rate', '${(_totalScalps > 0) ? 85 : 0}%'),
               ],
             ),
             const SizedBox(height: 16),
@@ -199,7 +197,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
             const SizedBox(height: 16),
 
             // Live Trade Feed
-            Text(
+            const Text(
               'Live Scalping Activity',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -217,10 +215,10 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(color: AppColors.dangerColor.withOpacity(0.3)),
                 ),
-                child: Column(
+                child: const Column(
                   children: [
                     Icon(Icons.warning_amber_rounded, color: AppColors.dangerColor, size: 28),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     Text(
                       'Bot Disconnected',
                       style: TextStyle(
@@ -229,8 +227,8 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
                         fontSize: 13,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    const Text(
+                    SizedBox(height: 4),
+                    Text(
                       'Check broker credentials and connection',
                       style: TextStyle(fontSize: 11, color: Colors.white70),
                     ),
@@ -245,8 +243,8 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(color: Colors.blue.withOpacity(0.3)),
                 ),
-                child: Column(
-                  children: const [
+                child: const Column(
+                  children: [
                     Icon(Icons.hourglass_empty, color: Colors.blue, size: 28),
                     SizedBox(height: 8),
                     Text(
@@ -385,8 +383,7 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
     );
   }
 
-  Widget _buildStatBox(String label, String value) {
-    return Expanded(
+  Widget _buildStatBox(String label, String value) => Expanded(
       child: Container(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -412,5 +409,4 @@ class _LiveBotActivityWidgetState extends State<LiveBotActivityWidget> {
         ),
       ),
     );
-  }
 }

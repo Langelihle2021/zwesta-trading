@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
-import '../services/advanced_order_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../services/advanced_order_service.dart';
+
 class AdvancedOrderWidget extends StatefulWidget {
+
+  const AdvancedOrderWidget({
+    required this.brokerName, required this.accountId, required this.sessionToken, Key? key,
+    this.onOrderPlaced,
+  }) : super(key: key);
   final String brokerName;
   final String accountId;
   final String sessionToken;
   final VoidCallback? onOrderPlaced;
-
-  const AdvancedOrderWidget({
-    Key? key,
-    required this.brokerName,
-    required this.accountId,
-    required this.sessionToken,
-    this.onOrderPlaced,
-  }) : super(key: key);
 
   @override
   State<AdvancedOrderWidget> createState() => _AdvancedOrderWidgetState();
@@ -179,8 +177,7 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context) => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1F3A),
@@ -236,7 +233,7 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
                       ),
                     ],
                     selected: {_selectedDirection},
-                    onSelectionChanged: (Set<OrderDirection> newSelection) {
+                    onSelectionChanged: (newSelection) {
                       setState(() => _selectedDirection = newSelection.first);
                     },
                   ),
@@ -271,7 +268,7 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
                   value: _selectedOrderType,
                   isExpanded: true,
                   underline: const SizedBox(),
-                  onChanged: (OrderType? newValue) {
+                  onChanged: (newValue) {
                     if (newValue != null) {
                       setState(() => _selectedOrderType = newValue);
                     }
@@ -389,7 +386,7 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
                     title: const Text('Use Trailing Stop'),
                     subtitle: const Text('Follow price movements'),
                     value: _useTrailingStop,
-                    onChanged: (bool? value) {
+                    onChanged: (value) {
                       setState(() => _useTrailingStop = value ?? false);
                     },
                   ),
@@ -421,7 +418,7 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
               child: ElevatedButton.icon(
                 onPressed: _isSubmitting ? null : _submitOrder,
                 icon: _isSubmitting
-                    ? SizedBox(
+                    ? const SizedBox(
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
@@ -443,5 +440,4 @@ class _AdvancedOrderWidgetState extends State<AdvancedOrderWidget> {
         ),
       ),
     );
-  }
 }

@@ -1,9 +1,12 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
 import '../services/commission_service.dart';
 import '../widgets/logo_widget.dart';
+import 'consolidated_reports_screen.dart';
+import 'user_wallet_screen.dart';
 
 class CommissionDashboardScreen extends StatefulWidget {
   const CommissionDashboardScreen({Key? key}) : super(key: key);
@@ -22,12 +25,11 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Commissions'),
@@ -35,6 +37,27 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
         ),
         backgroundColor: const Color(0xFF111633),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            tooltip: 'Wallet',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const UserWalletScreen()));
+            },
+          ),
+        ],
       ),
       body: Consumer<CommissionService>(
         builder: (context, service, _) {
@@ -50,6 +73,19 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withOpacity(0.08)),
+                  ),
+                  child: Text(
+                    'Commission tracking, reports, and wallet access are now linked directly on mobile.',
+                    style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
                 // Stats cards
                 if (stats != null) ...[
                   Row(
@@ -214,10 +250,8 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
         },
       ),
     );
-  }
 
-  Widget _statCard(String label, String value, Color color, IconData icon) {
-    return Expanded(
+  Widget _statCard(String label, String value, Color color, IconData icon) => Expanded(
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -237,7 +271,6 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
         ),
       ),
     );
-  }
 
   Widget _buildTopBotsPieChart(List<Map<String, dynamic>> topBots) {
     final chartColors = [

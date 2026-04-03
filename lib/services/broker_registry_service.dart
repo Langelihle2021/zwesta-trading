@@ -1,16 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class BrokerConfig {
-  final String id;
-  final String name;
-  final String displayName;
-  final String logo;
-  final List<String> accountTypes; // ['DEMO', 'LIVE']
-  final bool isActive;
-  final String? description;
 
   BrokerConfig({
     required this.id,
@@ -22,8 +17,7 @@ class BrokerConfig {
     this.description,
   });
 
-  factory BrokerConfig.fromJson(Map<String, dynamic> json) {
-    return BrokerConfig(
+  factory BrokerConfig.fromJson(Map<String, dynamic> json) => BrokerConfig(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
       displayName: json['display_name'] ?? json['name'] ?? '',
@@ -32,7 +26,13 @@ class BrokerConfig {
       isActive: json['is_active'] ?? true,
       description: json['description'],
     );
-  }
+  final String id;
+  final String name;
+  final String displayName;
+  final String logo;
+  final List<String> accountTypes; // ['DEMO', 'LIVE']
+  final bool isActive;
+  final String? description;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -46,6 +46,12 @@ class BrokerConfig {
 }
 
 class BrokerRegistryService extends ChangeNotifier {
+
+  BrokerRegistryService() {
+    _apiUrl = EnvironmentConfig.apiUrl;
+    _initializeDefaultBrokers();
+    fetchBrokersFromBackend();
+  }
   List<BrokerConfig> _brokers = [];
   bool _isLoading = false;
   String? _errorMessage;
@@ -55,12 +61,6 @@ class BrokerRegistryService extends ChangeNotifier {
   List<BrokerConfig> get activeBrokers => _brokers.where((b) => b.isActive).toList();
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
-
-  BrokerRegistryService() {
-    _apiUrl = EnvironmentConfig.apiUrl;
-    _initializeDefaultBrokers();
-    fetchBrokersFromBackend();
-  }
 
   /// Initialize with default brokers (fallback if backend is down)
   void _initializeDefaultBrokers() {

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../services/binance_trading_service.dart';
+
 import '../services/auth_service.dart';
+import '../services/binance_trading_service.dart';
 import '../services/notification_service.dart';
+import 'bot_dashboard_screen.dart';
+import 'consolidated_reports_screen.dart';
 
 class BinanceWithdrawalScreen extends StatefulWidget {
   const BinanceWithdrawalScreen({Key? key}) : super(key: key);
@@ -25,9 +28,9 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
   List<dynamic> _notifications = [];
 
   final List<Map<String, String>> _networks = [
-    {'value': 'TRC20', 'label': 'TRC20 (Tron)', 'fee': '~\$1'},
-    {'value': 'BEP20', 'label': 'BEP20 (BSC)', 'fee': '~\$0.30'},
-    {'value': 'ERC20', 'label': 'ERC20 (Ethereum)', 'fee': '~\$5-20'},
+    {'value': 'TRC20', 'label': 'TRC20 (Tron)', 'fee': r'~$1'},
+    {'value': 'BEP20', 'label': 'BEP20 (BSC)', 'fee': r'~$0.30'},
+    {'value': 'ERC20', 'label': 'ERC20 (Ethereum)', 'fee': r'~$5-20'},
   ];
 
   @override
@@ -61,7 +64,7 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
   Future<void> _runProfitCheck() async {
     final target = double.tryParse(_targetController.text) ?? 0;
     if (target <= 0) {
-      _showSnack('Enter a valid profit target > \$0');
+      _showSnack(r'Enter a valid profit target > $0');
       return;
     }
     setState(() { _checking = true; _lastCheckResult = null; });
@@ -130,14 +133,32 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
         title: Text('Binance Withdrawals',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.smart_toy_outlined),
+            tooltip: 'Bots',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const BotDashboardScreen()));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadNotifications),
         ],
       ),
@@ -161,10 +182,8 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildInfoBanner() {
-    return Container(
+  Widget _buildInfoBanner() => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [Color(0xFFF0B90B), Color(0xFFE8A90A)]),
@@ -194,10 +213,8 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildProfitCheckCard() {
-    return Container(
+  Widget _buildProfitCheckCard() => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -274,7 +291,6 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
         ],
       ),
     );
-  }
 
   Widget _buildCheckResultCard() {
     final r = _lastCheckResult!;
@@ -338,8 +354,7 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
     );
   }
 
-  Widget _buildWithdrawCard() {
-    return Container(
+  Widget _buildWithdrawCard() => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -449,11 +464,9 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
         ],
       ),
     );
-  }
 
   Widget _resultBox({required Color color, required IconData icon,
-      required String title, required String subtitle, Widget? extra}) {
-    return Container(
+      required String title, required String subtitle, Widget? extra}) => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
@@ -474,10 +487,8 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
+  Widget _infoRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -487,10 +498,8 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildNotificationsSection() {
-    return Column(
+  Widget _buildNotificationsSection() => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
@@ -523,10 +532,9 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
             ]),
           )
         else
-          ...List<Widget>.from(_notifications.map((n) => _buildNotifCard(n))),
+          ...List<Widget>.from(_notifications.map(_buildNotifCard)),
       ],
     );
-  }
 
   Widget _buildNotifCard(dynamic n) {
     final isPending = n['status'] == 'pending';
@@ -572,13 +580,11 @@ class _BinanceWithdrawalScreenState extends State<BinanceWithdrawalScreen> {
     );
   }
 
-  Widget _miniStat(String label, String value, Color color) {
-    return Column(
+  Widget _miniStat(String label, String value, Color color) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: GoogleFonts.poppins(color: Colors.white30, fontSize: 9)),
         Text(value, style: GoogleFonts.poppins(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 }

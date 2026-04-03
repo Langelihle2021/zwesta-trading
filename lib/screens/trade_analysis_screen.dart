@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../services/trading_service.dart';
+import 'package:provider/provider.dart';
+
 import '../services/bot_service.dart';
-import '../utils/constants.dart';
+import '../services/trading_service.dart';
 import '../widgets/custom_widgets.dart';
 
 class TradeAnalysisScreen extends StatefulWidget {
@@ -31,13 +31,12 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       extendBodyBehindAppBar: true,
       appBar: CustomAppBar(
         title: 'Trade Analysis',
         showBackButton: true,
-        actions: [
+        actions: const [
           // Add any actions if needed
         ],
         bottom: TabBar(
@@ -71,8 +70,8 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
             // ...existing code...
             // (rest of the metrics and TabBarView logic remains unchanged)
             // ...existing code...
-            int maxConsecWins = 0, maxConsecLosses = 0;
-            int curWins = 0, curLosses = 0;
+            var maxConsecWins = 0, maxConsecLosses = 0;
+            var curWins = 0, curLosses = 0;
             for (final t in closedTrades) {
               if ((t.profit ?? 0) > 0) {
                 curWins++;
@@ -92,9 +91,9 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
                   closedCount: closedTrades.length,
                   winCount: closedTrades.where((t) => (t.profit ?? 0) > 0).length,
                   lossCount: closedTrades.where((t) => (t.profit ?? 0) < 0).length,
-                  winRate: closedTrades.length > 0 ? (closedTrades.where((t) => (t.profit ?? 0) > 0).length / closedTrades.length * 100) : 0.0,
+                  winRate: closedTrades.isNotEmpty ? (closedTrades.where((t) => (t.profit ?? 0) > 0).length / closedTrades.length * 100) : 0.0,
                   totalProfit: closedTrades.fold<double>(0, (s, t) => s + (t.profit ?? 0)),
-                  avgProfit: closedTrades.length > 0 ? closedTrades.fold<double>(0, (s, t) => s + (t.profit ?? 0)) / closedTrades.length : 0.0,
+                  avgProfit: closedTrades.isNotEmpty ? closedTrades.fold<double>(0, (s, t) => s + (t.profit ?? 0)) / closedTrades.length : 0.0,
                   profitFactor: closedTrades.where((t) => (t.profit ?? 0) < 0).fold<double>(0, (s, t) => s + (t.profit ?? 0).abs()) > 0
                       ? closedTrades.where((t) => (t.profit ?? 0) > 0).fold<double>(0, (s, t) => s + (t.profit ?? 0)) /
                           closedTrades.where((t) => (t.profit ?? 0) < 0).fold<double>(0, (s, t) => s + (t.profit ?? 0).abs())
@@ -125,7 +124,6 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
         ),
       ),
     );
-  }
 
   // ── OVERVIEW TAB ──
   Widget _buildOverviewTab({
@@ -139,8 +137,7 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
     required double profitFactor,
     required int activeBots,
     required int openTrades,
-  }) {
-    return SingleChildScrollView(
+  }) => SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
@@ -273,7 +270,6 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
         ],
       ),
     );
-  }
 
   // ── PERFORMANCE TAB ──
   Widget _buildPerformanceTab({
@@ -284,8 +280,7 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
     required double grossLoss,
     required int maxConsecWins,
     required int maxConsecLosses,
-  }) {
-    return SingleChildScrollView(
+  }) => SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
@@ -384,17 +379,16 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
                     ),
                   )
                 else
-                  ...symbolList.take(8).map((s) => _buildSymbolRow(s)),
+                  ...symbolList.take(8).map(_buildSymbolRow),
               ],
             ),
           ),
         ],
       ),
     );
-  }
 
   Widget _buildSymbolRow(_SymbolStats s) {
-    final maxVal = 1.0;
+    const maxVal = 1.0;
     final normalized = s.totalProfit.abs().clamp(0.0, 1000.0) / 1000.0;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -535,7 +529,7 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
               children: [
                 Row(
                   children: [
-                    Icon(Icons.lightbulb_outline, color: const Color(0xFFFFD600), size: 20),
+                    const Icon(Icons.lightbulb_outline, color: Color(0xFFFFD600), size: 20),
                     const SizedBox(width: 8),
                     Text('Recommendations', style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
                   ],
@@ -555,8 +549,7 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
     );
   }
 
-  Widget _recTile(String text, IconData icon) {
-    return Padding(
+  Widget _recTile(String text, IconData icon) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -567,7 +560,6 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
         ],
       ),
     );
-  }
 
   double _calculateRiskScore(double winRate, double pf, double maxDD) {
     double score = 0;
@@ -581,8 +573,7 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
     return score.clamp(0, 100);
   }
 
-  Widget _riskRow(String label, String value, Color color) {
-    return Padding(
+  Widget _riskRow(String label, String value, Color color) => Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -592,7 +583,6 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
         ],
       ),
     );
-  }
 
   // ── SHARED WIDGETS ──
 
@@ -629,8 +619,7 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
     );
   }
 
-  Widget _glassMetric(String label, String value, IconData icon, Color color) {
-    return _buildGlassCard(
+  Widget _glassMetric(String label, String value, IconData icon, Color color) => _buildGlassCard(
       child: Column(
         children: [
           Icon(icon, color: color, size: 24),
@@ -648,10 +637,8 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
         ],
       ),
     );
-  }
 
-  Widget _miniStat(String label, String value, Color color) {
-    return Expanded(
+  Widget _miniStat(String label, String value, Color color) => Expanded(
       child: Column(
         children: [
           Text(label, style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11)),
@@ -660,10 +647,8 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
         ],
       ),
     );
-  }
 
-  Widget _buildGlassCard({required Widget child}) {
-    return Container(
+  Widget _buildGlassCard({required Widget child}) => Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -673,16 +658,15 @@ class _TradeAnalysisScreenState extends State<TradeAnalysisScreen>
       ),
       child: child,
     );
-  }
 }
 
 class _SymbolStats {
+
+  _SymbolStats(this.symbol);
   final String symbol;
   int tradeCount = 0;
   int wins = 0;
   double totalProfit = 0;
-
-  _SymbolStats(this.symbol);
 
   void addTrade(double profit) {
     tradeCount++;

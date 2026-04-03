@@ -66,7 +66,7 @@ class _UserAccountManagementScreenState extends State<UserAccountManagementScree
 
     await showDialog(
       context: context,
-      builder: (BuildContext context) => Dialog(
+      builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -160,7 +160,7 @@ class _UserAccountManagementScreenState extends State<UserAccountManagementScree
 
     await showDialog(
       context: context,
-      builder: (BuildContext context) => Dialog(
+      builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -255,11 +255,10 @@ class _UserAccountManagementScreenState extends State<UserAccountManagementScree
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('User Account Management'),
@@ -294,7 +293,7 @@ class _UserAccountManagementScreenState extends State<UserAccountManagementScree
                           itemCount: _users.length,
                           itemBuilder: (context, index) {
                             final user = _users[index];
-                            bool isSelected = _selectedUser == user['user_id'];
+                            final isSelected = _selectedUser == user['user_id'];
                             return ListTile(
                               selected: isSelected,
                               selectedTileColor: Colors.deepPurple.withAlpha(100),
@@ -433,5 +432,4 @@ class _UserAccountManagementScreenState extends State<UserAccountManagementScree
               ],
             ),
     );
-  }
 }

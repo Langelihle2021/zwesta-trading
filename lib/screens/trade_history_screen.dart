@@ -1,9 +1,11 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/environment_config.dart';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+
 import '../services/auth_service.dart';
+import '../utils/environment_config.dart';
 
 class TradeHistoryScreen extends StatefulWidget {
   const TradeHistoryScreen({Key? key}) : super(key: key);
@@ -109,8 +111,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E27),
       appBar: AppBar(
         title: const Text('Trade History & Withdrawals'),
@@ -147,13 +148,10 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildTradesTab() {
-    return FutureBuilder<Map<String, dynamic>>(
+  Widget _buildTradesTab() => FutureBuilder<Map<String, dynamic>>(
       future: _tradeDataFuture,
-      builder: (context, tradeSnapshot) {
-        return FutureBuilder<Map<String, dynamic>>(
+      builder: (context, tradeSnapshot) => FutureBuilder<Map<String, dynamic>>(
           future: _tradeSummaryFuture,
           builder: (context, summarySnapshot) {
             if (tradeSnapshot.connectionState == ConnectionState.waiting ||
@@ -263,10 +261,8 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
               ),
             );
           },
-        );
-      },
+        ),
     );
-  }
 
   Widget _buildSummaryCard(Map<String, dynamic> summary) {
     final netProfit = (summary['netProfit'] as num?)?.toDouble() ?? 0;
@@ -303,8 +299,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
     );
   }
 
-  Widget _buildStatsGrid(Map<String, dynamic> summary) {
-    return GridView.count(
+  Widget _buildStatsGrid(Map<String, dynamic> summary) => GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -354,10 +349,8 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
         ),
       ],
     );
-  }
 
-  Widget _buildStatCard(String label, String value, Color color) {
-    return Container(
+  Widget _buildStatCard(String label, String value, Color color) => Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1F3A),
@@ -386,7 +379,6 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
         ],
       ),
     );
-  }
 
   Widget _buildTradeCard(Map<String, dynamic> trade) {
     final profitLoss = (trade['profitLoss'] as num?)?.toDouble() ?? 0;
@@ -476,8 +468,7 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
     );
   }
 
-  Widget _buildTradeDetail(String label, String value) {
-    return Column(
+  Widget _buildTradeDetail(String label, String value) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
@@ -497,10 +488,8 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
         ),
       ],
     );
-  }
 
-  Widget _buildWithdrawalsTab() {
-    return FutureBuilder<Map<String, dynamic>>(
+  Widget _buildWithdrawalsTab() => FutureBuilder<Map<String, dynamic>>(
       future: _fetchWithdrawalHistory(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -589,7 +578,6 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
         );
       },
     );
-  }
 
   Widget _buildWithdrawalCard(Map<String, dynamic> withdrawal) {
     final status = withdrawal['status'] ?? 'pending';
@@ -710,18 +698,15 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
 }
 
 class TabSelector extends StatelessWidget {
+
+  const TabSelector({
+    required this.selectedIndex, required this.onTabChanged, Key? key,
+  }) : super(key: key);
   final int selectedIndex;
   final Function(int) onTabChanged;
 
-  const TabSelector({
-    Key? key,
-    required this.selectedIndex,
-    required this.onTabChanged,
-  }) : super(key: key);
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context) => Container(
       color: const Color(0xFF1A1F3A),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -738,7 +723,6 @@ class TabSelector extends StatelessWidget {
         ],
       ),
     );
-  }
 
   Widget _buildTabButton(String label, int index) {
     final isSelected = selectedIndex == index;

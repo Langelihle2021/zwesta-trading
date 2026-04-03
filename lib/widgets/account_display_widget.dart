@@ -1,19 +1,19 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import '../utils/environment_config.dart';
+
 import '../screens/account_detail_screen.dart';
+import '../utils/environment_config.dart';
 
 class AccountDisplayWidget extends StatefulWidget {
-  final String tradingMode; // 'DEMO' or 'LIVE'
-  final VoidCallback onRefresh;
 
   const AccountDisplayWidget({
-    Key? key,
-    required this.tradingMode,
-    required this.onRefresh,
+    required this.tradingMode, required this.onRefresh, Key? key,
   }) : super(key: key);
+  final String tradingMode; // 'DEMO' or 'LIVE'
+  final VoidCallback onRefresh;
 
   @override
   State<AccountDisplayWidget> createState() => _AccountDisplayWidgetState();
@@ -101,13 +101,10 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
     }
   }
 
-  String _formatAmount(double amount) {
-    return '\$${amount.toStringAsFixed(2).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}';
-  }
+  String _formatAmount(double amount) => '\$${amount.toStringAsFixed(2).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}';
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
+  Widget build(BuildContext context) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Header with mode indicator and refresh button
@@ -143,7 +140,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
                   ),
                 const SizedBox(width: 8),
                 if (_isLoading)
-                  SizedBox(
+                  const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
@@ -225,7 +222,6 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
           ),
       ],
     );
-  }
 
   Widget _buildAccountCard(Map<String, dynamic> account) {
     final broker = account['broker'] ?? 'Unknown';
@@ -292,7 +288,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
                           const SizedBox(height: 2),
                           Text(
                             'Account #$accountNum',
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 11,
                               color: Colors.white54,
                             ),
@@ -324,7 +320,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      Icon(Icons.chevron_right,
+                      const Icon(Icons.chevron_right,
                           color: Colors.white24, size: 20),
                     ],
                   ),
@@ -374,7 +370,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
                             : dataSource.toString().contains('cache')
                                 ? 'Cached'
                                 : 'Offline',
-                        style: TextStyle(
+                        style: const TextStyle(
                             fontSize: 10,
                             color: Colors.white30),
                       ),
@@ -391,7 +387,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
 
               // Tap hint
               const SizedBox(height: 6),
-              Center(
+              const Center(
                 child: Text(
                   'Tap for detailed financials',
                   style: TextStyle(fontSize: 10, color: Colors.white24),
@@ -404,8 +400,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
     );
   }
 
-  Widget _statBox(String label, String value, Color color) {
-    return Expanded(
+  Widget _statBox(String label, String value, Color color) => Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
         decoration: BoxDecoration(
@@ -438,5 +433,4 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
         ),
       ),
     );
-  }
 }

@@ -10,7 +10,7 @@ class PDFService {
     required int winningTrades,
   }) async {
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
-    final currencyFormat = NumberFormat.currency(symbol: '\$');
+    final currencyFormat = NumberFormat.currency(symbol: r'$');
 
     // Calculate statistics
     final closedTrades = trades.where((t) => t.status == TradeStatus.closed).toList();
@@ -20,8 +20,8 @@ class PDFService {
         : (winningTrades / closedTrades.length) * 100;
 
     // Group trades by symbol
-    final Map<String, List<Trade>> tradesBySymbol = {};
-    for (var trade in trades) {
+    final tradesBySymbol = <String, List<Trade>>{};
+    for (final trade in trades) {
       if (!tradesBySymbol.containsKey(trade.symbol)) {
         tradesBySymbol[trade.symbol] = [];
       }
@@ -182,9 +182,9 @@ class PDFService {
                 ${tradesBySymbol.entries.map((entry) {
                   final symbol = entry.key;
                   final symbolTrades = entry.value;
-                  final totalProfit = symbolTrades.fold<double>(0.0, (sum, trade) => sum + (trade.profit ?? 0));
+                  final totalProfit = symbolTrades.fold<double>(0, (sum, trade) => sum + (trade.profit ?? 0));
                   final winCount = symbolTrades.where((t) => (t.profit ?? 0) > 0).length;
-                  final avgEntry = symbolTrades.fold<double>(0.0, (sum, trade) => sum + trade.entryPrice) / symbolTrades.length;
+                  final avgEntry = symbolTrades.fold<double>(0, (sum, trade) => sum + trade.entryPrice) / symbolTrades.length;
                   final profitPercent = avgEntry == 0 ? 0 : (totalProfit / avgEntry) * 100;
                   final profitClass = totalProfit >= 0 ? 'positive' : 'negative';
                   

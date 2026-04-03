@@ -1,5 +1,7 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
+
 import '../services/api_service.dart';
 import '../widgets/logo_widget.dart';
 
@@ -28,13 +30,12 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
   final List<String> _riskLevels = ['LOW', 'MEDIUM', 'HIGH'];
 
   final List<String> _commonSymbols = [
-    // Only tradeable symbols on Exness Demo Account 298997455
-    // with "m" suffix (micro lot size) as shown in MT5 Market Watch
-    'BTCUSDm',   // Bitcoin
-    'ETHUSDm',   // Ethereum
-    'EURUSDm',   // Euro
-    'USDJPYm',   // Japanese Yen
-    'XAUUSDm',   // Gold
+    // Exness Standard account symbols (no 'm' suffix)
+    'BTCUSD',   // Bitcoin
+    'ETHUSD',   // Ethereum
+    'EURUSD',   // Euro
+    'USDJPY',   // Japanese Yen
+    'XAUUSD',   // Gold
   ];
 
   @override
@@ -65,13 +66,13 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
   Future<void> _createStrategy() async {
     final formKey = GlobalKey<FormState>();
     String? strategyName, description, strategyType, riskLevel;
-    List<String> selectedSymbols = [];
+    final selectedSymbols = <String>[];
     double? profitTarget, stopLoss;
-    Map<String, dynamic> parameters = {};
+    final parameters = <String, dynamic>{};
 
     await showDialog(
       context: context,
-      builder: (BuildContext context) => Dialog(
+      builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -129,8 +130,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
                   const Text('Trading Symbols:', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Column(
-                    children: _commonSymbols.map((symbol) {
-                      return CheckboxListTile(
+                    children: _commonSymbols.map((symbol) => CheckboxListTile(
                         title: Text(symbol),
                         value: selectedSymbols.contains(symbol),
                         onChanged: (value) {
@@ -142,8 +142,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
                         },
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                      );
-                    }).toList(),
+                      )).toList(),
                   ),
                   const SizedBox(height: 15),
                   Row(
@@ -247,7 +246,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
     late String riskLevel;
     late double profitTarget;
     late double stopLoss;
-    List<String> selectedSymbols = [];
+    var selectedSymbols = <String>[];
 
     // Pre-fill form with existing values
     strategyName = strategy['strategy_name'];
@@ -269,7 +268,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
 
     await showDialog(
       context: context,
-      builder: (BuildContext context) => Dialog(
+      builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -326,8 +325,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
                   const Text('Trading Symbols:', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Column(
-                    children: _commonSymbols.map((symbol) {
-                      return CheckboxListTile(
+                    children: _commonSymbols.map((symbol) => CheckboxListTile(
                         title: Text(symbol),
                         value: selectedSymbols.contains(symbol),
                         onChanged: (value) {
@@ -339,8 +337,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
                         },
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                      );
-                    }).toList(),
+                      )).toList(),
                   ),
                   const SizedBox(height: 15),
                   Row(
@@ -463,11 +460,10 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Bot Strategy Configuration'),
@@ -538,7 +534,7 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
                         itemCount: _strategies.length,
                         itemBuilder: (context, index) {
                           final strategy = _strategies[index];
-                          List<String> symbols = [];
+                          var symbols = <String>[];
                           try {
                             if (strategy['symbols'] is String) {
                               symbols = List<String>.from(jsonDecode(strategy['symbols']));
@@ -650,5 +646,4 @@ class _BotStrategyConfigurationScreenState extends State<BotStrategyConfiguratio
                   ],
                 ),
     );
-  }
 }

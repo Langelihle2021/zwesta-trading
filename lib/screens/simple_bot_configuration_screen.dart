@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../services/bot_service.dart';
 
 class SimpleBotConfigurationScreen extends StatefulWidget {
   const SimpleBotConfigurationScreen({Key? key}) : super(key: key);
@@ -15,8 +13,8 @@ class _SimpleBotConfigurationScreenState
   late TextEditingController _riskPerTradeController;
   late TextEditingController _maxDailyLossController;
   String _selectedRiskType = 'fixed';
-  List<String> _selectedPairs = [];
-  List<String> _selectedStrategies = [];
+  final List<String> _selectedPairs = [];
+  final List<String> _selectedStrategies = [];
 
   final List<String> availablePairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'];
   final List<String> availableStrategies = [
@@ -43,8 +41,7 @@ class _SimpleBotConfigurationScreenState
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
         title: const Text('Bot Configuration'),
         leading: IconButton(
@@ -72,7 +69,7 @@ class _SimpleBotConfigurationScreenState
                     TextField(
                       controller: _riskPerTradeController,
                       decoration: const InputDecoration(
-                        labelText: 'Risk Per Trade (\$)',
+                        labelText: r'Risk Per Trade ($)',
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
@@ -81,7 +78,7 @@ class _SimpleBotConfigurationScreenState
                     TextField(
                       controller: _maxDailyLossController,
                       decoration: const InputDecoration(
-                        labelText: 'Max Daily Loss (\$)',
+                        labelText: r'Max Daily Loss ($)',
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
@@ -202,5 +199,4 @@ class _SimpleBotConfigurationScreenState
         ),
       ),
     );
-  }
 }

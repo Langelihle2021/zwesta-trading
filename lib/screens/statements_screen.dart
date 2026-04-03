@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
 import '../services/statement_service.dart';
 import '../services/trading_service.dart';
 import '../utils/constants.dart';
-import '../widgets/custom_widgets.dart';
 
 class StatementsScreen extends StatefulWidget {
   const StatementsScreen({Key? key}) : super(key: key);
@@ -26,8 +26,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
         title: const Text('Trading Statements'),
         elevation: 0,
@@ -60,10 +59,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
         },
       ),
     );
-  }
 
-  Widget _buildFilterSection(BuildContext context, TradingService tradingService) {
-    return Card(
+  Widget _buildFilterSection(BuildContext context, TradingService tradingService) => Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -134,7 +131,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
         ),
       ),
     );
-  }
 
   Widget _buildDatePickerField(
     BuildContext context,
@@ -181,8 +177,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
     BuildContext context,
     TradingService tradingService,
     StatementService statementService,
-  ) {
-    return SizedBox(
+  ) => SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: () {
@@ -196,7 +191,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
         ),
       ),
     );
-  }
 
   Widget _buildStatementsList(
     BuildContext context,
@@ -241,7 +235,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
 
   Widget _buildStatementCard(BuildContext context, dynamic statement) {
     final dateFormat = DateFormat('MMM dd, yyyy');
-    final currencyFormat = NumberFormat.currency(symbol: '\$ ');
+    final currencyFormat = NumberFormat.currency(symbol: r'$ ');
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -295,8 +289,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
     );
   }
 
-  Widget _buildStatementMetrics(dynamic statement, NumberFormat currencyFormat) {
-    return Column(
+  Widget _buildStatementMetrics(dynamic statement, NumberFormat currencyFormat) => Column(
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -308,10 +301,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
         ),
       ],
     );
-  }
 
-  Widget _buildMetricItem(String label, String value) {
-    return Column(
+  Widget _buildMetricItem(String label, String value) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
@@ -325,7 +316,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
         ),
       ],
     );
-  }
 
   void _generateStatement(
     BuildContext context,
@@ -391,8 +381,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
+  Widget _buildDetailRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -402,5 +391,4 @@ class _StatementsScreenState extends State<StatementsScreen> {
         ],
       ),
     );
-  }
 }

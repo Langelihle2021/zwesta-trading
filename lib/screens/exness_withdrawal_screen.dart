@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../services/exness_withdrawal_service.dart';
-import '../utils/constants.dart';
 import 'package:intl/intl.dart';
 
+import '../services/exness_withdrawal_service.dart';
+import '../utils/constants.dart';
+
 class ExnessWithdrawalScreen extends StatefulWidget {
-  final String userId;
-  final String brokerAccountId;
 
   const ExnessWithdrawalScreen({
-    Key? key,
-    required this.userId,
-    required this.brokerAccountId,
+    required this.userId, required this.brokerAccountId, Key? key,
   }) : super(key: key);
+  final String userId;
+  final String brokerAccountId;
 
   @override
   State<ExnessWithdrawalScreen> createState() => _ExnessWithdrawalScreenState();
@@ -122,8 +121,7 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
+  Widget build(BuildContext context) => DefaultTabController(
       length: 2,
       child: Scaffold(
         appBar: AppBar(
@@ -149,10 +147,8 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
               ),
       ),
     );
-  }
 
-  Widget _buildWithdrawalForm() {
-    return SingleChildScrollView(
+  Widget _buildWithdrawalForm() => SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -181,7 +177,7 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               hintText: 'Enter amount in USD',
-              prefixText: '\$ ',
+              prefixText: r'$ ',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               filled: true,
               fillColor: Colors.grey[100],
@@ -251,7 +247,7 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
                 const SizedBox(height: 8),
                 if (_amountController.text.isNotEmpty)
                   Text(
-                    'Net Amount: \$${(_calculateNetAmount().toStringAsFixed(2))}',
+                    'Net Amount: \$${_calculateNetAmount().toStringAsFixed(2)}',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -295,10 +291,8 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
         ],
       ),
     );
-  }
 
-  Widget _buildBalanceSummary() {
-    return Container(
+  Widget _buildBalanceSummary() => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: AppColors.primaryGradient,
@@ -380,10 +374,8 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
         ],
       ),
     );
-  }
 
-  Widget _buildWithdrawalTypeSelection() {
-    return Row(
+  Widget _buildWithdrawalTypeSelection() => Row(
       children: [
         Expanded(
           child: _buildTypeCard('Profits', 'profits'),
@@ -398,7 +390,6 @@ class _ExnessWithdrawalScreenState extends State<ExnessWithdrawalScreen>
         ),
       ],
     );
-  }
 
   Widget _buildTypeCard(String label, String type) {
     final isSelected = _withdrawalType == type;

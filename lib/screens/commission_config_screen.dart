@@ -1,7 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
 
@@ -138,13 +140,12 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Commission Config'),
@@ -225,20 +226,16 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
               ),
             ),
     );
-  }
 
-  Widget _sectionHeader(String title, IconData icon, Color color) {
-    return Row(
+  Widget _sectionHeader(String title, IconData icon, Color color) => Row(
       children: [
         Icon(icon, color: color, size: 22),
         const SizedBox(width: 10),
         Text(title, style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 
-  Widget _rateRow(String label, TextEditingController ctrl, String hint) {
-    return Container(
+  Widget _rateRow(String label, TextEditingController ctrl, String hint) => Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -284,10 +281,8 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
         ],
       ),
     );
-  }
 
-  Widget _toggleRow(String label, bool value, ValueChanged<bool> onChanged) {
-    return Container(
+  Widget _toggleRow(String label, bool value, ValueChanged<bool> onChanged) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -307,10 +302,8 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildPreviewSection() {
-    return Container(
+  Widget _buildPreviewSection() => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
@@ -324,7 +317,7 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             style: GoogleFonts.poppins(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
-              labelText: 'Profit Amount (\$)',
+              labelText: r'Profit Amount ($)',
               labelStyle: GoogleFonts.poppins(color: Colors.white54),
               prefixIcon: const Icon(Icons.attach_money, color: Color(0xFFFFD600)),
               filled: true,
@@ -370,10 +363,8 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
         ],
       ),
     );
-  }
 
-  Widget _previewButton(String label, VoidCallback onTap) {
-    return OutlinedButton(
+  Widget _previewButton(String label, VoidCallback onTap) => OutlinedButton(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         foregroundColor: const Color(0xFFFFD600),
@@ -383,7 +374,6 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
       ),
       child: Text(label, style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500)),
     );
-  }
 
   Widget _buildPreviewResult() {
     final p = _preview!;
@@ -462,8 +452,7 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
     );
   }
 
-  Widget _msgBox(String msg, Color color) {
-    return Container(
+  Widget _msgBox(String msg, Color color) => Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(12),
@@ -474,5 +463,4 @@ class _CommissionConfigScreenState extends State<CommissionConfigScreen> {
       ),
       child: Text(msg, style: GoogleFonts.poppins(color: color, fontSize: 12)),
     );
-  }
 }

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../services/fxcm_trading_service.dart';
+
 import '../services/auth_service.dart';
+import '../services/fxcm_trading_service.dart';
 import '../services/notification_service.dart';
+import 'bot_dashboard_screen.dart';
+import 'consolidated_reports_screen.dart';
 
 class FxcmWithdrawalScreen extends StatefulWidget {
   const FxcmWithdrawalScreen({Key? key}) : super(key: key);
@@ -49,7 +52,7 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
   Future<void> _runProfitCheck() async {
     final target = double.tryParse(_targetController.text) ?? 0;
     if (target <= 0) {
-      _showSnack('Enter a valid profit target > \$0');
+      _showSnack(r'Enter a valid profit target > $0');
       return;
     }
     setState(() { _checking = true; _lastCheckResult = null; });
@@ -88,14 +91,32 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
         title: Text('FXCM Withdrawals',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.smart_toy_outlined),
+            tooltip: 'Bots',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const BotDashboardScreen()));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadNotifications),
         ],
       ),
@@ -117,10 +138,8 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildInfoBanner() {
-    return Container(
+  Widget _buildInfoBanner() => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [Color(0xFF4A148C), Color(0xFF311B92)]),
@@ -150,10 +169,8 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildProfitCheckCard() {
-    return Container(
+  Widget _buildProfitCheckCard() => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -174,7 +191,7 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             style: GoogleFonts.poppins(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
-              labelText: 'Profit Target (\$)',
+              labelText: r'Profit Target ($)',
               labelStyle: GoogleFonts.poppins(color: Colors.white54),
               prefixIcon: const Icon(Icons.attach_money, color: Color(0xFFCE93D8)),
               filled: true,
@@ -230,7 +247,6 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
         ],
       ),
     );
-  }
 
   Widget _buildCheckResultCard() {
     final r = _lastCheckResult!;
@@ -295,8 +311,7 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
   }
 
   Widget _resultBox({required Color color, required IconData icon,
-      required String title, required String subtitle, Widget? extra}) {
-    return Container(
+      required String title, required String subtitle, Widget? extra}) => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
@@ -317,10 +332,8 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
+  Widget _infoRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -330,10 +343,8 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildNotificationsSection() {
-    return Column(
+  Widget _buildNotificationsSection() => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
@@ -366,10 +377,9 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
             ]),
           )
         else
-          ...List<Widget>.from(_notifications.map((n) => _buildNotifCard(n))),
+          ...List<Widget>.from(_notifications.map(_buildNotifCard)),
       ],
     );
-  }
 
   Widget _buildNotifCard(dynamic n) {
     final isPending = n['status'] == 'pending';
@@ -415,13 +425,11 @@ class _FxcmWithdrawalScreenState extends State<FxcmWithdrawalScreen> {
     );
   }
 
-  Widget _miniStat(String label, String value, Color color) {
-    return Column(
+  Widget _miniStat(String label, String value, Color color) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: GoogleFonts.poppins(color: Colors.white30, fontSize: 9)),
         Text(value, style: GoogleFonts.poppins(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 }

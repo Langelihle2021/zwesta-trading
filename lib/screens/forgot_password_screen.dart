@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+
 import '../services/password_reset_service.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
-  final VoidCallback onBackToLogin;
 
   const ForgotPasswordScreen({
-    Key? key,
-    required this.onBackToLogin,
+    required this.onBackToLogin, Key? key,
   }) : super(key: key);
+  final VoidCallback onBackToLogin;
 
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
@@ -116,8 +115,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -419,11 +417,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         ),
       ),
     );
-  }
 
   Widget _buildMethodRadio(
-      String value, String title, String subtitle) {
-    return GestureDetector(
+      String value, String title, String subtitle) => GestureDetector(
       onTap: () => setState(() => _resetMethod = value),
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -442,7 +438,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               value: value,
               groupValue: _resetMethod,
               onChanged: (val) => setState(() => _resetMethod = val!),
-              fillColor: const MaterialStatePropertyAll(Colors.white),
+              fillColor: const WidgetStatePropertyAll(Colors.white),
             ),
             const SizedBox(width: 12),
             Column(
@@ -468,5 +464,4 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         ),
       ),
     );
-  }
 }

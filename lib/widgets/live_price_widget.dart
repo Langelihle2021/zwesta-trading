@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
-import '../services/realtime_price_websocket_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../services/realtime_price_websocket_service.dart';
+
 class LivePriceWidget extends StatefulWidget {
+
+  const LivePriceWidget({
+    required this.symbols, required this.brokerName, required this.sessionToken, Key? key,
+    this.autoConnect = true,
+  }) : super(key: key);
   final List<String> symbols;
   final String brokerName;
   final String sessionToken;
   final bool autoConnect;
-
-  const LivePriceWidget({
-    Key? key,
-    required this.symbols,
-    required this.brokerName,
-    required this.sessionToken,
-    this.autoConnect = true,
-  }) : super(key: key);
 
   @override
   State<LivePriceWidget> createState() => _LivePriceWidgetState();
@@ -252,7 +250,7 @@ class _LivePriceWidgetState extends State<LivePriceWidget> {
                               fontSize: 11,
                             ),
                           ),
-                          SizedBox(
+                          const SizedBox(
                             height: 4,
                           ),
                           Text(
@@ -320,7 +318,7 @@ class _LivePriceWidgetState extends State<LivePriceWidget> {
                           const SizedBox(height: 4),
                           Text(
                             price.spreadPips,
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: Colors.orange,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -416,7 +414,7 @@ class _LivePriceWidgetState extends State<LivePriceWidget> {
                 ],
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );

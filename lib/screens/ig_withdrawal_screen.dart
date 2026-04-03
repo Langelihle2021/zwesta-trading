@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../services/ig_trading_service.dart';
+
 import '../services/auth_service.dart';
+import '../services/ig_trading_service.dart';
 import '../services/notification_service.dart';
 
 class IGWithdrawalScreen extends StatefulWidget {
@@ -49,7 +50,7 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
   Future<void> _runProfitCheck() async {
     final target = double.tryParse(_targetController.text) ?? 0;
     if (target <= 0) {
-      _showSnack('Enter a valid profit target > \$0');
+      _showSnack(r'Enter a valid profit target > $0');
       return;
     }
     setState(() {
@@ -108,8 +109,7 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
         backgroundColor: const Color(0xFF111633),
@@ -140,10 +140,8 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildInfoBanner() {
-    return Container(
+  Widget _buildInfoBanner() => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -176,10 +174,8 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildProfitCheckCard() {
-    return Container(
+  Widget _buildProfitCheckCard() => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -201,7 +197,7 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             style: GoogleFonts.poppins(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
-              labelText: 'Profit Target (\$)',
+              labelText: r'Profit Target ($)',
               labelStyle: GoogleFonts.poppins(color: Colors.white54),
               prefixIcon: const Icon(Icons.attach_money, color: Color(0xFF69F0AE)),
               filled: true,
@@ -263,7 +259,6 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
         ],
       ),
     );
-  }
 
   Widget _buildCheckResultCard() {
     final r = _lastCheckResult!;
@@ -371,8 +366,7 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
     required String title,
     required String subtitle,
     Widget? extra,
-  }) {
-    return Container(
+  }) => Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
@@ -398,10 +392,8 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
+  Widget _infoRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -413,10 +405,8 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildNotificationsSection() {
-    return Column(
+  Widget _buildNotificationsSection() => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
@@ -454,10 +444,9 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
             ),
           )
         else
-          ...List<Widget>.from(_notifications.map((n) => _buildNotifCard(n))),
+          ...List<Widget>.from(_notifications.map(_buildNotifCard)),
       ],
     );
-  }
 
   Widget _buildNotifCard(dynamic n) {
     final isPending = n['status'] == 'pending';
@@ -559,8 +548,7 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
     );
   }
 
-  Widget _miniStat(String label, String value, Color color) {
-    return Expanded(
+  Widget _miniStat(String label, String value, Color color) => Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -571,7 +559,6 @@ class _IGWithdrawalScreenState extends State<IGWithdrawalScreen> {
         ],
       ),
     );
-  }
 
   String _formatDate(String iso) {
     try {

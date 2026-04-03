@@ -1,7 +1,9 @@
-import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../utils/environment_config.dart';
+
+import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
+
+import '../utils/environment_config.dart';
 
 class ExnessWithdrawalService {
   final Logger logger = Logger();

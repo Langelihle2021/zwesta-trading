@@ -1,6 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 
 class JoinWithReferralScreen extends StatefulWidget {
@@ -154,8 +156,7 @@ class _JoinWithReferralScreenState extends State<JoinWithReferralScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
         title: const Text('Join with Referral'),
         backgroundColor: Colors.grey[900],
@@ -181,7 +182,7 @@ class _JoinWithReferralScreenState extends State<JoinWithReferralScreen> {
                       color: Colors.blue.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.card_giftcard,
                       size: 48,
                       color: Colors.blue,
@@ -208,38 +209,38 @@ class _JoinWithReferralScreenState extends State<JoinWithReferralScreen> {
             // Benefits
             Card(
               color: Colors.green.withOpacity(0.1),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
+              child: const Padding(
+                padding: EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
                         Icon(Icons.check_circle, color: Colors.green, size: 20),
-                        const SizedBox(width: 8),
-                        const Text(
+                        SizedBox(width: 8),
+                        Text(
                           'No Upfront Cost',
                           style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     Row(
                       children: [
                         Icon(Icons.check_circle, color: Colors.green, size: 20),
-                        const SizedBox(width: 8),
-                        const Text(
+                        SizedBox(width: 8),
+                        Text(
                           'Earn 5% from Your Recruits',
                           style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     Row(
                       children: [
                         Icon(Icons.check_circle, color: Colors.green, size: 20),
-                        const SizedBox(width: 8),
-                        const Text(
+                        SizedBox(width: 8),
+                        Text(
                           '30% Total Profit Share',
                           style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
@@ -290,7 +291,7 @@ class _JoinWithReferralScreenState extends State<JoinWithReferralScreen> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(
                   children: [
-                    Icon(Icons.info, size: 16, color: Colors.green),
+                    const Icon(Icons.info, size: 16, color: Colors.green),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -376,5 +377,4 @@ class _JoinWithReferralScreenState extends State<JoinWithReferralScreen> {
         ),
       ),
     );
-  }
 }

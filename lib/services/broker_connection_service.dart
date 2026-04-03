@@ -1,19 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
 import '../models/broker_connection_model.dart';
 import '../utils/environment_config.dart';
 import 'connection_analytics_service.dart';
 
 class BrokerConnectionService {
-  static const Map<String, String> _validCredentials = {
-    'demo': 'demo123',
-    '136372035': 'demo123',
-    '5678': 'secure123',
-  };
-
   static final Map<String, BrokerRequirements> _brokerRequirements = {
     'XM': BrokerRequirements(
       brokerName: 'XM',
@@ -21,7 +18,7 @@ class BrokerConnectionService {
       minLeverage: 1,
       maxLeverage: 888,
       minSpread: 0.6,
-      maxSpread: 2.0,
+      maxSpread: 2,
       tradableAssets: ['Forex', 'Metals', 'Indices', 'Stocks'],
       hasCommission: false,
       commissionRate: 0,
@@ -58,7 +55,8 @@ class BrokerConnectionService {
 
   static final Map<String, List<ConnectionMetric>> _connectionHistory = {};
   static final Map<String, BrokerAccount> _accountCache = {};
-  static final Map<String, StreamController<ConnectionMetric>> _monitoringStreams = {};
+  static final Map<String, StreamController<ConnectionMetric>>
+      _monitoringStreams = {};
 
   /// Test connection with REAL backend broker API
   static Future<Map<String, dynamic>> testConnection({
@@ -71,17 +69,18 @@ class BrokerConnectionService {
     String? username,
     String? accountId,
     String? market,
-    bool isLive = false,  // DEMO by default
+    bool isLive = false, // DEMO by default
   }) async {
     try {
-      print('🔌 Testing ${isLive ? 'LIVE' : 'DEMO'} connection with backend: $broker | Account: $accountNumber');
-      
+      debugPrint(
+          '🔌 Testing ${isLive ? 'LIVE' : 'DEMO'} connection with backend: $broker | Account: $accountNumber');
+
       // Get session token from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
-      
+
       if (sessionToken == null || sessionToken.isEmpty) {
-        print('❌ No session token found');
+        debugPrint('❌ No session token found');
         return {
           'success': false,
           'connected': false,
@@ -89,7 +88,7 @@ class BrokerConnectionService {
           'errorCode': 'SESSION_EXPIRED',
         };
       }
-      
+
       final normalizedBroker = broker.trim().toLowerCase();
       final Map<String, dynamic> payload;
 
@@ -116,31 +115,35 @@ class BrokerConnectionService {
       // Call backend API with session token and is_live flag
       // Exness MT5 requires longer timeout due to terminal launch & initialization
       final isExness = normalizedBroker.contains('exness');
-      final timeout = isExness 
-          ? const Duration(seconds: 60)  // Exness needs more time for MT5 terminal
+      final timeout = isExness
+          ? const Duration(
+              seconds: 60) // Exness needs more time for MT5 terminal
           : const Duration(seconds: 45); // Other brokers need reasonable time
-      
-      final response = await http.post(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': sessionToken,
-        },
-        body: jsonEncode(payload),
-      ).timeout(timeout);
 
-      print('📥 Backend response: ${response.statusCode}');
-      print('   Body: ${response.body}');
+      final response = await http
+          .post(
+            Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Session-Token': sessionToken,
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(timeout);
+
+      debugPrint('📥 Backend response: ${response.statusCode}');
+      debugPrint('   Body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        
+
         if (data['success'] == true) {
           // Backend returns: credential_id, broker, account_number, balance, status, etc.
           final credentialId = data['credential_id'] as String?;
-          final balance = (data['balance'] ?? 10000.0);
+          final balance = data['balance'] ?? 10000.0;
 
-          print('✅ Connection successful! Credential ID: $credentialId | Balance: \$${balance.toStringAsFixed(2)}');
+          debugPrint(
+              '✅ Connection successful! Credential ID: $credentialId | Balance: \$${balance.toStringAsFixed(2)}');
 
           return {
             'success': true,
@@ -155,7 +158,7 @@ class BrokerConnectionService {
             'timestamp': data['timestamp'],
           };
         } else {
-          print('❌ Backend connection failed: ${data['error']}');
+          debugPrint('❌ Backend connection failed: ${data['error']}');
           return {
             'success': false,
             'connected': false,
@@ -164,7 +167,7 @@ class BrokerConnectionService {
           };
         }
       } else if (response.statusCode == 401) {
-        print('❌ Unauthorized: Session token invalid');
+        debugPrint('❌ Unauthorized: Session token invalid');
         return {
           'success': false,
           'connected': false,
@@ -173,7 +176,7 @@ class BrokerConnectionService {
         };
       } else if (response.statusCode == 400) {
         final data = jsonDecode(response.body);
-        print('❌ Bad request: ${data['error']}');
+        debugPrint('❌ Bad request: ${data['error']}');
         return {
           'success': false,
           'connected': false,
@@ -181,7 +184,7 @@ class BrokerConnectionService {
           'errorCode': 'BAD_REQUEST',
         };
       } else {
-        print('❌ Backend error: ${response.statusCode}');
+        debugPrint('❌ Backend error: ${response.statusCode}');
         return {
           'success': false,
           'connected': false,
@@ -190,7 +193,7 @@ class BrokerConnectionService {
         };
       }
     } catch (e) {
-      print('❌ Connection error: $e');
+      debugPrint('❌ Connection error: $e');
       return {
         'success': false,
         'connected': false,
@@ -201,14 +204,12 @@ class BrokerConnectionService {
   }
 
   /// Get all saved accounts
-  static List<BrokerAccount> getSavedAccounts() {
-    return _accountCache.values.toList();
-  }
+  static List<BrokerAccount> getSavedAccounts() =>
+      _accountCache.values.toList();
 
   /// Get specific account
-  static BrokerAccount? getAccount(String accountId) {
-    return _accountCache[accountId];
-  }
+  static BrokerAccount? getAccount(String accountId) =>
+      _accountCache[accountId];
 
   /// Get real-time account balance
   static double getAccountBalance(String accountId) {
@@ -221,20 +222,21 @@ class BrokerConnectionService {
   }
 
   /// Get broker requirements
-  static BrokerRequirements? getBrokerRequirements(String brokerName) {
-    return _brokerRequirements[brokerName];
-  }
+  static BrokerRequirements? getBrokerRequirements(String brokerName) =>
+      _brokerRequirements[brokerName];
 
   /// Get connection statistics
   static ConnectionStats getConnectionStats(String accountId) {
     final metrics = _connectionHistory[accountId] ?? [];
     final successful = metrics.where((m) => m.isConnected).length;
     final total = metrics.length;
-    final successRate = total > 0 ? ((successful / total) * 100).toDouble() : 0.0;
+    final successRate =
+        total > 0 ? ((successful / total) * 100).toDouble() : 0.0;
 
     double avgLatency = 0;
     if (metrics.isNotEmpty) {
-      avgLatency = metrics.fold<double>(0, (sum, m) => sum + m.latency) / metrics.length;
+      avgLatency =
+          metrics.fold<double>(0, (sum, m) => sum + m.latency) / metrics.length;
     }
 
     return ConnectionStats(
@@ -256,7 +258,7 @@ class BrokerConnectionService {
       _monitoringStreams[accountId] = StreamController<ConnectionMetric>();
 
       Timer.periodic(const Duration(seconds: 5), (timer) {
-        if (_monitoringStreams.containsKey(accountId) && 
+        if (_monitoringStreams.containsKey(accountId) &&
             !_monitoringStreams[accountId]!.isClosed) {
           final random = Random();
           final balance = (_accountCache[accountId]?.accountBalance ?? 0) +
@@ -309,28 +311,23 @@ class BrokerConnectionService {
     _connectionHistory[accountId]!.add(metric);
 
     // Record in analytics service
-    ConnectionAnalyticsService.recordMetric(accountId: accountId, metric: metric);
+    ConnectionAnalyticsService.recordMetric(
+        accountId: accountId, metric: metric);
 
     if (_connectionHistory[accountId]!.length > 100) {
       _connectionHistory[accountId]!.removeAt(0);
     }
   }
 
-  static int _getRandomTradeCount() {
-    return Random().nextInt(150) + 50;
-  }
-
-  static bool _validateCredentials(String accountNumber, String password) {
-    return _validCredentials[accountNumber] == password;
-  }
+  static int _getRandomTradeCount() => Random().nextInt(150) + 50;
 
   /// Test auto-reconnect with exponential backoff
   static Future<bool> testAutoReconnect({
     required String accountId,
     int maxAttempts = 3,
   }) async {
-    int attempts = 0;
-    int delayMs = 1000;
+    var attempts = 0;
+    var delayMs = 1000;
 
     while (attempts < maxAttempts) {
       try {
@@ -353,37 +350,42 @@ class BrokerConnectionService {
     bool isLive = false,
   }) async {
     try {
-      print('🔌 Testing IG Markets connection: $accountId');
-      
+      debugPrint('🔌 Testing IG Markets connection: $accountId');
+
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
-      
+
       if (sessionToken == null || sessionToken.isEmpty) {
-        return {'success': false, 'message': 'Session expired. Please login again.'};
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.'
+        };
       }
-      
+
       // Call backend IG test endpoint
-      final response = await http.post(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': sessionToken,
-        },
-        body: jsonEncode({
-          'broker': 'IG',
-          'api_key': apiKey,
-          'username': username,
-          'password': password,
-          'account_id': accountId,
-          'is_live': isLive,
-        }),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/test-connection'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Session-Token': sessionToken,
+            },
+            body: jsonEncode({
+              'broker': 'IG',
+              'api_key': apiKey,
+              'username': username,
+              'password': password,
+              'account_id': accountId,
+              'is_live': isLive,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        
+
         if (data['success'] == true) {
-          print('✅ IG Markets connection successful!');
+          debugPrint('✅ IG Markets connection successful!');
           return {
             'success': true,
             'credential_id': data['credential_id'],
@@ -406,7 +408,7 @@ class BrokerConnectionService {
         };
       }
     } catch (e) {
-      print('❌ IG connection error: $e');
+      debugPrint('❌ IG connection error: $e');
       return {
         'success': false,
         'message': 'Error: $e',
@@ -416,7 +418,7 @@ class BrokerConnectionService {
 
   /// Cleanup resources
   static void dispose() {
-    for (var stream in _monitoringStreams.values) {
+    for (final stream in _monitoringStreams.values) {
       if (!stream.isClosed) {
         stream.close();
       }

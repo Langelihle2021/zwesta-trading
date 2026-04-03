@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/financial_service.dart';
-import '../services/trading_service.dart';
+
 import '../models/account.dart';
 import '../models/financial_statement.dart';
+import '../services/financial_service.dart';
+import '../services/trading_service.dart';
 import '../utils/constants.dart';
 import '../widgets/logo_widget.dart';
 
 class FinancialsScreen extends StatefulWidget {
-  final Account account;
 
-  const FinancialsScreen({Key? key, required this.account}) : super(key: key);
+  const FinancialsScreen({required this.account, Key? key}) : super(key: key);
+  final Account account;
 
   @override
   State<FinancialsScreen> createState() => _FinancialsScreenState();
@@ -39,7 +40,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         trades,
         startDate,
         endDate,
-        initialCapital: 10000.0,
+        initialCapital: 10000,
       );
 
       setState(() {
@@ -67,11 +68,10 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Financial Analytics'),
@@ -81,7 +81,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         elevation: 0,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -152,10 +152,8 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildDateRangeSection() {
-    return Card(
+  Widget _buildDateRangeSection() => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -248,10 +246,8 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildCapitalSection(FinancialStatement stmt) {
-    return Card(
+  Widget _buildCapitalSection(FinancialStatement stmt) => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -290,10 +286,8 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildRevenueSection(FinancialStatement stmt) {
-    return Card(
+  Widget _buildRevenueSection(FinancialStatement stmt) => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -342,10 +336,8 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildCostsSection(FinancialStatement stmt) {
-    return Card(
+  Widget _buildCostsSection(FinancialStatement stmt) => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -399,7 +391,6 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ),
     );
-  }
 
   Widget _buildProfitSection(FinancialStatement stmt) {
     final isProfitable = stmt.netProfit >= 0;
@@ -567,7 +558,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                         ),
                       ],
                     ),
-                  )).toList(),
+                  )),
                   const SizedBox(height: 12),
                 ],
               ),
@@ -601,7 +592,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                         ),
                       ],
                     ),
-                  )).toList(),
+                  )),
                 ],
               ),
           ],
@@ -610,8 +601,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
     );
   }
 
-  Widget _buildBalanceSection(FinancialStatement stmt) {
-    return Card(
+  Widget _buildBalanceSection(FinancialStatement stmt) => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -650,10 +640,8 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ),
     );
-  }
 
-  Widget _buildHistorySection() {
-    return Consumer<FinancialService>(
+  Widget _buildHistorySection() => Consumer<FinancialService>(
       builder: (context, service, _) {
         final statements = service.financialStatements
             .where((s) => s.accountId == widget.account.id)
@@ -696,12 +684,11 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                   ),
                 ),
               );
-            }).toList(),
+            }),
           ],
         );
       },
     );
-  }
 
   void _deleteStatement(String id) {
     showDialog(
@@ -731,8 +718,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
     );
   }
 
-  Widget _buildMetricRow(String label, String value, Color valueColor) {
-    return Row(
+  Widget _buildMetricRow(String label, String value, Color valueColor) => Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
@@ -749,5 +735,4 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         ),
       ],
     );
-  }
 }

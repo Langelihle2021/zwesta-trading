@@ -1,11 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+
 import '../services/auth_service.dart';
 import '../utils/constants.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../utils/environment_config.dart';
+import '../widgets/logo_widget.dart';
+import 'consolidated_reports_screen.dart';
 
 class MultiBrokerManagementScreen extends StatefulWidget {
   const MultiBrokerManagementScreen({Key? key}) : super(key: key);
@@ -162,11 +166,32 @@ class _MultiBrokerManagementScreenState
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
+      backgroundColor: const Color(0xFF0A0E21),
       appBar: AppBar(
-        title: const Text('Multi-Broker Management'),
-        backgroundColor: Colors.blue[700],
+        backgroundColor: const Color(0xFF111633),
+        elevation: 0,
+        title: const Row(
+          children: [
+            LogoWidget(size: 40, showText: false),
+            SizedBox(width: 12),
+            Expanded(child: Text('Multi-Broker Management')),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Home',
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -175,6 +200,19 @@ class _MultiBrokerManagementScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Container(
+                    margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                    ),
+                    child: Text(
+                      'Broker credentials, reports, and automation now share the same mobile navigation flow.',
+                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
                   // Error message
                   if (_errorMessage != null)
                     Container(
@@ -396,5 +434,4 @@ class _MultiBrokerManagementScreenState
               ),
             ),
     );
-  }
 }

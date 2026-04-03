@@ -1,25 +1,30 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'package:intl/intl.dart';
+
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../providers/currency_provider.dart';
 import '../services/bot_service.dart';
-
 import '../services/broker_credentials_service.dart';
 import '../utils/environment_config.dart';
-import '../widgets/logo_widget.dart';
-import '../widgets/trading_mode_switcher.dart';
 import '../widgets/account_display_widget.dart';
+import '../widgets/logo_widget.dart';
 import '../widgets/pxbt_session_manager.dart';
+import '../widgets/trading_mode_switcher.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
+import 'consolidated_reports_screen.dart';
+import 'dashboard_screen.dart';
 
 class BotDashboardScreen extends StatefulWidget {
-  const BotDashboardScreen({Key? key}) : super(key: key);
+  const BotDashboardScreen({Key? key, this.embedded = false}) : super(key: key);
+
+  final bool embedded;
 
   @override
   State<BotDashboardScreen> createState() => _BotDashboardScreenState();
@@ -69,7 +74,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   String _currencySymbol(AppCurrency currency) {
     switch (currency) {
       case AppCurrency.usd:
-        return '\$';
+        return r'$';
       case AppCurrency.zar:
         return 'R';
       case AppCurrency.gbp:
@@ -94,7 +99,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     int decimals = 2,
   }) {
     // Always display as USD - no currency conversion (backend enforces USD)
-    const symbol = '\$';
+    const symbol = r'$';
     final absoluteAmount = amount.abs().toStringAsFixed(decimals);
 
     if (amount < 0) {
@@ -105,7 +110,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<BotService, CurrencyProvider>(
+    final content = Consumer2<BotService, CurrencyProvider>(
       builder: (context, botService, currencyProvider, _) {
         // Bots are already filtered by trading mode from the backend
         final allBots = List<Map<String, dynamic>>.from(botService.activeBots);
@@ -265,12 +270,10 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                               dropdownColor: const Color(0xFF1A1F3A),
                               iconEnabledColor: const Color(0xFF00E5FF),
                               style: GoogleFonts.poppins(color: Colors.white, fontSize: 12),
-                              items: AppCurrency.values.map((currency) {
-                                return DropdownMenuItem<AppCurrency>(
+                              items: AppCurrency.values.map((currency) => DropdownMenuItem<AppCurrency>(
                                   value: currency,
                                   child: Text(_currencyCode(currency)),
-                                );
-                              }).toList(),
+                                )).toList(),
                               onChanged: (value) {
                                 if (value != null) {
                                   currencyProvider.setCurrency(value);
@@ -440,10 +443,52 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         );
       },
     );
+
+    if (widget.embedded) {
+      return content;
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0E21),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF111633),
+        elevation: 0,
+        title: const Row(
+          children: [
+            LogoWidget(size: 36, showText: false),
+            SizedBox(width: 10),
+            Text('Bot Monitor'),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Reports',
+            icon: const Icon(Icons.assessment_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Dashboard',
+            icon: const Icon(Icons.dashboard_rounded),
+            onPressed: () {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                (route) => route.isFirst,
+              );
+            },
+          ),
+        ],
+      ),
+      body: content,
+    );
   }
 
-  Widget _summaryChip(IconData icon, String label, Color color) {
-    return Expanded(
+  Widget _summaryChip(IconData icon, String label, Color color) => Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
         decoration: BoxDecoration(
@@ -463,10 +508,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ),
       ),
     );
-  }
 
-  Widget _emptyState() {
-    return Container(
+  Widget _emptyState() => Container(
       padding: const EdgeInsets.all(40),
       child: Column(
         children: [
@@ -478,10 +521,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ],
       ),
     );
-  }
 
-  Widget _errorState(String error) {
-    return Container(
+  Widget _errorState(String error) => Container(
       padding: const EdgeInsets.all(24),
       margin: const EdgeInsets.only(top: 12),
       decoration: BoxDecoration(
@@ -502,11 +543,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ],
       ),
     );
-  }
 
-  Widget _buildBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) {
-    return _buildUnifiedBotCard(bot, currencyProvider);
-  }
+  Widget _buildBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) => _buildUnifiedBotCard(bot, currencyProvider);
 
   Widget _buildUnifiedBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) {
     final botId = bot['botId'] ?? 'Unknown';
@@ -525,7 +563,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
     final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
-    final symbolStr = symbols is List ? (symbols as List).join(', ') : symbols.toString();
+    final symbolStr = symbols is List ? symbols.join(', ') : symbols.toString();
     final runtime = bot['runtimeFormatted'] ?? '--';
     final drawdownPauseUntilText = bot['drawdownPauseUntil']?.toString();
     final drawdownPauseUntil = drawdownPauseUntilText == null || drawdownPauseUntilText.isEmpty
@@ -566,7 +604,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Cooling down until ${DateFormat('HH:mm').format(drawdownPauseUntil!.toLocal())}',
+                      'Cooling down until ${DateFormat('HH:mm').format(drawdownPauseUntil.toLocal())}',
                       style: GoogleFonts.poppins(
                         color: const Color(0xFFFFCC80),
                         fontSize: 11,
@@ -948,7 +986,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               const SizedBox(width: 6),
               // Overflow menu for less-used actions (Delete)
               PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert, color: Colors.white54, size: 22),
+                icon: const Icon(Icons.more_vert, color: Colors.white54, size: 22),
                 color: const Color(0xFF1A1F3A),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 onSelected: (value) async {
@@ -1008,8 +1046,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     );
   }
 
-  Widget _botStat(String label, String value, Color color) {
-    return Expanded(
+  Widget _botStat(String label, String value, Color color) => Expanded(
       child: Column(
         children: [
           Container(
@@ -1029,7 +1066,6 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ],
       ),
     );
-  }
 
   // IG Markets integration removed
 
@@ -1040,8 +1076,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     required VoidCallback onTap,
     dynamic icon,
     String? description,
-  }) {
-    return GestureDetector(
+  }) => GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1083,7 +1118,6 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ),
       ),
     );
-  }
 
   /// Create bot for specific broker - with quick create option for Binance
   void _createBotForBroker(BuildContext context, String brokerName) async {
@@ -1170,8 +1204,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   }
 
   /// Individual Binance preset option button
-  Widget _binancePresetOption(BuildContext context, String title, String description, String preset) {
-    return InkWell(
+  Widget _binancePresetOption(BuildContext context, String title, String description, String preset) => InkWell(
       onTap: () => _quickCreateBinanceBot(context, preset),
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -1190,7 +1223,6 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ),
       ),
     );
-  }
 
   /// Quick create Binance bot with preset
   void _quickCreateBinanceBot(BuildContext context, String preset) async {
@@ -1251,7 +1283,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/quick-create'),
         headers: {
           'Content-Type': 'application/json',
-          'X-Session-Token': sessionToken!,
+          'X-Session-Token': sessionToken,
         },
         body: jsonEncode({
           'credentialId': credential.credentialId,
@@ -1316,15 +1348,13 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   }
 
   /// Helper widget to display info rows
-  Widget _infoRow(String label, String value, Color valueColor) {
-    return Row(
+  Widget _infoRow(String label, String value, Color valueColor) => Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
         Text(value, style: GoogleFonts.poppins(color: valueColor, fontSize: 12, fontWeight: FontWeight.w600)),
       ],
     );
-  }
 
   /// Show error snackbar
   void _showErrorSnackbar(String message) {
@@ -1360,12 +1390,9 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     );
   }
 
-  Widget _buildNewestBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) {
-    return _buildUnifiedBotCard(bot, currencyProvider);
-  }
+  Widget _buildNewestBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) => _buildUnifiedBotCard(bot, currencyProvider);
 
-  Widget _buildStatCard(String value, String label, Color color) {
-    return Container(
+  Widget _buildStatCard(String value, String label, Color color) => Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.05),
@@ -1394,7 +1421,6 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         ],
       ),
     );
-  }
 
   Widget _buildMiniBot(Map<String, dynamic> bot) {
     final botId = bot['botId'] ?? 'Unknown';

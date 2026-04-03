@@ -183,7 +183,7 @@ class BinanceTradingService {
 
   static Future<Map<String, dynamic>> getPendingOrders({String? symbol}) async {
     try {
-      String url = '$_baseUrl/api/binance/pending-orders';
+      var url = '$_baseUrl/api/binance/pending-orders';
       if (symbol != null) url += '?symbol=$symbol';
 
       final resp = await http.get(

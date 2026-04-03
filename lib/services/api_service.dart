@@ -1,24 +1,24 @@
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
 import '../utils/environment_config.dart';
 
 class ApiService {
+
+  ApiService({String? apiKey}) : _apiKey = apiKey ?? _defaultApiKey {
+    _baseUrl = EnvironmentConfig.apiUrl;
+  }
   static const String _defaultApiKey = 'default_api_key_for_demo';
 
   final String? _apiKey;
   late String _baseUrl;
 
-  ApiService({String? apiKey}) : _apiKey = apiKey ?? _defaultApiKey {
-    _baseUrl = EnvironmentConfig.apiUrl;
-  }
-
-  Map<String, String> _getHeaders() {
-    return {
+  Map<String, String> _getHeaders() => {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $_apiKey',
       'X-User-ID': 'default_user', // Can be updated with actual user ID
     };
-  }
 
   Future<Map<String, dynamic>> get(String endpoint) async {
     try {

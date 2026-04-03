@@ -1,25 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:async';
-import 'dart:convert';
-import '../models/trade.dart';
+
 import '../models/account.dart';
-import 'mock_data_provider.dart';
+import '../models/trade.dart';
 import '../utils/environment_config.dart';
+import 'mock_data_provider.dart';
 
 class TradingService extends ChangeNotifier {
-  late String? _token;
-  String? _apiUrl;
-  bool _useApi = false;
-  bool _isConnected = false;
-  Timer? _priceRefreshTimer; // Auto-refresh trades every 30 seconds
-  
-  List<Trade> _trades = [];
-  List<Account> _accounts = [];
-  Trade? _selectedTrade;
-  bool _isLoading = false;
-  String? _errorMessage;
 
   TradingService(String? token) : _token = token {
     _apiUrl = EnvironmentConfig.apiUrl;
@@ -39,6 +30,17 @@ class TradingService extends ChangeNotifier {
     // Start auto-refresh of trades every 30 seconds
     _startAutoRefresh();
   }
+  late String? _token;
+  String? _apiUrl;
+  bool _useApi = false;
+  bool _isConnected = false;
+  Timer? _priceRefreshTimer; // Auto-refresh trades every 30 seconds
+  
+  List<Trade> _trades = [];
+  List<Account> _accounts = [];
+  Trade? _selectedTrade;
+  bool _isLoading = false;
+  String? _errorMessage;
   
   void _startAutoRefresh() {
     _priceRefreshTimer?.cancel();
@@ -84,15 +86,11 @@ class TradingService extends ChangeNotifier {
   List<Trade> get closedTrades => _trades.where((t) => t.status == TradeStatus.closed).toList();
 
   double get totalBalance => _accounts.fold(0, (sum, acc) => sum + acc.balance);
-  double get totalProfit {
-    return _trades
+  double get totalProfit => _trades
         .where((t) => t.status == TradeStatus.closed)
         .fold(0, (sum, trade) => sum + (trade.profit ?? 0));
-  }
 
-  int get winningTrades {
-    return _trades.where((t) => t.status == TradeStatus.closed && t.profit != null && t.profit! > 0).length;
-  }
+  int get winningTrades => _trades.where((t) => t.status == TradeStatus.closed && t.profit != null && t.profit! > 0).length;
 
   // Check API connection
   Future<void> _checkApiConnection() async {
@@ -206,7 +204,7 @@ class TradingService extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         final sessionToken = prefs.getString('auth_token');
         
-        List<Trade> allTrades = [];
+        final allTrades = <Trade>[];
         
         // Fetch 1: Database stored trades from /api/trades-public
         try {
@@ -223,8 +221,7 @@ class TradingService extends ChangeNotifier {
             final data = jsonDecode(response.body);
             final tradesData = data['trades'] as List;
             
-            allTrades.addAll(tradesData.map((t) {
-              return Trade(
+            allTrades.addAll(tradesData.map((t) => Trade(
                 id: t['ticket'].toString(),
                 symbol: t['symbol'],
                 type: t['type'] == 'BUY' ? TradeType.buy : TradeType.sell,
@@ -237,8 +234,7 @@ class TradingService extends ChangeNotifier {
                 openedAt: DateTime.parse(t['time'] ?? DateTime.now().toIso8601String()),
                 profit: ((t['profit'] ?? 0) as num).toDouble(),
                 profitPercentage: null,
-              );
-            }));
+              )));
           }
         } catch (e) {
           print('Error fetching database trades: $e');
@@ -263,8 +259,7 @@ class TradingService extends ChangeNotifier {
               print('✅ Fetched ${positions.length} live MT5 positions');
             }
             
-            allTrades.addAll(positions.map((p) {
-              return Trade(
+            allTrades.addAll(positions.map((p) => Trade(
                 id: p['ticket'].toString(),
                 symbol: p['symbol'],
                 type: p['type'] == 'BUY' ? TradeType.buy : TradeType.sell,
@@ -277,8 +272,7 @@ class TradingService extends ChangeNotifier {
                 openedAt: DateTime.parse(p['time'] ?? DateTime.now().toIso8601String()),
                 profit: ((p['profit'] ?? 0) as num).toDouble(),
                 profitPercentage: ((p['profitPercent'] ?? 0) as num).toDouble(),
-              );
-            }));
+              )));
           }
         } catch (e) {
           print('Note: Live MT5 positions not available: $e');
@@ -566,7 +560,7 @@ class TradingService extends ChangeNotifier {
           balance: 50000, // Would fetch from broker API
           usedMargin: 5000,
           availableMargin: 45000,
-          profit: 0.0,
+          profit: 0,
           currency: 'USD',
           status: 'active',
           createdAt: DateTime.now().subtract(const Duration(days: 365)),

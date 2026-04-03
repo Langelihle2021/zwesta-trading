@@ -3,6 +3,14 @@ import '../utils/constants.dart';
 import 'logo_widget.dart';
 
 class StatCard extends StatelessWidget {
+
+  const StatCard({
+    required this.title, required this.value, required this.icon, Key? key,
+    this.subtitle,
+    this.backgroundColor,
+    this.foregroundColor,
+    this.onTap,
+  }) : super(key: key);
   final String title;
   final String value;
   final String? subtitle;
@@ -11,20 +19,8 @@ class StatCard extends StatelessWidget {
   final Color? foregroundColor;
   final Function? onTap;
 
-  const StatCard({
-    Key? key,
-    required this.title,
-    required this.value,
-    this.subtitle,
-    required this.icon,
-    this.backgroundColor,
-    this.foregroundColor,
-    this.onTap,
-  }) : super(key: key);
-
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
+  Widget build(BuildContext context) => GestureDetector(
       onTap: () => onTap?.call(),
       child: Card(
         color: backgroundColor ?? Theme.of(context).cardColor,
@@ -66,10 +62,14 @@ class StatCard extends StatelessWidget {
         ),
       ),
     );
-  }
 }
 
 class TradeCard extends StatelessWidget {
+
+  const TradeCard({
+    required this.symbol, required this.type, required this.quantity, required this.entryPrice, required this.currentPrice, required this.profit, required this.profitPercentage, Key? key,
+    this.onTap,
+  }) : super(key: key);
   final String symbol;
   final String type;
   final double quantity;
@@ -79,23 +79,10 @@ class TradeCard extends StatelessWidget {
   final double profitPercentage;
   final Function? onTap;
 
-  const TradeCard({
-    Key? key,
-    required this.symbol,
-    required this.type,
-    required this.quantity,
-    required this.entryPrice,
-    required this.currentPrice,
-    required this.profit,
-    required this.profitPercentage,
-    this.onTap,
-  }) : super(key: key);
-
   Color get profitColor => profit >= 0 ? AppColors.successColor : AppColors.dangerColor;
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
+  Widget build(BuildContext context) => GestureDetector(
       onTap: () => onTap?.call(),
       child: Card(
         margin: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
@@ -183,22 +170,18 @@ class TradeCard extends StatelessWidget {
         ),
       ),
     );
-  }
 }
 
 class LoadingOverlay extends StatelessWidget {
+
+  const LoadingOverlay({
+    required this.isLoading, required this.child, Key? key,
+  }) : super(key: key);
   final bool isLoading;
   final Widget child;
 
-  const LoadingOverlay({
-    Key? key,
-    required this.isLoading,
-    required this.child,
-  }) : super(key: key);
-
   @override
-  Widget build(BuildContext context) {
-    return Stack(
+  Widget build(BuildContext context) => Stack(
       children: [
         child,
         if (isLoading)
@@ -210,10 +193,18 @@ class LoadingOverlay extends StatelessWidget {
           ),
       ],
     );
-  }
 }
 
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
+
+  const CustomAppBar({
+    required this.title, Key? key,
+    this.showBackButton = false,
+    this.showLogo = true,
+    this.onBackPressed,
+    this.actions,
+    this.bottom,
+  }) : super(key: key);
   final String title;
   final bool showBackButton;
   final bool showLogo;
@@ -221,19 +212,8 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final List<Widget>? actions;
   final PreferredSizeWidget? bottom;
 
-  const CustomAppBar({
-    Key? key,
-    required this.title,
-    this.showBackButton = false,
-    this.showLogo = true,
-    this.onBackPressed,
-    this.actions,
-    this.bottom,
-  }) : super(key: key);
-
   @override
-  Widget build(BuildContext context) {
-    return AppBar(
+  Widget build(BuildContext context) => AppBar(
       title: Row(
         children: [
           if (showLogo) ...[
@@ -243,7 +223,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
           Expanded(
             child: Text(
               title,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -260,7 +240,6 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
       actions: actions,
       bottom: bottom,
     );
-  }
 
   @override
   Size get preferredSize => Size.fromHeight(
@@ -269,18 +248,15 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
 }
 
 class ErrorBanner extends StatelessWidget {
+
+  const ErrorBanner({
+    required this.message, required this.onDismiss, Key? key,
+  }) : super(key: key);
   final String message;
   final VoidCallback onDismiss;
 
-  const ErrorBanner({
-    Key? key,
-    required this.message,
-    required this.onDismiss,
-  }) : super(key: key);
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context) => Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       color: AppColors.dangerColor.withOpacity(0.1),
       child: Row(
@@ -310,22 +286,18 @@ class ErrorBanner extends StatelessWidget {
         ],
       ),
     );
-  }
 }
 
 class SuccessBanner extends StatelessWidget {
+
+  const SuccessBanner({
+    required this.message, required this.onDismiss, Key? key,
+  }) : super(key: key);
   final String message;
   final VoidCallback onDismiss;
 
-  const SuccessBanner({
-    Key? key,
-    required this.message,
-    required this.onDismiss,
-  }) : super(key: key);
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context) => Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       color: AppColors.successColor.withOpacity(0.1),
       child: Row(
@@ -355,5 +327,4 @@ class SuccessBanner extends StatelessWidget {
         ],
       ),
     );
-  }
 }

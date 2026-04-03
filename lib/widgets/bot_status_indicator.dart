@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 
 /// Animated indicator showing bot running status with pulsing effect
 class BotStatusIndicator extends StatefulWidget {
-  final bool isRunning;
-  final bool isConnected;
-  final String status;
 
   const BotStatusIndicator({
     Key? key,
@@ -12,6 +9,9 @@ class BotStatusIndicator extends StatefulWidget {
     this.isConnected = false,
     this.status = 'Idle',
   }) : super(key: key);
+  final bool isRunning;
+  final bool isConnected;
+  final String status;
 
   @override
   State<BotStatusIndicator> createState() => _BotStatusIndicatorState();
@@ -30,7 +30,7 @@ class _BotStatusIndicatorState extends State<BotStatusIndicator>
       vsync: this,
     );
 
-    _opacityAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+    _opacityAnimation = Tween<double>(begin: 0.3, end: 1).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
 
@@ -63,11 +63,9 @@ class _BotStatusIndicatorState extends State<BotStatusIndicator>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
+  Widget build(BuildContext context) => AnimatedBuilder(
       animation: _opacityAnimation,
-      builder: (context, child) {
-        return Row(
+      builder: (context, child) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             // Status Indicator Light
@@ -100,20 +98,18 @@ class _BotStatusIndicatorState extends State<BotStatusIndicator>
                   ),
             ),
           ],
-        );
-      },
+        ),
     );
-  }
 }
 
 /// Compact running indicator badge for bot lists
 class BotRunningBadge extends StatefulWidget {
-  final bool isRunning;
 
   const BotRunningBadge({
     Key? key,
     this.isRunning = false,
   }) : super(key: key);
+  final bool isRunning;
 
   @override
   State<BotRunningBadge> createState() => _BotRunningBadgeState();
@@ -180,8 +176,7 @@ class _BotRunningBadgeState extends State<BotRunningBadge>
 
     return AnimatedBuilder(
       animation: _scaleAnimation,
-      builder: (context, child) {
-        return Transform.scale(
+      builder: (context, child) => Transform.scale(
           scale: _scaleAnimation.value,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -212,8 +207,7 @@ class _BotRunningBadgeState extends State<BotRunningBadge>
               ],
             ),
           ),
-        );
-      },
+        ),
     );
   }
 }

@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
-import '../utils/constants.dart';
+
+import '../models/broker_connection_model.dart';
 import '../services/broker_connection_service.dart';
 import '../services/connection_analytics_service.dart';
-import '../models/broker_connection_model.dart';
+import '../utils/constants.dart';
 import '../widgets/logo_widget.dart';
 
 class BrokerAnalyticsDashboard extends StatefulWidget {
-  final VoidCallback? onBackPressed;
 
   const BrokerAnalyticsDashboard({
     Key? key,
     this.onBackPressed,
   }) : super(key: key);
+  final VoidCallback? onBackPressed;
 
   @override
   State<BrokerAnalyticsDashboard> createState() =>
@@ -52,13 +53,12 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
+  Widget build(BuildContext context) => DefaultTabController(
       length: 4,
       child: Scaffold(
         appBar: AppBar(
-          title: Row(
-            children: const [
+          title: const Row(
+            children: [
               LogoWidget(size: 40, showText: false),
               SizedBox(width: 12),
               Text('Broker Analytics Dashboard'),
@@ -93,7 +93,6 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
               ),
       ),
     );
-  }
 
   Widget _buildOverviewTab() {
     if (_selectedAccount == null) {
@@ -119,32 +118,28 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
     );
   }
 
-  Widget _buildAccountSelector() {
-    return Card(
+  Widget _buildAccountSelector() => Card(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: DropdownButton<BrokerAccount>(
           value: _selectedAccount,
           isExpanded: true,
           underline: const SizedBox(),
-          onChanged: (BrokerAccount? newValue) {
+          onChanged: (newValue) {
             if (newValue != null) {
               setState(() => _selectedAccount = newValue);
             }
           },
-          items: _accounts.map((BrokerAccount account) {
-            return DropdownMenuItem<BrokerAccount>(
+          items: _accounts.map((account) => DropdownMenuItem<BrokerAccount>(
               value: account,
               child: Text(
                 '${account.brokerName} - ${account.accountNumber}',
                 style: const TextStyle(fontSize: 12),
               ),
-            );
-          }).toList(),
+            )).toList(),
         ),
       ),
     );
-  }
 
   Widget _buildHealthScoreWidget() {
     if (_selectedAccount == null) return const SizedBox();
@@ -260,8 +255,7 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
     );
   }
 
-  Widget _buildStatItem(String label, String value, IconData icon) {
-    return Column(
+  Widget _buildStatItem(String label, String value, IconData icon) => Column(
       children: [
         Icon(icon, color: AppColors.primaryColor),
         const SizedBox(height: 8),
@@ -276,7 +270,6 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
         ),
       ],
     );
-  }
 
   Widget _buildAccountBalanceCard() {
     if (_selectedAccount == null) return const SizedBox();
@@ -376,8 +369,7 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon) {
-    return Card(
+  Widget _buildStatCard(String title, String value, IconData icon) => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -400,7 +392,6 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
         ),
       ),
     );
-  }
 
   Widget _buildPerformanceTab() {
     if (_selectedAccount == null) {
@@ -567,8 +558,7 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
   }
 
   Widget _buildAnalyticsCard(
-      String title, String value, String subtitle) {
-    return Card(
+      String title, String value, String subtitle) => Card(
       color: Colors.grey[900],
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -607,10 +597,8 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
         ),
       ),
     );
-  }
 
-  Widget _buildAccountsTab() {
-    return ListView.builder(
+  Widget _buildAccountsTab() => ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _accounts.length,
       itemBuilder: (context, index) {
@@ -647,5 +635,4 @@ class _BrokerAnalyticsDashboardState extends State<BrokerAnalyticsDashboard>
         );
       },
     );
-  }
 }

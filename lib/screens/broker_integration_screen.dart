@@ -1,28 +1,31 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:provider/provider.dart';
+
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../utils/constants.dart';
-import '../utils/environment_config.dart';
-import '../services/trading_service.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/broker_connection_model.dart';
 import '../services/broker_connection_service.dart';
 import '../services/broker_credentials_service.dart';
+import '../services/trading_service.dart';
+import '../utils/constants.dart';
+import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
-import '../models/broker_connection_model.dart';
-import 'broker_analytics_dashboard.dart';
 import 'bot_configuration_screen.dart';
 import 'bot_dashboard_screen.dart';
+import 'broker_analytics_dashboard.dart';
+import 'consolidated_reports_screen.dart';
 import 'dashboard_screen.dart';
 
 class BrokerIntegrationScreen extends StatefulWidget {
-  final VoidCallback? onBackPressed;
 
   const BrokerIntegrationScreen({
     Key? key,
     this.onBackPressed,
   }) : super(key: key);
+  final VoidCallback? onBackPressed;
 
   @override
   State<BrokerIntegrationScreen> createState() =>
@@ -485,17 +488,36 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Broker Integration'),
           ],
         ),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.dashboard_rounded),
+            tooltip: 'Home',
+            onPressed: () {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                (route) => route.isFirst,
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Reports',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsolidatedReportsScreen()));
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -681,7 +703,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                 value: _selectedBroker,
                 isExpanded: true,
                 underline: const SizedBox(),
-                onChanged: (String? newValue) {
+                onChanged: (newValue) {
                   if (newValue != null) {
                     setState(() {
                       _selectedBroker = newValue;
@@ -689,12 +711,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                     });
                   }
                 },
-                items: brokers.map((String broker) {
-                  return DropdownMenuItem<String>(
+                items: brokers.map((broker) => DropdownMenuItem<String>(
                     value: broker,
                     child: Text(broker),
-                  );
-                }).toList(),
+                  )).toList(),
               ),
             ),
           ),
@@ -725,10 +745,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             TextField(
               controller: _accountController,
               keyboardType: TextInputType.number,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Account Number (your MT5 account ID)',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.account_circle),
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.account_circle),
                 hintText: 'demo or 136372035',
               ),
             ),
@@ -741,10 +761,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             TextField(
               controller: _passwordController,
               obscureText: true,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'MT5 Password (your broker password)',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.lock),
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock),
                 hintText: 'demo123',
               ),
             ),
@@ -855,7 +875,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                   value: _serverController.text.isEmpty ? 'spot' : _serverController.text,
                   isExpanded: true,
                   underline: const SizedBox(),
-                  onChanged: (String? value) {
+                  onChanged: (value) {
                     if (value != null) {
                       setState(() {
                         _serverController.text = value;
@@ -1065,7 +1085,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                   style: GoogleFonts.poppins(fontSize: 13),
                 ),
                 value: _autoReconnectEnabled,
-                onChanged: (bool? value) {
+                onChanged: (value) {
                   if (value == true) {
                     _startAutoReconnect();
                   }
@@ -1227,7 +1247,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
           // Navigation footer icons
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               border: Border(top: BorderSide(color: Colors.white10)),
             ),
             child: Row(
@@ -1304,19 +1324,19 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Broker Integration Help'),
-                          content: SingleChildScrollView(
+                          content: const SingleChildScrollView(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text('📱 Demo Mode (Orange): Training account for testing'),
-                                const SizedBox(height: 8),
-                                const Text('🔴 Live Mode (Red): Real money trading - USE WITH CAUTION'),
-                                const SizedBox(height: 12),
-                                const Text('✓ When Connected:'),
-                                const Text('  • Account is authenticated'),
-                                const Text('  • Bots can place real trades'),
-                                const Text('  • Balance is synchronized'),
+                                Text('📱 Demo Mode (Orange): Training account for testing'),
+                                SizedBox(height: 8),
+                                Text('🔴 Live Mode (Red): Real money trading - USE WITH CAUTION'),
+                                SizedBox(height: 12),
+                                Text('✓ When Connected:'),
+                                Text('  • Account is authenticated'),
+                                Text('  • Bots can place real trades'),
+                                Text('  • Balance is synchronized'),
                               ],
                             ),
                           ),
@@ -1339,10 +1359,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       ),
       ),
     );
-  }
 
-  Widget _buildStatusInfoRow(String label, String value) {
-    return Row(
+  Widget _buildStatusInfoRow(String label, String value) => Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
@@ -1362,5 +1380,4 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         ),
       ],
     );
-  }
 }

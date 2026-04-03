@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 
 class LogoWidget extends StatelessWidget {
-  final double size;
-  final bool showText;
 
   const LogoWidget({
     Key? key,
     this.size = 80,
     this.showText = false,
   }) : super(key: key);
+  final double size;
+  final bool showText;
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
+  Widget build(BuildContext context) => Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         // Display logo - larger and more visible
@@ -50,5 +49,4 @@ class LogoWidget extends StatelessWidget {
         ],
       ],
     );
-  }
 }

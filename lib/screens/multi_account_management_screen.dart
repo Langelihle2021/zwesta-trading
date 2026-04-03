@@ -1,6 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
 
@@ -14,7 +16,7 @@ class MultiAccountManagementScreen extends StatefulWidget {
 
 class _MultiAccountManagementScreenState
     extends State<MultiAccountManagementScreen> {
-  late String _apiUrl = EnvironmentConfig.apiUrl;
+  late final String _apiUrl = EnvironmentConfig.apiUrl;
 
   List<Map<String, dynamic>> _accounts = [];
   List<Map<String, dynamic>> _availableBrokers = [];
@@ -260,11 +262,10 @@ class _MultiAccountManagementScreenState
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
             Text('Multi-Account Management'),
@@ -340,14 +341,14 @@ class _MultiAccountManagementScreenState
                       child: InkWell(
                         onTap: _showAddAccountDialog,
                         borderRadius: BorderRadius.circular(14),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.add_circle_outline, color: Colors.white, size: 22),
-                              const SizedBox(width: 10),
-                              const Text(
+                              Icon(Icons.add_circle_outline, color: Colors.white, size: 22),
+                              SizedBox(width: 10),
+                              Text(
                                 'Add Trading Account',
                                 style: TextStyle(
                                   color: Colors.white,
@@ -388,26 +389,26 @@ class _MultiAccountManagementScreenState
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [Color(0xFF00E5FF).withOpacity(0.2), Color(0xFF7C4DFF).withOpacity(0.15)],
+                                colors: [const Color(0xFF00E5FF).withOpacity(0.2), const Color(0xFF7C4DFF).withOpacity(0.15)],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Color(0xFF00E5FF).withOpacity(0.2),
+                                  color: const Color(0xFF00E5FF).withOpacity(0.2),
                                   blurRadius: 20,
                                 ),
                               ],
                             ),
-                            child: Icon(
+                            child: const Icon(
                               Icons.account_balance_wallet,
                               size: 56,
                               color: Color(0xFF00E5FF),
                             ),
                           ),
                           const SizedBox(height: 20),
-                          Text(
+                          const Text(
                             'No accounts added yet',
                             style: TextStyle(
                               fontSize: 18,
@@ -417,7 +418,7 @@ class _MultiAccountManagementScreenState
                             ),
                           ),
                           const SizedBox(height: 12),
-                          Text(
+                          const Text(
                             'Add your first trading account to get started',
                             textAlign: TextAlign.center,
                             style: TextStyle(
@@ -430,12 +431,11 @@ class _MultiAccountManagementScreenState
                       ),
                     )
                   else
-                    ..._accounts.map((account) => _buildAccountCard(account)),
+                    ..._accounts.map(_buildAccountCard),
                 ],
               ),
             ),
     );
-  }
 
   Widget _buildAccountCard(Map<String, dynamic> account) {
     final isConnected = account['connected'] ?? false;
@@ -512,7 +512,7 @@ class _MultiAccountManagementScreenState
                           const SizedBox(width: 6),
                           Text(
                             'Broker: ${account['broker'] ?? 'N/A'}',
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 12,
                               color: Colors.white70,
                               fontWeight: FontWeight.w500,
@@ -645,8 +645,7 @@ class _MultiAccountManagementScreenState
     );
   }
 
-  Widget _buildInfoRow(String label, String? value, Color accentColor) {
-    return Row(
+  Widget _buildInfoRow(String label, String? value, Color accentColor) => Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Row(
@@ -662,7 +661,7 @@ class _MultiAccountManagementScreenState
             const SizedBox(width: 10),
             Text(
               label,
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
@@ -681,5 +680,4 @@ class _MultiAccountManagementScreenState
         ),
       ],
     );
-  }
 }

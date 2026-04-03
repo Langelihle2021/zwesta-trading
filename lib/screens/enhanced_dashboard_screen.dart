@@ -1,10 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+
 import '../services/auth_service.dart';
 import '../utils/constants.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../utils/environment_config.dart';
 
 class EnhancedDashboardScreen extends StatefulWidget {
@@ -69,14 +71,13 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
   }
 
   String _formatCurrency(dynamic value) {
-    if (value == null) return '\$0.00';
+    if (value == null) return r'$0.00';
     final num val = value is String ? double.parse(value) : value;
     return '\$${val.toStringAsFixed(2)}';
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
         title: const Text('Trading Dashboard'),
         backgroundColor: Colors.blue[700],
@@ -136,7 +137,6 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
                   ),
                 ),
     );
-  }
 
   Widget _buildUserInfoCard() {
     final user = _dashboardData?['user'];
@@ -293,8 +293,7 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
     required String value,
     required IconData icon,
     required Color color,
-  }) {
-    return Card(
+  }) => Card(
       elevation: 2,
       child: Container(
         decoration: BoxDecoration(
@@ -334,7 +333,6 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
         ),
       ),
     );
-  }
 
   Widget _buildPerformanceCard() {
     final stats = _dashboardData?['stats'];
@@ -403,8 +401,7 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
     String label,
     String value,
     Color color,
-  ) {
-    return Row(
+  ) => Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: const TextStyle(fontSize: 13)),
@@ -418,7 +415,6 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
         ),
       ],
     );
-  }
 
   Widget _buildTopPerformersCard() {
     final topBots = _dashboardData?['top_performers'] as List? ?? [];
@@ -506,8 +502,7 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
     );
   }
 
-  Widget _buildCommissionCard() {
-    return Card(
+  Widget _buildCommissionCard() => Card(
       elevation: 2,
       child: Container(
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -565,5 +560,4 @@ class _EnhancedDashboardScreenState extends State<EnhancedDashboardScreen> {
         ),
       ),
     );
-  }
 }

@@ -1,11 +1,13 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/trading_service.dart';
+
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/trade.dart';
+import '../services/trading_service.dart';
 import '../utils/constants.dart';
 import '../utils/environment_config.dart';
 import '../widgets/custom_widgets.dart';
@@ -22,211 +24,238 @@ class _TradesScreenState extends State<TradesScreen> {
   int _selectedTab = 0; // 0: all, 1: open, 2: closed
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: CustomAppBar(
-        title: 'Trades',
-        showBackButton: true,
-        showLogo: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showOpenTradeDialog(context),
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0A0E21), Color(0xFF1A237E), Color(0xFF512DA8)],
-          ),
-        ),
-        child: _buildTradesContent(),
-      ),
-    );
-  }
-
-  Widget _buildTradesContent() {
-    return Consumer<TradingService>(
-      builder: (context, tradingService, _) {
-        return SafeArea(
-          child: Column(
-          children: [
-            // Connected broker banner
-            FutureBuilder<SharedPreferences>(
-              future: SharedPreferences.getInstance(),
-              builder: (ctx, snap) {
-                if (!snap.hasData) return const SizedBox.shrink();
-                final prefs = snap.data!;
-                final broker = prefs.getString('broker');
-                final connected = prefs.getBool('broker_connected') == true;
-                return GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrokerIntegrationScreen())),
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: connected ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: connected ? Colors.green.withOpacity(0.3) : Colors.orange.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(connected ? Icons.link : Icons.link_off, color: connected ? Colors.green : Colors.orange, size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            connected ? 'Connected to ${broker ?? "Broker"}' : 'No broker connected',
-                            style: GoogleFonts.poppins(color: connected ? Colors.green : Colors.orange, fontSize: 12, fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        Text('Manage', style: GoogleFonts.poppins(color: AppColors.primaryColor, fontSize: 11, fontWeight: FontWeight.w600)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right, color: AppColors.primaryColor, size: 16),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-
-            // Live Positions Indicator
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF00E5FF).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFF00E5FF),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Live MT5 positions • Auto-refreshing every 30 seconds',
-                      style: GoogleFonts.poppins(
-                        color: const Color(0xFF00E5FF),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  const Icon(Icons.update, color: Color(0xFF00E5FF), size: 16),
-                ],
-              ),
-            ),
-
-            // Account Balance Card
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFF1A237E).withOpacity(0.5),
-                    const Color(0xFF0D47A1).withOpacity(0.3),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.2)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildAccountMetric('Account Balance', tradingService.accountBalance, Colors.white),
-                  Container(width: 1, height: 40, color: Colors.white.withOpacity(0.1)),
-                  _buildAccountMetric('Equity', tradingService.accountEquity, const Color(0xFF69F0AE)),
-                  Container(width: 1, height: 40, color: Colors.white.withOpacity(0.1)),
-                  _buildAccountMetric('Free Margin', tradingService.freeMargin, const Color(0xFF00E5FF)),
-                ],
-              ),
-            ),
-
-            // Tab Selector
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Row(
-                children: [
-                  _buildTabButton(
-                    context,
-                    'All',
-                    0,
-                    '${tradingService.trades.length}',
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  _buildTabButton(
-                    context,
-                    'Open',
-                    1,
-                    '${tradingService.activeTrades.length}',
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  _buildTabButton(
-                    context,
-                    'Closed',
-                    2,
-                    '${tradingService.closedTrades.length}',
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  _buildTabButton(
-                    context,
-                    'Live MT5',
-                    3,
-                    '${tradingService.liveOpenPositions.length}',
-                  ),
-                ],
-              ),
-            ),
-
-            // Trades List
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () async {
-                  await tradingService.fetchTrades();
-                },
-                child: _buildTradesList(context, tradingService),
-              ),
+  Widget build(BuildContext context) => Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: CustomAppBar(
+          title: 'Trades',
+          showBackButton: true,
+          showLogo: false,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => _showOpenTradeDialog(context),
             ),
           ],
         ),
-        );
-      },
-    );
-  }
-
-  Widget _buildAccountMetric(String label, double value, Color color) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF0A0E21), Color(0xFF1A237E), Color(0xFF512DA8)],
+            ),
+          ),
+          child: _buildTradesContent(),
         ),
-        const SizedBox(height: 4),
-        Text(
-          '\$${value.toStringAsFixed(2)}',
-          style: GoogleFonts.poppins(
-            color: color,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+      );
+
+  Widget _buildTradesContent() => Consumer<TradingService>(
+        builder: (context, tradingService, _) => SafeArea(
+          child: Column(
+            children: [
+              // Connected broker banner
+              FutureBuilder<SharedPreferences>(
+                future: SharedPreferences.getInstance(),
+                builder: (ctx, snap) {
+                  if (!snap.hasData) return const SizedBox.shrink();
+                  final prefs = snap.data!;
+                  final broker = prefs.getString('broker');
+                  final connected = prefs.getBool('broker_connected') == true;
+                  return GestureDetector(
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const BrokerIntegrationScreen())),
+                    child: Container(
+                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: connected
+                            ? Colors.green.withOpacity(0.1)
+                            : Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: connected
+                                ? Colors.green.withOpacity(0.3)
+                                : Colors.orange.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(connected ? Icons.link : Icons.link_off,
+                              color: connected ? Colors.green : Colors.orange,
+                              size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              connected
+                                  ? 'Connected to ${broker ?? "Broker"}'
+                                  : 'No broker connected',
+                              style: GoogleFonts.poppins(
+                                  color:
+                                      connected ? Colors.green : Colors.orange,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          Text('Manage',
+                              style: GoogleFonts.poppins(
+                                  color: AppColors.primaryColor,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.chevron_right,
+                              color: AppColors.primaryColor, size: 16),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+              // Live Positions Indicator
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00E5FF).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: const Color(0xFF00E5FF).withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF00E5FF),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Live MT5 positions • Auto-refreshing every 30 seconds',
+                        style: GoogleFonts.poppins(
+                          color: const Color(0xFF00E5FF),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.update,
+                        color: Color(0xFF00E5FF), size: 16),
+                  ],
+                ),
+              ),
+
+              // Account Balance Card
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      const Color(0xFF1A237E).withOpacity(0.5),
+                      const Color(0xFF0D47A1).withOpacity(0.3),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFF00E5FF).withOpacity(0.2)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildAccountMetric('Account Balance',
+                        tradingService.accountBalance, Colors.white),
+                    Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.white.withOpacity(0.1)),
+                    _buildAccountMetric('Equity', tradingService.accountEquity,
+                        const Color(0xFF69F0AE)),
+                    Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.white.withOpacity(0.1)),
+                    _buildAccountMetric('Free Margin',
+                        tradingService.freeMargin, const Color(0xFF00E5FF)),
+                  ],
+                ),
+              ),
+
+              // Tab Selector
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Row(
+                  children: [
+                    _buildTabButton(
+                      context,
+                      'All',
+                      0,
+                      '${tradingService.trades.length}',
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    _buildTabButton(
+                      context,
+                      'Open',
+                      1,
+                      '${tradingService.activeTrades.length}',
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    _buildTabButton(
+                      context,
+                      'Closed',
+                      2,
+                      '${tradingService.closedTrades.length}',
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    _buildTabButton(
+                      context,
+                      'Live MT5',
+                      3,
+                      '${tradingService.liveOpenPositions.length}',
+                    ),
+                  ],
+                ),
+              ),
+
+              // Trades List
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    await tradingService.fetchTrades();
+                  },
+                  child: _buildTradesList(context, tradingService),
+                ),
+              ),
+            ],
           ),
         ),
-      ],
-    );
-  }
+      );
+
+  Widget _buildAccountMetric(String label, double value, Color color) => Column(
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '\$${value.toStringAsFixed(2)}',
+            style: GoogleFonts.poppins(
+              color: color,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      );
 
   Widget _buildLivePositionCard(BuildContext context, Trade position) {
     final symbol = position.symbol;
@@ -235,9 +264,10 @@ class _TradesScreenState extends State<TradesScreen> {
     final openPrice = position.entryPrice;
     final currentPrice = position.currentPrice ?? position.entryPrice;
     final profit = position.profit ?? 0.0;
-    final profitPct = openPrice > 0 ? ((currentPrice - openPrice) / openPrice * 100) : 0.0;
+    final profitPct =
+        openPrice > 0 ? ((currentPrice - openPrice) / openPrice * 100) : 0.0;
     final openTime = position.openedAt.toString().split('.')[0];
-    
+
     final isBuy = position.type == TradeType.buy;
     final isProfitable = profit >= 0;
 
@@ -248,7 +278,9 @@ class _TradesScreenState extends State<TradesScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.3) : const Color(0xFFFF8A80).withOpacity(0.3),
+            color: isProfitable
+                ? const Color(0xFF69F0AE).withOpacity(0.3)
+                : const Color(0xFFFF8A80).withOpacity(0.3),
           ),
         ),
         padding: const EdgeInsets.all(12),
@@ -258,11 +290,13 @@ class _TradesScreenState extends State<TradesScreen> {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: const Color(0xFF00E5FF).withOpacity(0.2),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.4)),
+                    border: Border.all(
+                        color: const Color(0xFF00E5FF).withOpacity(0.4)),
                   ),
                   child: Text(
                     'LIVE',
@@ -285,15 +319,20 @@ class _TradesScreenState extends State<TradesScreen> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isBuy ? const Color(0xFF1B5E20).withOpacity(0.2) : const Color(0xFFB71C1C).withOpacity(0.2),
+                    color: isBuy
+                        ? const Color(0xFF1B5E20).withOpacity(0.2)
+                        : const Color(0xFFB71C1C).withOpacity(0.2),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     type,
                     style: GoogleFonts.poppins(
-                      color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      color: isBuy
+                          ? const Color(0xFF69F0AE)
+                          : const Color(0xFFFF8A80),
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
@@ -308,22 +347,40 @@ class _TradesScreenState extends State<TradesScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Volume', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
-                    Text('$volume lots', style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                    Text('Volume',
+                        style: GoogleFonts.poppins(
+                            color: Colors.white60, fontSize: 10)),
+                    Text('$volume lots',
+                        style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500)),
                   ],
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('Open Price', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
-                    Text('\$${openPrice.toStringAsFixed(5)}', style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                    Text('Open Price',
+                        style: GoogleFonts.poppins(
+                            color: Colors.white60, fontSize: 10)),
+                    Text('\$${openPrice.toStringAsFixed(5)}',
+                        style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500)),
                   ],
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('Current Price', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
-                    Text('\$${currentPrice.toStringAsFixed(5)}', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 13, fontWeight: FontWeight.w500)),
+                    Text('Current Price',
+                        style: GoogleFonts.poppins(
+                            color: Colors.white60, fontSize: 10)),
+                    Text('\$${currentPrice.toStringAsFixed(5)}',
+                        style: GoogleFonts.poppins(
+                            color: const Color(0xFF00E5FF),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500)),
                   ],
                 ),
               ],
@@ -332,10 +389,14 @@ class _TradesScreenState extends State<TradesScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.1) : const Color(0xFFFF8A80).withOpacity(0.1),
+                color: isProfitable
+                    ? const Color(0xFF69F0AE).withOpacity(0.1)
+                    : const Color(0xFFFF8A80).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: isProfitable ? const Color(0xFF69F0AE).withOpacity(0.3) : const Color(0xFFFF8A80).withOpacity(0.3),
+                  color: isProfitable
+                      ? const Color(0xFF69F0AE).withOpacity(0.3)
+                      : const Color(0xFFFF8A80).withOpacity(0.3),
                 ),
               ),
               child: Row(
@@ -345,18 +406,24 @@ class _TradesScreenState extends State<TradesScreen> {
                     children: [
                       Icon(
                         isProfitable ? Icons.trending_up : Icons.trending_down,
-                        color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                        color: isProfitable
+                            ? const Color(0xFF69F0AE)
+                            : const Color(0xFFFF8A80),
                         size: 18,
                       ),
                       const SizedBox(width: 8),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('P/L', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 10)),
+                          Text('P/L',
+                              style: GoogleFonts.poppins(
+                                  color: Colors.white60, fontSize: 10)),
                           Text(
                             '${isProfitable ? '+' : ''}\$${profit.toStringAsFixed(2)}',
                             style: GoogleFonts.poppins(
-                              color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                              color: isProfitable
+                                  ? const Color(0xFF69F0AE)
+                                  : const Color(0xFFFF8A80),
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
@@ -368,7 +435,9 @@ class _TradesScreenState extends State<TradesScreen> {
                   Text(
                     '${isProfitable ? '+' : ''}${profitPct.toStringAsFixed(2)}%',
                     style: GoogleFonts.poppins(
-                      color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                      color: isProfitable
+                          ? const Color(0xFF69F0AE)
+                          : const Color(0xFFFF8A80),
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                     ),
@@ -389,7 +458,8 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
-  Widget _buildTabButton(BuildContext context, String label, int index, String count) {
+  Widget _buildTabButton(
+      BuildContext context, String label, int index, String count) {
     final isSelected = _selectedTab == index;
     return GestureDetector(
       onTap: () {
@@ -406,7 +476,8 @@ class _TradesScreenState extends State<TradesScreen> {
           color: isSelected ? AppColors.primaryColor : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected ? AppColors.primaryColor : AppColors.veryLightGrey,
+            color:
+                isSelected ? AppColors.primaryColor : AppColors.veryLightGrey,
           ),
         ),
         child: Column(
@@ -436,13 +507,13 @@ class _TradesScreenState extends State<TradesScreen> {
     // Handle Live MT5 Tab (case 3)
     if (_selectedTab == 3) {
       final livePositions = tradingService.liveOpenPositions;
-      
+
       if (livePositions.isEmpty) {
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
+              const Icon(
                 Icons.cloud_off_outlined,
                 size: 64,
                 color: AppColors.lightGrey,
@@ -465,9 +536,8 @@ class _TradesScreenState extends State<TradesScreen> {
       return ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: livePositions.length,
-        itemBuilder: (context, index) {
-          return _buildLivePositionCard(context, livePositions[index]);
-        },
+        itemBuilder: (context, index) =>
+            _buildLivePositionCard(context, livePositions[index]),
       );
     }
 
@@ -490,14 +560,16 @@ class _TradesScreenState extends State<TradesScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
+            const Icon(
               Icons.trending_up,
               size: 64,
               color: AppColors.lightGrey,
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
-              _selectedTab == 1 ? 'No open trades' : 'No ${_selectedTab == 2 ? 'closed' : ''} trades',
+              _selectedTab == 1
+                  ? 'No open trades'
+                  : 'No ${_selectedTab == 2 ? 'closed' : ''} trades',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -537,19 +609,21 @@ class _TradesScreenState extends State<TradesScreen> {
   /// Fetch trading symbols from the backend API
   Future<List<Map<String, String>>> _fetchTradingSymbolsForDialog() async {
     try {
-      final response = await http.get(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/commodities/list'),
-      ).timeout(const Duration(seconds: 5));
+      final response = await http
+          .get(
+            Uri.parse('${EnvironmentConfig.apiUrl}/api/commodities/list'),
+          )
+          .timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final commodities = data['commodities'] as Map;
-        
-        List<Map<String, String>> symbols = [];
-        
+
+        final symbols = <Map<String, String>>[];
+
         commodities.forEach((category, items) {
           if (items is List) {
-            for (var item in items) {
+            for (final item in items) {
               if (item is Map) {
                 final symbol = item['symbol'] ?? '';
                 final name = item['name'] ?? '';
@@ -563,19 +637,19 @@ class _TradesScreenState extends State<TradesScreen> {
             }
           }
         });
-        
+
         return symbols;
       }
     } catch (e) {
       print('Error fetching trading symbols: $e');
     }
-    
+
     // Fallback to minimal list if API fails
     return [
       {'symbol': 'EURUSD', 'name': 'EUR/USD'},
       {'symbol': 'GBPUSD', 'name': 'GBP/USD'},
       {'symbol': 'XPTUSD', 'name': 'Platinum'},
-      {'symbol': 'XAUUSDm', 'name': 'Gold (Only Available)'},
+      {'symbol': 'XAUUSD', 'name': 'Gold (XAU/USD)'},
     ];
   }
 
@@ -584,11 +658,11 @@ class _TradesScreenState extends State<TradesScreen> {
     final entryPriceController = TextEditingController();
     final takeProfitController = TextEditingController();
     final stopLossController = TextEditingController();
-    String selectedType = 'buy';
-    String selectedSymbol = 'EURUSD';
+    var selectedType = 'buy';
+    var selectedSymbol = 'EURUSD';
 
     // Initialize with empty list, will be populated from API
-    List<Map<String, String>> tradingSymbols = [];
+    var tradingSymbols = <Map<String, String>>[];
 
     // Fetch trading symbols from backend API
     _fetchTradingSymbolsForDialog().then((symbols) {
@@ -618,13 +692,14 @@ class _TradesScreenState extends State<TradesScreen> {
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<String>(
                 value: selectedSymbol,
-                decoration: const InputDecoration(labelText: 'Select Symbol/Commodity'),
-                items: tradingSymbols.map((item) {
-                  return DropdownMenuItem(
-                    value: item['symbol'],
-                    child: Text(item['name'] ?? ''),
-                  );
-                }).toList(),
+                decoration:
+                    const InputDecoration(labelText: 'Select Symbol/Commodity'),
+                items: tradingSymbols
+                    .map((item) => DropdownMenuItem(
+                          value: item['symbol'],
+                          child: Text(item['name'] ?? ''),
+                        ))
+                    .toList(),
                 onChanged: (value) {
                   selectedSymbol = value ?? 'EURUSD';
                 },
@@ -644,13 +719,15 @@ class _TradesScreenState extends State<TradesScreen> {
               const SizedBox(height: AppSpacing.md),
               TextField(
                 controller: takeProfitController,
-                decoration: const InputDecoration(labelText: 'Take Profit (Optional)'),
+                decoration:
+                    const InputDecoration(labelText: 'Take Profit (Optional)'),
                 keyboardType: TextInputType.number,
               ),
               const SizedBox(height: AppSpacing.md),
               TextField(
                 controller: stopLossController,
-                decoration: const InputDecoration(labelText: 'Stop Loss (Optional)'),
+                decoration:
+                    const InputDecoration(labelText: 'Stop Loss (Optional)'),
                 keyboardType: TextInputType.number,
               ),
             ],
@@ -691,7 +768,7 @@ class _TradesScreenState extends State<TradesScreen> {
   ) async {
     final tradingService = context.read<TradingService>();
 
-    bool success = await tradingService.openTrade(
+    final success = await tradingService.openTrade(
       symbol,
       type == 'buy' ? TradeType.buy : TradeType.sell,
       quantity,
@@ -708,13 +785,16 @@ class _TradesScreenState extends State<TradesScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tradingService.errorMessage ?? 'Error opening trade')),
+          SnackBar(
+              content:
+                  Text(tradingService.errorMessage ?? 'Error opening trade')),
         );
       }
     }
   }
 
-  void _showTradeDetailsDialog(BuildContext context, Trade trade, TradingService tradingService) {
+  void _showTradeDetailsDialog(
+      BuildContext context, Trade trade, TradingService tradingService) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -725,17 +805,22 @@ class _TradesScreenState extends State<TradesScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildDetailRow('Symbol', trade.symbol),
-              _buildDetailRow('Type', trade.type.toString().split('.').last.toUpperCase()),
-              _buildDetailRow('Quantity', '${trade.quantity.toStringAsFixed(0)} units'),
-              _buildDetailRow('Entry Price', trade.entryPrice.toStringAsFixed(4)),
+              _buildDetailRow(
+                  'Type', trade.type.toString().split('.').last.toUpperCase()),
+              _buildDetailRow(
+                  'Quantity', '${trade.quantity.toStringAsFixed(0)} units'),
+              _buildDetailRow(
+                  'Entry Price', trade.entryPrice.toStringAsFixed(4)),
               _buildDetailRow(
                 'Current Price',
                 (trade.currentPrice ?? trade.entryPrice).toStringAsFixed(4),
               ),
               if (trade.takeProfit != null)
-                _buildDetailRow('Take Profit', trade.takeProfit!.toStringAsFixed(4)),
+                _buildDetailRow(
+                    'Take Profit', trade.takeProfit!.toStringAsFixed(4)),
               if (trade.stopLoss != null)
-                _buildDetailRow('Stop Loss', trade.stopLoss!.toStringAsFixed(4)),
+                _buildDetailRow(
+                    'Stop Loss', trade.stopLoss!.toStringAsFixed(4)),
               _buildDetailRow(
                 'Status',
                 trade.status.toString().split('.').last.toUpperCase(),
@@ -769,7 +854,8 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
-  void _showClosePriceDialog(BuildContext context, Trade trade, TradingService tradingService) {
+  void _showClosePriceDialog(
+      BuildContext context, Trade trade, TradingService tradingService) {
     final closingPriceController = TextEditingController();
 
     showDialog(
@@ -795,8 +881,10 @@ class _TradesScreenState extends State<TradesScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final closingPrice = double.tryParse(closingPriceController.text) ?? 0;
-              bool success = await tradingService.closeTrade(trade.id, closingPrice);
+              final closingPrice =
+                  double.tryParse(closingPriceController.text) ?? 0;
+              final success =
+                  await tradingService.closeTrade(trade.id, closingPrice);
 
               if (mounted) {
                 Navigator.pop(context);
@@ -807,7 +895,8 @@ class _TradesScreenState extends State<TradesScreen> {
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(tradingService.errorMessage ?? 'Error closing trade'),
+                      content: Text(
+                          tradingService.errorMessage ?? 'Error closing trade'),
                     ),
                   );
                 }
@@ -820,16 +909,14 @@ class _TradesScreenState extends State<TradesScreen> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
-          Text(value),
-        ],
-      ),
-    );
-  }
+  Widget _buildDetailRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+            Text(value),
+          ],
+        ),
+      );
 }

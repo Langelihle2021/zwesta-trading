@@ -1,13 +1,11 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../services/auth_service.dart';
-import '../utils/constants.dart';
-import '../widgets/custom_widgets.dart';
 import 'package:provider/provider.dart';
-import '../widgets/logo_widget.dart';
+
 import '../l10n/app_localizations.dart';
+import '../services/auth_service.dart';
+import '../widgets/logo_widget.dart';
 import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -252,8 +250,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // Build MFA/2FA form
-  Widget _buildMfaForm(AppLocalizations loc) {
-    return Column(
+  Widget _buildMfaForm(AppLocalizations loc) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
@@ -295,8 +292,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 32),
         Consumer<AuthService>(
-          builder: (context, authService, _) {
-            return SizedBox(
+          builder: (context, authService, _) => SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
@@ -326,8 +322,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
               ),
-            );
-          },
+            ),
         ),
         const SizedBox(height: 16),
         Center(
@@ -341,11 +336,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ],
     );
-  }
 
   // Build login/register form
-  Widget _buildLoginRegisterForm(AppLocalizations loc) {
-    return Column(
+  Widget _buildLoginRegisterForm(AppLocalizations loc) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!_isLogin) ...[
@@ -527,8 +520,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         // Submit Button
         Consumer<AuthService>(
-          builder: (context, authService, _) {
-            return SizedBox(
+          builder: (context, authService, _) => SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
@@ -558,8 +550,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
               ),
-            );
-          },
+            ),
         ),
         const SizedBox(height: 28),
 
@@ -569,7 +560,7 @@ class _LoginScreenState extends State<LoginScreen> {
             text: TextSpan(
               children: [
                 TextSpan(
-                  text: _isLogin ? "Don't have an account? " : "Already have an account? ",
+                  text: _isLogin ? "Don't have an account? " : 'Already have an account? ',
                   style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
                 ),
                 TextSpan(
@@ -612,7 +603,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
       ],
     );
-  }
 
   // Handle login/register submission
   void _handleSubmit() async {

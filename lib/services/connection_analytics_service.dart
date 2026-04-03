@@ -3,7 +3,8 @@ import '../models/broker_connection_model.dart';
 
 class ConnectionAnalyticsService {
   static final Map<String, List<ConnectionMetric>> _metricsHistory = {};
-  static final Map<String, StreamController<List<ConnectionMetric>>> _analyticsStreams = {};
+  static final Map<String, StreamController<List<ConnectionMetric>>>
+      _analyticsStreams = {};
 
   /// Record analytics data point
   static void recordMetric({
@@ -32,16 +33,17 @@ class ConnectionAnalyticsService {
     final metrics = _metricsHistory[accountId] ?? [];
     if (metrics.isEmpty) return [];
 
-    final List<double> trends = [];
+    final trends = <double>[];
     final metricsPerInterval = (metrics.length / intervals).ceil();
 
-    for (int i = 0; i < intervals; i++) {
+    for (var i = 0; i < intervals; i++) {
       final start = i * metricsPerInterval;
       final end = ((i + 1) * metricsPerInterval).clamp(0, metrics.length);
 
       if (start < metrics.length) {
         final subset = metrics.sublist(start, end);
-        final avgLatency = subset.fold<double>(0, (sum, m) => sum + m.latency) / subset.length;
+        final avgLatency =
+            subset.fold<double>(0, (sum, m) => sum + m.latency) / subset.length;
         trends.add(avgLatency);
       }
     }
@@ -79,25 +81,27 @@ class ConnectionAnalyticsService {
     final metrics = _metricsHistory[accountId] ?? [];
     if (metrics.isEmpty) return 0;
 
-    double score = 100.0;
+    var score = 100.0;
 
     // Reduce score based on disconnections
     final uptime = metrics.where((m) => m.isConnected).length / metrics.length;
     score *= uptime;
 
     // Reduce score based on high latency (>200ms = bad)
-    final avgLatency = metrics.fold<double>(0, (sum, m) => sum + m.latency) / metrics.length;
+    final avgLatency =
+        metrics.fold<double>(0, (sum, m) => sum + m.latency) / metrics.length;
     if (avgLatency > 200) {
       score -= (avgLatency - 200) * 0.1;
     }
 
-    return (score.clamp(0, 100)).toInt();
+    return score.clamp(0, 100).toInt();
   }
 
   /// Stream analytics updates
   static Stream<List<ConnectionMetric>> getAnalyticsStream(String accountId) {
     if (!_analyticsStreams.containsKey(accountId)) {
-      _analyticsStreams[accountId] = StreamController<List<ConnectionMetric>>.broadcast();
+      _analyticsStreams[accountId] =
+          StreamController<List<ConnectionMetric>>.broadcast();
     }
     return _analyticsStreams[accountId]!.stream;
   }
@@ -123,7 +127,8 @@ class ConnectionAnalyticsService {
     return PerformanceSummary(
       totalConnections: metrics.length,
       successfulConnections: successCount,
-      averageLatency: latencies.fold(0.0, (a, b) => a + b) / latencies.length,
+      averageLatency:
+          latencies.fold<double>(0.0, (a, b) => a + b) / latencies.length,
       peakLatency: latencies.reduce((a, b) => a > b ? a : b),
       minLatency: latencies.reduce((a, b) => a < b ? a : b),
       uptime: (successCount / metrics.length) * 100,
@@ -152,7 +157,7 @@ class ConnectionAnalyticsService {
 
   /// Cleanup
   static void dispose() {
-    for (var stream in _analyticsStreams.values) {
+    for (final stream in _analyticsStreams.values) {
       stream.close();
     }
     _analyticsStreams.clear();
@@ -161,26 +166,17 @@ class ConnectionAnalyticsService {
 }
 
 class EquityDataPoint {
-  final double timeIndex;
-  final double value;
-  final DateTime timestamp;
-
   EquityDataPoint({
     required this.timeIndex,
     required this.value,
     required this.timestamp,
   });
+  final double timeIndex;
+  final double value;
+  final DateTime timestamp;
 }
 
 class PerformanceSummary {
-  final int totalConnections;
-  final int successfulConnections;
-  final double averageLatency;
-  final double peakLatency;
-  final double minLatency;
-  final double uptime;
-  final int healthScore;
-
   PerformanceSummary({
     required this.totalConnections,
     required this.successfulConnections,
@@ -190,4 +186,11 @@ class PerformanceSummary {
     required this.uptime,
     required this.healthScore,
   });
+  final int totalConnections;
+  final int successfulConnections;
+  final double averageLatency;
+  final double peakLatency;
+  final double minLatency;
+  final double uptime;
+  final int healthScore;
 }

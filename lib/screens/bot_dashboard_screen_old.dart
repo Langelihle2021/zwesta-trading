@@ -1,20 +1,20 @@
-import '../services/notification_service.dart';
-import '../providers/currency_provider.dart';
-import '../widgets/global_loading_overlay.dart';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../widgets/global_error_banner.dart';
-import '../utils/session_utils.dart';
 import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import '../services/bot_service.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../providers/currency_provider.dart';
+import '../services/notification_service.dart';
 import '../services/trading_service.dart';
 import '../utils/constants.dart';
 import '../utils/environment_config.dart';
-import '../widgets/custom_widgets.dart';
+import '../utils/session_utils.dart';
 import '../widgets/bot_status_indicator.dart';
+import '../widgets/global_error_banner.dart';
+import '../widgets/global_loading_overlay.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
 
@@ -284,8 +284,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Failed to delete bot'),
+            const SnackBar(
+              content: Text('Failed to delete bot'),
               backgroundColor: Colors.red,
             ),
           );
@@ -305,21 +305,20 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
         title: const Text('Bot Dashboard'),
         backgroundColor: Colors.grey[900],
         elevation: 0,
         actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8),
             child: BotStatusIndicator(),
           ),
           Consumer<CurrencyProvider>(
             builder: (context, currencyProvider, _) => DropdownButton<AppCurrency>(
               value: currencyProvider.currency,
-              underline: SizedBox.shrink(),
+              underline: const SizedBox.shrink(),
               icon: const Icon(Icons.currency_exchange, color: Colors.white),
               dropdownColor: Colors.grey[900],
               items: const [
@@ -407,45 +406,45 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                                 padding: const EdgeInsets.all(12),
                                 child: Column(
                                   children: [
-                                    Icon(Icons.smart_toy, color: Colors.blueAccent),
-                                    Text('Total Bots'),
+                                    const Icon(Icons.smart_toy, color: Colors.blueAccent),
+                                    const Text('Total Bots'),
                                     Text(_activeBots.length.toString()),
                                   ],
                                 ),
                               ),
                             ),
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Card(
                               child: Padding(
                                 padding: const EdgeInsets.all(12),
                                 child: Column(
                                   children: [
-                                    Icon(Icons.trending_up, color: Colors.greenAccent),
-                                    Text('Total Profit'),
-                                    Text('${currencyProvider.symbol} ' + currencyProvider.convert(_activeBots.fold<double>(0, (sum, b) => sum + ((b['totalProfit'] ?? 0).toDouble())), fromUsd: false).toStringAsFixed(2)),
+                                    const Icon(Icons.trending_up, color: Colors.greenAccent),
+                                    const Text('Total Profit'),
+                                    Text('${currencyProvider.symbol} ${currencyProvider.convert(_activeBots.fold<double>(0, (sum, b) => sum + ((b['totalProfit'] ?? 0).toDouble())), fromUsd: false).toStringAsFixed(2)}'),
                                   ],
                                 ),
                               ),
                             ),
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Card(
                               child: Padding(
                                 padding: const EdgeInsets.all(12),
                                 child: Column(
                                   children: [
-                                    Icon(Icons.emoji_events, color: Colors.orangeAccent),
-                                    Text('Avg Win Rate'),
+                                    const Icon(Icons.emoji_events, color: Colors.orangeAccent),
+                                    const Text('Avg Win Rate'),
                                     Text(_activeBots.isNotEmpty
-                                        ? (_activeBots.fold<double>(0, (sum, b) {
+                                        ? '${(_activeBots.fold<double>(0, (sum, b) {
                                             final total = (b['totalTrades'] ?? 0).toDouble();
                                             final win = (b['winningTrades'] ?? 0).toDouble();
                                             return sum + (total > 0 ? (win / total * 100) : 0);
                                           }) /
-                                            _activeBots.length).toStringAsFixed(1) + '%'
+                                            _activeBots.length).toStringAsFixed(1)}%'
                                         : '0.0%'),
                                   ],
                                 ),
@@ -466,19 +465,17 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                     child: Row(
                       children: [
-                        Icon(Icons.account_balance_wallet_rounded, color: Colors.amberAccent, size: 38),
+                        const Icon(Icons.account_balance_wallet_rounded, color: Colors.amberAccent, size: 38),
                         const SizedBox(width: 18),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Broker Balance', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
-                              _isBalanceLoading
-                                  ? const Padding(
+                              const Text('Broker Balance', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
+                              if (_isBalanceLoading) const Padding(
                                       padding: EdgeInsets.only(top: 6),
                                       child: SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                                    )
-                                  : Text(
+                                    ) else Text(
                                       _brokerBalance != null
                                           ? '${currencyProvider.symbol} ${currencyProvider.convert(_brokerBalance!, fromUsd: false).toStringAsFixed(2)}'
                                           : 'Unavailable',
@@ -514,15 +511,13 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       height: 120,
                       width: 120,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
+                      errorBuilder: (context, error, stackTrace) => Container(
                           height: 120,
                           width: 120,
                           color: Colors.grey[800],
                           child: const Icon(Icons.image_not_supported,
                               color: Colors.grey),
-                        );
-                      },
+                        ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -610,7 +605,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     child: Center(
                       child: Column(
                         children: [
-                          Icon(Icons.smart_toy, size: 48, color: Colors.grey),
+                          const Icon(Icons.smart_toy, size: 48, color: Colors.grey),
                           const SizedBox(height: 12),
                           Text(
                             'No Active Bots',
@@ -661,7 +656,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                                     children: [
                                       Row(
                                         children: [
-                                          Icon(Icons.smart_toy, color: Colors.white, size: 22),
+                                          const Icon(Icons.smart_toy, color: Colors.white, size: 22),
                                           const SizedBox(width: 8),
                                           Text(
                                             bot['botId'] ?? 'Unknown Bot',
@@ -878,24 +873,22 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
         },
       ),
     );
-  }
 }
 
 // Helper widget for stats tiles
 class _StatTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
 
   const _StatTile({
     required this.label,
     required this.value,
     required this.color,
   });
+  final String label;
+  final String value;
+  final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context) => Container(
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         border: Border.all(color: color.withOpacity(0.3)),
@@ -923,5 +916,4 @@ class _StatTile extends StatelessWidget {
         ],
       ),
     );
-  }
 }
