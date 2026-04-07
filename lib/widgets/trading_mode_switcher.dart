@@ -54,18 +54,46 @@ class _TradingModeSwitcherState extends State<TradingModeSwitcher> {
           'X-User-ID': userId,
         },
         body: jsonEncode({'mode': newMode}),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 60));
+
+      final Map<String, dynamic> payload = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
 
       if (response.statusCode == 200) {
-        setState(() => _selectedMode = newMode);
-        await prefs.setString('trading_mode', newMode);
+        final confirmedMode = (payload['mode'] as String?) ?? newMode;
+        final activeCredential = payload['active_credential'];
+
+        setState(() => _selectedMode = confirmedMode);
+        await prefs.setString('trading_mode', confirmedMode);
+        await prefs.setBool('is_live_mode', confirmedMode == 'LIVE');
+
+        if (activeCredential is Map<String, dynamic>) {
+          final credentialId = activeCredential['credential_id']?.toString();
+          final brokerName = activeCredential['broker_name']?.toString();
+          final accountNumber = activeCredential['account_number']?.toString();
+
+          if (credentialId != null && credentialId.isNotEmpty) {
+            await prefs.setString('credential_id', credentialId);
+          }
+          if (brokerName != null && brokerName.isNotEmpty) {
+            await prefs.setString('broker_name', brokerName);
+          }
+          if (accountNumber != null && accountNumber.isNotEmpty) {
+            await prefs.setString('account_number', accountNumber);
+          }
+        }
         
-        widget.onModeChanged(newMode);
+        widget.onModeChanged(confirmedMode);
         
-        _showSuccess('Switched to $newMode trading mode');
-        print('✅ Trading mode switched to: $newMode');
+        final warning = payload['warning']?.toString();
+        _showSuccess(payload['message']?.toString() ?? 'Switched to $confirmedMode trading mode');
+        if (warning != null && warning.isNotEmpty) {
+          _showError(warning);
+        }
+        print('✅ Trading mode switched to: $confirmedMode');
       } else {
-        _showError('Failed to switch mode: ${response.statusCode}');
+        _showError(payload['error']?.toString() ?? 'Failed to switch mode: ${response.statusCode}');
         print('❌ Error switching mode: ${response.body}');
       }
     } catch (e) {

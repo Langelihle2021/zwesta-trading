@@ -1177,9 +1177,19 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
             'Failed to create bot: ${createResponse.statusCode}');
       }
 
-      print('✅ Bot created successfully');
+      final createData = jsonDecode(createResponse.body);
+      final createdBotId = (createData['botId']?.toString().trim().isNotEmpty ?? false)
+          ? createData['botId'].toString().trim()
+          : _botIdController.text.trim();
 
-      // STEP 3: Start bot
+      if (createdBotId.isEmpty) {
+        throw Exception('Bot creation succeeded but no botId was returned by the backend.');
+      }
+
+      print('✅ Bot created successfully: $createdBotId');
+
+      // STEP 3: Start the bot immediately after creation
+      print('🚀 Starting bot: $createdBotId');
       final startResponse = await http
           .post(
             Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/start'),
@@ -1187,61 +1197,56 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
               'Content-Type': 'application/json',
               'X-Session-Token': sessionToken,
             },
-            body: jsonEncode({'botId': _botIdController.text}),
+            body: jsonEncode({
+              'botId': createdBotId,
+              'user_id': null, // Will be extracted from session
+            }),
           )
           .timeout(const Duration(seconds: 30));
 
-      if (startResponse.statusCode == 200) {
-        final data = jsonDecode(startResponse.body);
-        print('✅ Bot started, trades placed: ${data['tradesPlaced']}');
-        print('💰 Commission tracking enabled for this bot');
-
-        // 🔴 FIX: Null-safe credential display in success message
-        final credential = _brokerService.activeCredential;
-        final brokerName = credential?.broker ?? 'Unknown';
-        final accountNum = credential?.accountNumber ?? 'N/A';
-
+      if (startResponse.statusCode != 200) {
+        final startError = jsonDecode(startResponse.body);
+        print('⚠️ Bot created but failed to start: ${startError['error']}');
+        // Don't throw - bot is created, just warn about start failure
         setState(() {
-          _successMessage = 'Bot created and started! 🎉\n'
-              'Broker: $brokerName\n'
-              'Account: $accountNum\n'
-              '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n'
-              'Trades placed: ${data['tradesPlaced']}\n\n'
-              '💰 Commissions will be tracked on every trade.\n'
-              '📊 Earnings appear in your Commission Dashboard.';
-          _isCreating = false;
+          _successMessage = 'Bot created successfully! 🎉\n'
+              'Bot ID: $createdBotId\n'
+              '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n\n'
+              '⚠️ Bot was created but failed to start automatically. '
+              'Please start it manually from your bot list.';
         });
-
-        // Refresh commission data
-        _commissionService.fetchCommissions();
-
-        // Force-refresh bot list before navigating
-        final botService = Provider.of<BotService>(context, listen: false);
-        await botService.fetchActiveBots();
-
-        // Show success snackbar immediately
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  '✅ Bot "${_botIdController.text}" created and running! It will appear in the list below.'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-
-        // Navigate to dashboard immediately after refresh
-        if (mounted) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (context) => const DashboardScreen()),
-          );
-        }
       } else {
-        final errorData = jsonDecode(startResponse.body);
-        throw Exception(errorData['error'] ??
-            'Failed to start bot: ${startResponse.statusCode}');
+        final startData = jsonDecode(startResponse.body);
+        print('✅ Bot started successfully: ${startData['message']}');
+        setState(() {
+          _successMessage = 'Bot created and started successfully! 🎉\n'
+              'Bot ID: $createdBotId\n'
+              '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n\n'
+              'The bot is now actively trading in the background.';
+        });
+      }
+
+      // Force-refresh bot list before navigating
+      final botService = Provider.of<BotService>(context, listen: false);
+      await botService.fetchActiveBots();
+
+      // Show success snackbar immediately
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Bot created. It will appear in your list.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      // Navigate to dashboard immediately after refresh
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
+        );
       }
     } catch (e) {
       _showError('Error: ${e.toString()}');
@@ -1259,9 +1264,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   /// Load risk settings from backend API
   Future<void> _loadRiskSettings() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token') ?? '';
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/risk-settings/get'),
-        headers: {'Cookie': 'session=${await _getSessionId()}'},
+        headers: {
+          if (sessionToken.isNotEmpty) 'X-Session-Token': sessionToken,
+        },
       ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
@@ -1282,12 +1291,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   /// Save risk settings to backend API
   Future<void> _saveRiskSettings() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token') ?? '';
       final response = await http
           .post(
             Uri.parse('${EnvironmentConfig.apiUrl}/api/risk-settings/save'),
             headers: {
               'Content-Type': 'application/json',
-              'Cookie': 'session=${await _getSessionId()}',
+              if (sessionToken.isNotEmpty) 'X-Session-Token': sessionToken,
             },
             body: jsonEncode({
               'risk_percent': _riskPercent,
@@ -2871,9 +2882,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.play_circle),
+                        : const Icon(Icons.add_circle),
                     label: Text(
-                        _isCreating ? 'Creating Bot...' : 'Create & Start Bot'),
+                        _isCreating ? 'Creating & Starting Bot...' : 'Create & Start Bot'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       padding: const EdgeInsets.symmetric(

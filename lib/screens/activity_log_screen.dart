@@ -26,29 +26,40 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
       final logs = await ActivityLogService.fetchLogs(context);
       setState(() { _logs = logs; });
     } catch (e) {
-      setState(() { _error = 'Failed to load logs.'; });
+      setState(() { _error = 'Failed to load activity logs: $e'; });
     }
     setState(() { _loading = false; });
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: const Text('Activity Log')),
+      appBar: AppBar(
+        title: const Text('Activity Log'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchLogs,
+            tooltip: 'Refresh logs',
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? Center(child: Text(_error!))
-              : ListView.builder(
-                  itemCount: _logs.length,
-                  itemBuilder: (context, i) {
-                    final log = _logs[i];
-                    return ListTile(
-                      leading: const Icon(Icons.event_note, color: Colors.blue),
-                      title: Text(log.title),
-                      subtitle: Text(log.description),
-                      trailing: Text(log.timestamp),
-                    );
-                  },
-                ),
+              : _logs.isEmpty
+                  ? const Center(child: Text('No activity logs found.'))
+                  : ListView.builder(
+                      itemCount: _logs.length,
+                      itemBuilder: (context, i) {
+                        final log = _logs[i];
+                        return ListTile(
+                          leading: const Icon(Icons.event_note, color: Colors.blue),
+                          title: Text(log.title),
+                          subtitle: Text(log.description),
+                          trailing: Text(log.timestamp),
+                        );
+                      },
+                    ),
     );
 }

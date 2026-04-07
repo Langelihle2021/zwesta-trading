@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/environment_config.dart';
 
@@ -39,9 +40,18 @@ class _DemoLiveModeScreenState extends State<DemoLiveModeScreen> {
 
   Future<void> _loadCurrentMode() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      final userId = prefs.getString('user_id');
+
       final response = await http.get(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/user/trading-mode'),
-        headers: {'Authorization': 'Bearer ${EnvironmentConfig.apiKey}'},
+        headers: {
+          'Authorization': 'Bearer ${EnvironmentConfig.apiKey}',
+          if (sessionToken != null && sessionToken.isNotEmpty)
+            'X-Session-Token': sessionToken,
+          if (userId != null && userId.isNotEmpty) 'X-User-ID': userId,
+        },
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -60,16 +70,22 @@ class _DemoLiveModeScreenState extends State<DemoLiveModeScreen> {
   Future<void> _switchToDemo() async {
     setState(() => isLoading = true);
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/user/switch-mode'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${EnvironmentConfig.apiKey}',
+          if (sessionToken != null && sessionToken.isNotEmpty)
+            'X-Session-Token': sessionToken,
         },
         body: jsonEncode({'mode': 'DEMO'}),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
+        await prefs.setString('trading_mode', 'DEMO');
+        await prefs.setBool('is_live_mode', false);
         setState(() {
           isDemoMode = true;
           selectedMode = 'DEMO';
@@ -146,20 +162,26 @@ class _DemoLiveModeScreenState extends State<DemoLiveModeScreen> {
 
     setState(() => isLoading = true);
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
       final response = await http.post(
         Uri.parse('${EnvironmentConfig.apiUrl}/api/user/switch-mode'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${EnvironmentConfig.apiKey}',
+          if (sessionToken != null && sessionToken.isNotEmpty)
+            'X-Session-Token': sessionToken,
         },
         body: jsonEncode({
           'mode': 'LIVE',
           'account': liveAccountController.text,
           'server': liveServerController.text,
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
+        await prefs.setString('trading_mode', 'LIVE');
+        await prefs.setBool('is_live_mode', true);
         setState(() {
           isDemoMode = false;
           selectedMode = 'LIVE';

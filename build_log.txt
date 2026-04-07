@@ -1,0 +1,12 @@
+Running Gradle task 'assembleRelease'...                        
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 20836 bytes (98.7% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+3 warnings
+Generating lint files for com.tools.android:desugar_jdk_libs:1.2.2 (compile API R)
+Generating lint files for backported methods only (compile API B)
+Generating lint files for com.tools.android:desugar_jdk_libs:1.2.2 (compile API R)
+Running Gradle task 'assembleRelease'...                          592,2s
+ÔêÜ Built build\app\outputs\flutter-apk\app-release.apk (30.0MB)

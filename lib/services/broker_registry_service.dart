@@ -66,6 +66,24 @@ class BrokerRegistryService extends ChangeNotifier {
   void _initializeDefaultBrokers() {
     _brokers = [
       BrokerConfig(
+        id: 'exness',
+        name: 'Exness',
+        displayName: 'Exness',
+        logo: '⚡',
+        accountTypes: ['DEMO', 'LIVE'],
+        isActive: true,
+        description: 'Primary MT5 broker for forex, metals, and crypto pairs',
+      ),
+      BrokerConfig(
+        id: 'binance',
+        name: 'Binance',
+        displayName: 'Binance',
+        logo: '₿',
+        accountTypes: ['DEMO', 'LIVE'],
+        isActive: true,
+        description: 'Primary crypto exchange for spot and futures trading',
+      ),
+      BrokerConfig(
         id: 'xm',
         name: 'XM',
         displayName: 'XM Global',
@@ -91,15 +109,6 @@ class BrokerRegistryService extends ChangeNotifier {
         accountTypes: ['DEMO', 'LIVE'],
         isActive: true,
         description: 'Forex, metals, and energies broker',
-      ),
-      BrokerConfig(
-        id: 'exness',
-        name: 'Exness',
-        displayName: 'Exness',
-        logo: '⚡',
-        accountTypes: ['DEMO', 'LIVE'],
-        isActive: true,
-        description: 'High leverage forex trading',
       ),
       BrokerConfig(
         id: 'darwinex',

@@ -155,6 +155,9 @@ class BrokerConnectionService {
             'is_live': data['is_live'] ?? false,
             'status': data['status'] ?? 'CONNECTED',
             'message': data['message'] ?? 'Connection established',
+            'connection_status': data['connection_status'],
+            'auto_connected': data['auto_connected'] ?? false,
+            'warning': data['warning'],
             'timestamp': data['timestamp'],
           };
         } else {

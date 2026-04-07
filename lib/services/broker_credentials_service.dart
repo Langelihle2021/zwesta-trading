@@ -66,6 +66,25 @@ class BrokerCredentialsService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
+  static const List<String> _brokerPriority = ['exness', 'binance'];
+
+  BrokerCredential? _preferredCredential(Iterable<BrokerCredential> credentials) {
+    final list = credentials.toList();
+    if (list.isEmpty) {
+      return null;
+    }
+
+    for (final brokerName in _brokerPriority) {
+      for (final credential in list) {
+        if (credential.broker.toLowerCase().trim() == brokerName) {
+          return credential;
+        }
+      }
+    }
+
+    return list.first;
+  }
+
   /// Load credentials from backend
   Future<void> fetchCredentials() async {
     _isLoading = true;
@@ -115,9 +134,9 @@ class BrokerCredentialsService extends ChangeNotifier {
         
         // Set active credential if available
         if (_credentials.isNotEmpty) {
-          _activeCredential = _credentials.firstWhere(
-            (c) => c.isActive,
-            orElse: () => _credentials.first,
+          final activeCredentials = _credentials.where((c) => c.isActive);
+          _activeCredential = _preferredCredential(
+            activeCredentials.isNotEmpty ? activeCredentials : _credentials,
           );
         }
 
@@ -288,7 +307,7 @@ class BrokerCredentialsService extends ChangeNotifier {
       if (response.statusCode == 200) {
         _credentials.removeWhere((c) => c.credentialId == credentialId);
         if (_activeCredential?.credentialId == credentialId) {
-          _activeCredential = _credentials.isNotEmpty ? _credentials.first : null;
+          _activeCredential = _preferredCredential(_credentials);
         }
         _saveCredentialsLocal();
         _isLoading = false;
@@ -334,10 +353,14 @@ class BrokerCredentialsService extends ChangeNotifier {
 
         final activeId = prefs.getString('active_credential_id');
         if (activeId != null) {
-          _activeCredential = _credentials.firstWhere(
+          final matchedCredential = _credentials.where(
             (c) => c.credentialId == activeId,
-            orElse: () => _credentials.isNotEmpty ? _credentials.first : null as dynamic,
           );
+          _activeCredential = matchedCredential.isNotEmpty
+              ? matchedCredential.first
+              : _preferredCredential(_credentials);
+        } else {
+          _activeCredential = _preferredCredential(_credentials);
         }
       }
     } catch (e) {

@@ -1,24 +1,19 @@
+
 import sqlite3
-
-db_path = r'C:\backend\zwesta_trading.db'
-conn = sqlite3.connect(db_path)
+conn = sqlite3.connect(r'C:\backend\zwesta_trading.db')
 cursor = conn.cursor()
-cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-tables = [t[0] for t in cursor.fetchall()]
-output = []
-output.append(f"Database: {db_path}")
-output.append(f"Tables count: {len(tables)}")
-
-if 'user_bots' in tables:
-    cursor.execute('SELECT COUNT(*) FROM user_bots')
+cursor.execute('SELECT name FROM sqlite_master WHERE type=\
+table\')
+tables = cursor.fetchall()
+print('All tables:')
+for table in tables:
+    print(table[0])
+print('\\nChecking for trades...')
+try:
+    cursor.execute('SELECT COUNT(*) FROM trades')
     count = cursor.fetchone()[0]
-    output.append(f"Total bots: {count}")
-    if count > 0:
-        cursor.execute('SELECT id, user_id, bot_name FROM user_bots LIMIT 10')
-        output.append("\nFirst 10 bots:")
-        for row in cursor.fetchall():
-            output.append(f"  - Bot ID {row[0]}: {row[2]} (User: {row[1]})")
-
+    print(f'Trades: {count}')
+except:
+    print('No trades table')
 conn.close()
-for line in output:
-    print(line)
+

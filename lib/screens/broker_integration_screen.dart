@@ -38,7 +38,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   late TextEditingController _passwordController;
   late TextEditingController _apiKeyController;
   late TextEditingController _usernameController;
-  String _selectedBroker = 'XM';
+  String _selectedBroker = 'Exness';
   bool _showSuccess = false;
   bool _isTestingConnection = false;
   bool _isConnected = false;
@@ -51,21 +51,21 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
   // ✅ ONLY INTEGRATED BROKERS - These are fully working and tested
   final List<String> brokers = [
-    'Exness',      // ✅ Full MT5 support with crypto
-    'XM',          // ✅ MT5 with forex/indices
+    'Exness',      // ✅ Primary MT5 path with crypto support
+    'Binance',     // ✅ Primary crypto spot trading path
     'PXBT',        // ✅ Prime XBT crypto trading
-    'Binance',     // ✅ Crypto spot trading
     'OANDA',       // ✅ REST API forex trading
+    'XM',          // ✅ MT5 with forex/indices
    // FXCM support available but requires separate API key
   ];
 
   final Map<String, String> brokerServers = {
     'Binance': 'spot',
     'OANDA': 'REST-API',
-    'XM': 'XMGlobal-MT5',
+    'XM': 'XMGlobal-MT5Demo',
     'Pepperstone': 'Pepperstone MT5 Live',
     'FxOpen': 'FxOpen-MT5',
-    'Exness': 'Exness-MT5',
+    'Exness': 'Exness-MT5Trial9',
     'Darwinex': 'Darwinex MT5',
     'IC Markets': 'ICMarkets-MT5',
     'IG Markets': 'REST-API',
@@ -109,7 +109,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   void _loadSavedCredentials() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _selectedBroker = prefs.getString('broker') ?? 'XM';
+      _selectedBroker = prefs.getString('broker') ?? 'Exness';
       _accountController.text = prefs.getString('mt5_account') ?? '';
       _passwordController.text = prefs.getString('mt5_password') ?? '';
       _apiKeyController.text = prefs.getString('broker_api_key') ?? '';
@@ -378,7 +378,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         // Backend returns: credential_id, broker, account_number, balance, status, timestamp
         final credentialId = result['credential_id'] as String?;
         final balance = (result['balance'] ?? 10000.0).toDouble();
-        final isDemo = !(_passwordController.text.contains('live') || result['is_live'] == true);
+        final isDemo = !(result['is_live'] == true);
         
         // Create BrokerAccount from backend response
         final account = BrokerAccount(

@@ -36,7 +36,7 @@ class BackupManager:
         self.backup_dir = Path(backup_dir)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.max_backups = max_backups
-        self.backup_interval = 30 * 60  # 30 minutes in seconds
+        self.backup_interval = 2 * 60 * 60  # 2 hours in seconds (reduced from 30 minutes)
         self.backup_thread = None
         self.is_running = False
         
@@ -53,7 +53,7 @@ class BackupManager:
                     shutil.copyfileobj(f_in, f_out)
             
             file_size_mb = backup_path.stat().st_size / (1024 * 1024)
-            logger.info(f"✅ Database backed up: {backup_filename} ({file_size_mb:.2f}MB)")
+            logger.debug(f"✅ Database backed up: {backup_filename} ({file_size_mb:.2f}MB)")
             
             # Cleanup old backups
             self._cleanup_old_backups()

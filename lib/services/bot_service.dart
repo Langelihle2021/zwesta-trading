@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -24,6 +25,11 @@ class BotService extends ChangeNotifier {
   String? _errorMessage;
   String? _apiUrl;
   List<Map<String, dynamic>> _activeBots = [];
+  SharedPreferences? _prefs;
+  Timer? _pollTimer;
+  DateTime? _lastFetchAt;
+  String? _lastTradingMode;
+  Future<void>? _inFlightFetch;
 
   Bot? get bot => _bot;
   BotStats? get stats => _stats;
@@ -32,6 +38,27 @@ class BotService extends ChangeNotifier {
   bool get isConnected => _isConnected;
   String? get errorMessage => _errorMessage;
   List<Map<String, dynamic>> get activeBots => _activeBots;
+
+  Future<SharedPreferences> _getPrefs() async {
+    _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
+  }
+
+  void startPolling({String? tradingMode, Duration interval = const Duration(seconds: 15)}) {
+    final mode = tradingMode ?? _lastTradingMode;
+    _pollTimer?.cancel();
+    if (mode == null || mode.isEmpty) {
+      return;
+    }
+    _pollTimer = Timer.periodic(interval, (_) {
+      fetchActiveBots(tradingMode: mode);
+    });
+  }
+
+  void stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
 
   // Fallback list for Exness / MT5 symbols when backend data is not yet loaded.
   final List<String> availableTradingSymbols = [
@@ -92,7 +119,30 @@ class BotService extends ChangeNotifier {
   }
 
   /// Fetch active bots from backend
-  Future<void> fetchActiveBots({String? tradingMode}) async {
+  Future<void> fetchActiveBots({String? tradingMode, bool force = false}) async {
+    if (_inFlightFetch != null && !force) {
+      return _inFlightFetch!;
+    }
+
+    final future = _fetchActiveBotsInternal(tradingMode: tradingMode, force: force);
+    _inFlightFetch = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_inFlightFetch, future)) {
+        _inFlightFetch = null;
+      }
+    }
+  }
+
+  Future<void> _fetchActiveBotsInternal({String? tradingMode, bool force = false}) async {
+    final prefs = await _getPrefs();
+    final mode = tradingMode ?? prefs.getString('trading_mode') ?? 'DEMO';
+    final now = DateTime.now();
+    if (!force && _lastFetchAt != null && _lastTradingMode == mode && now.difference(_lastFetchAt!) < const Duration(seconds: 3)) {
+      return;
+    }
+
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -103,12 +153,11 @@ class BotService extends ChangeNotifier {
       }
 
       // Get user_id from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('user_id');
       final sessionToken = prefs.getString('auth_token');
-      final mode = tradingMode ?? prefs.getString('trading_mode') ?? 'DEMO';
+      _lastTradingMode = mode;
 
-      var url = '$_apiUrl/api/bot/status?mode=$mode';
+      var url = '$_apiUrl/api/bot/summary?mode=$mode';
       if (userId != null && userId.isNotEmpty) {
         url += '&user_id=$userId';
       }
@@ -126,6 +175,7 @@ class BotService extends ChangeNotifier {
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
           _activeBots = List<Map<String, dynamic>>.from(data['bots'] ?? []);
+          _lastFetchAt = now;
           _errorMessage = null;
           debugPrint('Fetched ${_activeBots.length} active bots from backend');
         } else {
@@ -162,7 +212,7 @@ class BotService extends ChangeNotifier {
 
     try {
       // Get session token and user_id from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _getPrefs();
       final sessionToken = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
 
@@ -223,7 +273,7 @@ class BotService extends ChangeNotifier {
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final responseData = jsonDecode(response.body);
         if (responseData['success'] == true) {
-          await fetchActiveBots();
+          await fetchActiveBots(force: true);
           return true;
         }
         _errorMessage = responseData['error'] ?? 'Failed to create bot';
@@ -258,7 +308,7 @@ class BotService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _getPrefs();
       final sessionToken = prefs.getString('auth_token');
 
       if (sessionToken == null || sessionToken.isEmpty) {
@@ -283,7 +333,7 @@ class BotService extends ChangeNotifier {
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
           debugPrint('Bot started: $botId');
-          await fetchActiveBots();
+          await fetchActiveBots(force: true);
           return true;
         }
       } else if (response.statusCode == 401) {
@@ -310,7 +360,7 @@ class BotService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _getPrefs();
       final sessionToken = prefs.getString('auth_token');
 
       if (sessionToken == null || sessionToken.isEmpty) {
@@ -332,7 +382,7 @@ class BotService extends ChangeNotifier {
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
           debugPrint('Bot stopped: $botId');
-          await fetchActiveBots();
+          await fetchActiveBots(force: true);
           return true;
         }
       } else if (response.statusCode == 401) {
@@ -446,5 +496,11 @@ class BotService extends ChangeNotifier {
   void removeBotLocally(String botId) {
     _activeBots.removeWhere((bot) => (bot['botId'] ?? bot['id']) == botId);
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 }

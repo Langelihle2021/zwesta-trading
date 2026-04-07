@@ -99,13 +99,15 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     // Fetch fresh bot data from backend API
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('user_id');
       final sessionToken = prefs.getString('auth_token');
+      final botId = _botData['botId'];
 
-      var url = '${EnvironmentConfig.apiUrl}/api/bot/status';
-      if (userId != null && userId.isNotEmpty) {
-        url += '?user_id=$userId';
+      if (botId == null || botId.toString().isEmpty) {
+        return;
       }
+
+      final url =
+          '${EnvironmentConfig.apiUrl}/api/bot/$botId/analytics-snapshot';
 
       final response = await http.get(
         Uri.parse(url),
@@ -119,17 +121,11 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
-          final bots = List<Map<String, dynamic>>.from(data['bots'] ?? []);
-          final botId = _botData['botId'];
-          for (final bot in bots) {
-            if (bot['botId'] == botId) {
-              if (mounted) {
-                setState(() {
-                  _botData = bot;
-                });
-              }
-              break;
-            }
+          final bot = data['bot'];
+          if (bot is Map<String, dynamic> && mounted) {
+            setState(() {
+              _botData = bot;
+            });
           }
         }
       }
