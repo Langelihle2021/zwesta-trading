@@ -37,7 +37,7 @@ jobs:
         rm -rf android/.gradle
         rm -rf build/
         flutter clean
-        flutter pub cache clean --all
+        flutter pub cache clean --force
       shell: bash
     
     - name: Get dependencies
