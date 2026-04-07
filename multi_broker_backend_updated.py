@@ -130,6 +130,12 @@ _failed_auth_lock = threading.Lock()
 _FAILED_AUTH_COOLDOWN = 300  # 5 minutes before retrying a failed account
 logger.info("✅ Failed auth cooldown initialized - prevents repeated bad credential retries")
 
+# ==================== MT5 TERMINAL STARTUP TRACKER ====================
+# Prevents duplicate MT5 terminal launches for the same configured path
+mt5_terminal_paths_started = set()
+mt5_terminal_startup_lock = threading.Lock()
+logger.info("✅ MT5 terminal startup tracker initialized - prevents duplicate local launches")
+
 # NOTE: Removed hardcoded emergency demo balances — each account's real balance
 # is populated into balance_cache by the bot trading loop when it connects to MT5.
 # This ensures live and demo accounts always show their own real balances.
@@ -182,121 +188,6 @@ def ensure_mt5_ready():
     except Exception as e:
         logger.warning(f"⚠️ ensure_mt5_ready: {e}")
         return False
-
-# ==================== PXBT SESSION PERSISTENCE ====================
-# Maintains last known PXBT credentials for auto-reconnect
-pxbt_session_cache = {}  # { credential_id: { 'account': X, 'password': X, 'server': X, 'timestamp': Z } }
-pxbt_session_lock = threading.Lock()
-
-def cache_pxbt_credentials(credential_id: str, account: str, password: str, server: str):
-    """Cache PXBT credentials for auto-reconnect on session loss"""
-    with pxbt_session_lock:
-        pxbt_session_cache[credential_id] = {
-            'account': account,
-            'password': password,
-            'server': server,
-            'timestamp': time.time(),
-            'last_check': time.time(),
-        }
-    logger.info(f"✅ PXBT session cached for credential {credential_id}: account={account}, server={server}")
-
-def get_cached_pxbt_credentials(credential_id: str):
-    """Get cached PXBT credentials (for auto-reconnect on session loss)"""
-    with pxbt_session_lock:
-        if credential_id in pxbt_session_cache:
-            cred = pxbt_session_cache[credential_id]
-            elapsed = time.time() - cred['timestamp']
-            logger.debug(f"✅ Retrieved cached PXBT credentials for {credential_id} (cached {elapsed:.0f}s ago)")
-            return cred
-    return None
-
-def is_pxbt_connection_healthy(mt5_conn: 'MT5Connection') -> bool:
-    """Check if PXBT MT5 connection is still healthy
-    
-    Returns: True if connection is valid and logged in, False if reconnect needed
-    """
-    try:
-        if not mt5_conn or not hasattr(mt5_conn, 'connected'):
-            return False
-        
-        if not mt5_conn.connected:
-            logger.warning("⚠️  PXBT connection status: DISCONNECTED")
-            return False
-        
-        # Try to get account info (will fail if session expired)
-        import MetaTrader5 as mt5
-        try:
-            account_info = mt5.account_info()
-            if account_info is None:
-                logger.warning("⚠️  PXBT connection health check failed: account_info() returned None")
-                return False
-            logger.debug(f"✅ PXBT connection health check passed: account {account_info.login}")
-            return True
-        except Exception as e:
-            logger.warning(f"⚠️  PXBT connection health check failed: {e}")
-            return False
-    except Exception as e:
-        logger.warning(f"⚠️  Error checking PXBT connection health: {e}")
-        return False
-
-def ensure_pxbt_connection_active(mt5_conn: 'MT5Connection', credentials: Dict, retry_count: int = 3) -> bool:
-    """Ensure PXBT connection is active, reconnect if needed
-    
-    This handles the case where PXBT MT5 terminal session expires or disconnects.
-    Will attempt to reconnect using cached credentials.
-    
-    Returns: True if connection is active, False if reconnect failed
-    """
-    try:
-        # Check if connection is still healthy
-        if is_pxbt_connection_healthy(mt5_conn):
-            logger.debug("✅ PXBT connection is active and healthy")
-            return True
-        
-        # Connection is not healthy - attempt to reconnect
-        logger.warning(f"⚠️  PXBT connection lost - attempting auto-reconnect...")
-        
-        for attempt in range(1, retry_count + 1):
-            try:
-                logger.info(f"   Reconnect attempt {attempt}/{retry_count}...")
-                
-                # Disconnect first to reset state
-                if hasattr(mt5_conn, 'disconnect'):
-                    try:
-                        mt5_conn.disconnect()
-                    except:
-                        pass
-                
-                # Wait before reconnecting (exponential backoff: 2s, 4s, 8s)
-                wait_time = 2 ** (attempt - 1)
-                logger.info(f"   Waiting {wait_time}s before reconnect attempt...")
-                time.sleep(wait_time)
-                
-                # Attempt to reconnect
-                if mt5_conn.connect():
-                    logger.info(f"✅ PXBT auto-reconnect successful on attempt {attempt}")
-                    # Re-cache the credentials on successful reconnect
-                    if credentials:
-                        cache_pxbt_credentials(
-                            credentials.get('credential_id', 'unknown'),
-                            credentials.get('account', ''),
-                            credentials.get('password', ''),
-                            credentials.get('server', '')
-                        )
-                    return True
-                else:
-                    logger.warning(f"   Reconnect attempt {attempt} failed - will retry")
-            except Exception as e:
-                logger.warning(f"   Reconnect attempt {attempt} exception: {e}")
-        
-        logger.error(f"❌ PXBT auto-reconnect failed after {retry_count} attempts")
-        return False
-    
-    except Exception as e:
-        logger.error(f"❌ Error in ensure_pxbt_connection_active: {e}")
-        return False
-
-logger.info("✅ PXBT session persistence initialized - auto-connect on session loss enabled")
 
 logger.info("✅ Global MT5 singleton initialized - will reuse single terminal across all bots")
 
@@ -484,11 +375,31 @@ def normalize_mt5_server_name(broker_name: str, is_live: bool, server: str = Non
     return 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
 
 
+def is_mt5_process_running(terminal_path: str) -> bool:
+    if not terminal_path or sys.platform != 'win32':
+        return False
+
+    exe_name = os.path.basename(str(terminal_path)).lower()
+    if exe_name not in ['terminal64.exe', 'terminal.exe']:
+        exe_name = 'terminal64.exe'
+
+    try:
+        output = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {exe_name}'], universal_newlines=True, stderr=subprocess.DEVNULL)
+        return exe_name in output.lower()
+    except Exception as exc:
+        logger.debug(f"[MT5 Terminal] Process check failed: {exc}")
+        return False
+
+
 def ensure_mt5_terminal_running(terminal_path: str, broker_name: str) -> bool:
     normalized_path = str(terminal_path or '').strip().strip('"').strip("'")
     if not normalized_path or not os.path.isfile(normalized_path):
         logger.warning(f"[MT5 Terminal] Cannot launch {broker_name} terminal - path missing: {normalized_path or 'unset'}")
         return False
+
+    if is_mt5_process_running(normalized_path):
+        logger.info(f"[MT5 Terminal] MT5 process already running for {broker_name}; no launch needed")
+        return True
 
     try:
         creationflags = 0
@@ -1857,6 +1768,13 @@ def init_database():
             logger.info("✅ Migration: Added cached_profit column to broker_credentials")
         except Exception as e:
             logger.debug(f"cached_profit column might already exist: {e}")
+    
+    if 'account_currency' not in broker_cred_columns:
+        try:
+            cursor.execute('ALTER TABLE broker_credentials ADD COLUMN account_currency TEXT DEFAULT "USD"')
+            logger.info("✅ Migration: Added account_currency column to broker_credentials")
+        except Exception as e:
+            logger.debug(f"account_currency column might already exist: {e}")
 
     # Market Pause Events table - tracks when markets are paused/halted
     cursor.execute('''
@@ -2299,9 +2217,35 @@ class MT5Connection(BrokerConnection):
                 credentials.get('path') or broker_cfg.get('path'),
                 is_live=is_live
             )
+            self._ensure_mt5_terminal_started()
         except ImportError:
             logger.error("MetaTrader5 not installed")
             self.mt5 = None
+
+    def _ensure_mt5_terminal_started(self):
+        """Ensure the MT5 terminal is started once per configured terminal path."""
+        global mt5_terminal_paths_started
+
+        if DEPLOYMENT_MODE == 'VPS':
+            logger.info(f"[MT5 Terminal] VPS deployment mode — skipping local MT5 launch for {self.mt5_broker}")
+            return
+
+        if not self.mt5_path:
+            logger.warning(f"[MT5 Terminal] No terminal path configured for {self.mt5_broker}; cannot auto-launch MT5")
+            return
+
+        normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
+        with mt5_terminal_startup_lock:
+            if normalized_path in mt5_terminal_paths_started:
+                return
+
+            if is_mt5_process_running(normalized_path):
+                logger.info(f"[MT5 Terminal] Existing MT5 process detected for {self.mt5_broker}; using running terminal")
+                mt5_terminal_paths_started.add(normalized_path)
+                return
+
+            if ensure_mt5_terminal_running(normalized_path, self.mt5_broker):
+                mt5_terminal_paths_started.add(normalized_path)
 
     def connect(self) -> bool:
         """
@@ -4813,11 +4757,6 @@ def detect_exness_mt5():
     return detect_mt5_terminal_for_broker('Exness', MT5_CONFIG.get('path'))
 
 
-def detect_pxbt_mt5():
-    """Detect if PXBT MT5 is available on the system"""
-    return detect_mt5_terminal_for_broker('PXBT', PXBT_CONFIG.get('path'))
-
-
 def check_exness_connectivity(account_id=None, password=None, server='Exness-MT5'):
     """Check if Exness MT5 server is reachable.
     CRITICAL: Does NOT call mt5.initialize(login=...) or mt5.shutdown()!
@@ -4878,197 +4817,6 @@ def check_exness():
         }), 500
 
 
-@app.route('/api/brokers/check-pxbt', methods=['GET'])
-def check_pxbt():
-    """Check if PXBT is available and can be used"""
-    try:
-        pxbt_info = detect_pxbt_mt5()
-        return jsonify(pxbt_info), 200
-    except Exception as e:
-        logger.error(f"❌ Error checking PXBT availability: {e}")
-        return jsonify({
-            'available': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/brokers/pxbt/session-status', methods=['GET'])
-@require_session
-def get_pxbt_session_status():
-    """Check PXBT MT5 connection status and health
-    
-    Returns connection status, last activity timestamp, and suggestion for action
-    """
-    try:
-        user_id = request.user_id
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Get PXBT credentials for this user
-        cursor.execute('''
-            SELECT credential_id, broker_name, account_number, server, is_live
-            FROM broker_credentials
-            WHERE user_id = ? AND is_active = 1 AND broker_name LIKE '%PXBT%'
-        ''', (user_id,))
-        
-        creds = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        if not creds:
-            return jsonify({
-                'success': True,
-                'connected': False,
-                'message': 'No PXBT account connected',
-                'accounts': []
-            }), 200
-        
-        # Check status for each PXBT account
-        account_status = []
-        for cred in creds:
-            credential_id = cred['credential_id']
-            account_num = cred['account_number']
-            server = cred['server'] or 'PXBTTrading-1'
-            is_live = cred['is_live']
-            
-            # Check MT5 connection health
-            mt5_conn = get_global_mt5()
-            is_healthy = is_pxbt_connection_healthy(mt5_conn) if mt5_conn else False
-            
-            # Check if session is cached
-            cached_creds = get_cached_pxbt_credentials(credential_id)
-            cached_time = cached_creds.get('timestamp') if cached_creds else None
-            
-            account_status.append({
-                'credentialId': credential_id,
-                'accountNumber': account_num,
-                'server': server,
-                'mode': 'LIVE' if is_live else 'DEMO',
-                'connected': is_healthy,
-                'lastActivityTime': cached_time,
-                'suggestion': 'Connection healthy - no action needed' if is_healthy else 'PXBT disconnected - click reconnect to restore'
-            })
-        
-        return jsonify({
-            'success': True,
-            'connected': any(acc['connected'] for acc in account_status),
-            'accounts': account_status,
-            'timestamp': datetime.now().isoformat()
-        }), 200
-    
-    except Exception as e:
-        logger.error(f"Error getting PXBT session status: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/brokers/pxbt/reconnect', methods=['POST'])
-@require_session
-def reconnect_pxbt():
-    """Force PXBT reconnection - useful when connection drops
-    
-    Attempts to re-establish MT5 connection using cached credentials
-    """
-    try:
-        user_id = request.user_id
-        data = request.get_json() or {}
-        credential_id = data.get('credentialId')
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Get PXBT credentials (either specific credential or first active one)
-        if credential_id:
-            cursor.execute('''
-                SELECT credential_id, broker_name, account_number, password, server, is_live
-                FROM broker_credentials
-                WHERE credential_id = ? AND user_id = ? AND is_active = 1
-            ''', (credential_id, user_id))
-        else:
-            cursor.execute('''
-                SELECT credential_id, broker_name, account_number, password, server, is_live
-                FROM broker_credentials
-                WHERE user_id = ? AND is_active = 1 AND broker_name LIKE '%PXBT%'
-                LIMIT 1
-            ''', (user_id,))
-        
-        cred_row = cursor.fetchone()
-        conn.close()
-        
-        if not cred_row:
-            return jsonify({
-                'success': False,
-                'error': 'PXBT credential not found'
-            }), 404
-        
-        cred = dict(cred_row)
-        credential_id = cred['credential_id']
-        account_num = cred['account_number']
-        password = cred['password']
-        server = cred['server'] or 'PXBTTrading-1'
-        
-        logger.info(f"🔄 PXBT Reconnect requested for user {user_id}, account {account_num}")
-        
-        # Get current connection
-        mt5_conn = get_global_mt5()
-        
-        # Build credentials dict for reconnect
-        reconnect_creds = {
-            'credential_id': credential_id,
-            'broker': 'PXBT',
-            'account': account_num,
-            'password': password,
-            'server': server,
-            'is_live': cred['is_live']
-        }
-        
-        if mt5_conn:
-            # Try to reconnect existing connection
-            if ensure_pxbt_connection_active(mt5_conn, reconnect_creds, retry_count=5):
-                logger.info(f"✅ PXBT reconnection successful for {account_num}")
-                return jsonify({
-                    'success': True,
-                    'message': f'Successfully reconnected to PXBT account {account_num}',
-                    'accountNumber': account_num,
-                    'server': server
-                }), 200
-            else:
-                logger.error(f"❌ PXBT reconnection failed for {account_num}")
-                return jsonify({
-                    'success': False,
-                    'error': f'Failed to reconnect to PXBT account {account_num} - try again in a moment'
-                }), 500
-        else:
-            # No existing connection - create new one
-            logger.info(f"Creating new MT5 connection for PXBT...")
-            try:
-                mt5_conn = MT5Connection(reconnect_creds)
-                if mt5_conn.connect():
-                    set_global_mt5(mt5_conn)
-                    cache_pxbt_credentials(credential_id, account_num, password, server)
-                    logger.info(f"✅ New PXBT connection created and connected")
-                    return jsonify({
-                        'success': True,
-                        'message': f'Created and connected to PXBT account {account_num}',
-                        'accountNumber': account_num,
-                        'server': server
-                    }), 200
-                else:
-                    logger.error(f"❌ Failed to connect new MT5 connection for PXBT")
-                    return jsonify({
-                        'success': False,
-                        'error': 'Failed to create new connection to PXBT'
-                    }), 500
-            except Exception as e:
-                logger.error(f"❌ Exception creating MT5 connection: {e}")
-                return jsonify({
-                    'success': False,
-                    'error': f'Error: {str(e)}'
-                }), 500
-    
-    except Exception as e:
-        logger.error(f"Error reconnecting PXBT: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
 @app.route('/api/brokers/verify-exness', methods=['POST'])
 def verify_exness():
     """Verify Exness connectivity with credentials"""
@@ -5102,8 +4850,6 @@ def list_brokers():
     # Detect Exness availability
     exness_status = detect_exness_mt5()
     exness_broker_status = 'active' if exness_status.get('available') else 'inactive'
-    pxbt_status = detect_pxbt_mt5()
-    pxbt_broker_status = 'active' if pxbt_status.get('available') else 'inactive'
     
     brokers = [
         {
@@ -5123,17 +4869,6 @@ def list_brokers():
             'status': 'active'
         },
         {
-            'type': 'pxbt',
-            'name': 'PXBT (Prime XBT)',
-            'description': 'PXBT - MetaTrader 5 forex & commodities broker',
-            'assets': ['Forex', 'Metals', 'Indices', 'Cryptos'],
-            'status': 'active',  # Always show PXBT as available for configuration
-            'installed': pxbt_status.get('installed', False),
-            'version': pxbt_status.get('version', 'Unknown'),
-            'configurable': True,
-            'note': 'Configure PXBT credentials in .env file'
-        },
-        {
             'type': 'oanda',
             'name': 'OANDA',
             'description': 'OANDA - Regulated US broker',
@@ -5145,13 +4880,6 @@ def list_brokers():
             'name': 'Interactive Brokers',
             'description': 'Interactive Brokers - Low commission',
             'assets': ['Stocks', 'Forex', 'Futures', 'Options'],
-            'status': 'coming_soon'
-        },
-        {
-            'type': 'xm',
-            'name': 'XM',
-            'description': 'XM - Forex & CFDs',
-            'assets': ['Forex', 'Metals', 'Indices', 'CFDs'],
             'status': 'coming_soon'
         },
         {
@@ -6303,6 +6031,8 @@ def get_account_balances():
             account_num = cred['account_number']
             is_live = cred['is_live']
             mode = 'Live' if is_live else 'Demo'
+            # GET ACTUAL ACCOUNT CURRENCY from database (demo USD vs live ZAR)
+            account_currency = cred.get('account_currency', 'USD').upper()
             
             account_info = None
             error_msg = None
@@ -6315,8 +6045,8 @@ def get_account_balances():
                     # balance is populated into balance_cache by the bot trading loop when
                     # that account is actively connected.  This prevents cross-contamination
                     # between live and demo balances and avoids MT5 lock contention.
-                    logger.info(f"ℹ️ Balance: {broker_name} {account_num} — using cache only (MT5 disconnected in balance endpoint)")
-                    error_msg = "Using cached balance — MT5 reads handled by trading loop"
+                    logger.info(f"ℹ️ Balance: {broker_name} {account_num} ({account_currency}) — using cache only (MT5 disconnected in balance endpoint)")
+                    error_msg = f"Using cached balance ({account_currency}) — MT5 reads handled by trading loop"
                 
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
@@ -6391,6 +6121,7 @@ def get_account_balances():
                 'active_bots': active_bot_count,
                 'last_update': datetime.now().isoformat() if account_info else cached_data.get(cred['credential_id'], {}).get('last_update'),
                 'error': error_msg,
+                'currency': account_currency,  # Store database currency as fallback
             }
             
             if account_info:
@@ -6424,7 +6155,8 @@ def get_account_balances():
                 cached_margin_free = 0
                 cached_margin_level = 0
                 cached_profit = 0
-                cached_currency = 'USD'
+                # USE database account_currency, NOT 'USD' default
+                cached_currency = account_currency
                 
                 # Check in-memory cache (populated by bot trading loops)
                 with balance_cache_lock:
@@ -6436,8 +6168,10 @@ def get_account_balances():
                         cached_margin_free = cached_info.get('marginFree', 0)
                         cached_margin_level = cached_info.get('margin_level', 0)
                         cached_profit = cached_info.get('total_pl', 0)
-                        cached_currency = cached_info.get('currency', 'USD')
-                        logger.info(f"✅ Balance cache hit for {cache_key}: ${cached_balance:.2f}")
+                        # Use cache currency if available, otherwise use database account_currency
+                        if 'currency' in cached_info:
+                            cached_currency = cached_info['currency']
+                        logger.info(f"✅ Balance cache hit for {cache_key}: {cached_balance:.2f} {cached_currency}")
                 
                 # Fallback: try SQLite cached_balance column
                 if cached_balance == 0 and cred['credential_id'] in cached_data:
@@ -6449,7 +6183,7 @@ def get_account_balances():
                     cached_margin_level = cache.get('cached_margin_level', 0) or 0
                     cached_profit = cache.get('cached_profit', 0) or 0
                     if cached_balance > 0:
-                        logger.info(f"✅ SQLite cache hit for {cache_key}: ${cached_balance:.2f}")
+                        logger.info(f"✅ SQLite cache hit for {cache_key}: {cached_balance:.2f} {cached_currency}")
                 
                 # If still $0 — account genuinely not connected / not funded
                 if cached_balance == 0:
@@ -6837,10 +6571,6 @@ def place_trade():
                 ticket = random.randint(1000000, 9999999)
 
                 broker_name = 'MT5'
-                # IG Markets integration removed
-                if isinstance(connection, XMConnection):
-                    broker_name = 'XM'
-
                 demo_trade = {
                     'success': True,
                     'ticket': ticket,
@@ -7021,7 +6751,6 @@ def connect_broker():
             'binance': BrokerType.BINANCE,
             'ib': BrokerType.INTERACTIVE_BROKERS,
             'oanda': BrokerType.OANDA,
-            'xm': BrokerType.XM,
             'pepperstone': BrokerType.PEPPERSTONE,
             'fxopen': BrokerType.FXOPEN,
             'exness': BrokerType.EXNESS,
@@ -10817,15 +10546,6 @@ broker_connection_cache_lock = threading.Lock()  # Thread-safe access
 # This registry can be updated without code changes
 REGISTERED_BROKERS = [
     {
-        'id': 'xm',
-        'name': 'XM',
-        'display_name': 'XM Global',
-        'logo': '🏦',
-        'account_types': ['DEMO', 'LIVE'],
-        'is_active': True,
-        'description': 'Global regulated forex and commodities broker',
-    },
-    {
         'id': 'pepperstone',
         'name': 'Pepperstone',
         'display_name': 'Pepperstone Global',
@@ -10851,15 +10571,6 @@ REGISTERED_BROKERS = [
         'account_types': ['DEMO', 'LIVE'],
         'is_active': True,
         'description': 'High leverage forex trading',
-    },
-    {
-        'id': 'pxbt',
-        'name': 'PXBT',
-        'display_name': 'PXBT Trading',
-        'logo': '🚀',
-        'account_types': ['DEMO', 'LIVE'],
-        'is_active': True,
-        'description': 'PXBT Trading MT5 broker',
     },
     {
         'id': 'darwinex',
@@ -11098,9 +10809,9 @@ def save_broker_credentials():
         else:
             return jsonify({
                 'success': False,
-                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, XM Global/XM, Exness, PXBT, Binance, FXCM, OANDA'
+                'error': f'Unknown broker: {broker_name}. Supported: MetaQuotes, Exness, Binance, FXCM, OANDA'
             }), 400
-        
+
         created_at = datetime.now().isoformat()
         
         conn = get_db_connection()
@@ -11142,15 +10853,52 @@ def save_broker_credentials():
             cursor.execute('''
                 INSERT INTO broker_credentials
                 (credential_id, user_id, broker_name, account_number, password, server, 
-                 api_key, username, is_live, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                 api_key, username, is_live, is_active, created_at, updated_at, account_currency)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ''', (
                 credential_id, user_id, broker_name, account_number or '', password, server or '',
-                api_key or '', username or '', 1 if is_live else 0, created_at, created_at
+                api_key or '', username or '', 1 if is_live else 0, created_at, created_at, 'USD'
             ))
             logger.info(f"✅ Created new broker credential for user {user_id}: {broker_name} | Account: {account_id}")
         
         conn.commit()
+        
+        # CRITICAL: Fetch actual currency from broker account and update database
+        try:
+            # For Exness/MT5 brokers, get actual account currency
+            if broker_name in ['Exness', 'MetaQuotes', 'XM', 'XM Global', 'PXBT', 'MetaTrader 5']:
+                test_creds = {
+                    'account_number': account_number,
+                    'password': password,
+                    'server': server,
+                    'broker_name': broker_name,
+                }
+                mt5_conn = MT5Connection(test_creds)
+                if mt5_conn.connect():
+                    acct_info = mt5_conn.get_account_info()
+                    if acct_info and acct_info.get('currency'):
+                        account_currency = acct_info['currency'].upper()
+                        cursor.execute('''
+                            UPDATE broker_credentials 
+                            SET account_currency = ? 
+                            WHERE credential_id = ?
+                        ''', (account_currency, credential_id))
+                        conn2 = get_db_connection()
+                        conn2.execute('UPDATE broker_credentials SET account_currency = ? WHERE credential_id = ?', (account_currency, credential_id))
+                        conn2.commit()
+                        conn2.close()
+                        logger.info(f"✅ Captured account currency: {account_currency} for credential {credential_id}")
+                    mt5_conn.disconnect()
+            elif broker_name == 'Binance':
+                # Binance always uses USDT
+                cursor.execute('UPDATE broker_credentials SET account_currency = ? WHERE credential_id = ?', ('USDT', credential_id))
+                conn2 = get_db_connection()
+                conn2.execute('UPDATE broker_credentials SET account_currency = ? WHERE credential_id = ?', ('USDT', credential_id))
+                conn2.commit()
+                conn2.close()
+        except Exception as e:
+            logger.warning(f"⚠️ Could not auto-capture currency from broker: {e}")
+        
         conn.close()
         
         return jsonify({
@@ -11221,7 +10969,13 @@ def test_broker_connection():
         if broker == 'IG Markets':
             return jsonify({
                 'success': False,
-                'error': 'IG Markets integration has been removed. Supported brokers: Exness, PXBT, XM Global, Binance, FXCM, OANDA'
+                'error': 'IG Markets integration has been removed. Supported brokers: Exness, Binance, FXCM, OANDA'
+            }), 400
+
+        if broker in ['PXBT', 'XM', 'XM Global']:
+            return jsonify({
+                'success': False,
+                'error': 'XM and PXBT are temporarily unsupported. Use Exness, Binance, FXCM, or OANDA instead.'
             }), 400
 
         # ==================== BINANCE ====================
@@ -12255,8 +12009,13 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
     return effective
 
 
-def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
-    """Normalize bot risk configuration before persisting or trading."""
+def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[str, Any]:
+    """Normalize bot risk configuration before persisting or trading.
+    
+    Args:
+        data: Bot configuration dictionary
+        account_currency: Account's actual currency (e.g., 'USD', 'ZAR') from broker credentials
+    """
     warnings: List[str] = []
 
     intelligent_settings = data.get('intelligentManagement') or {}
@@ -12382,7 +12141,7 @@ def sanitize_bot_risk_config(data: Dict) -> Dict[str, Any]:
         signal_threshold = max(signal_threshold, profile_defaults['signalThreshold'])
         allowed_volatility = [level for level in allowed_volatility if level in profile_defaults['allowedVolatility']] or list(profile_defaults['allowedVolatility'])
 
-    display_currency = 'USD'  # Default, overridden by actual account currency
+    display_currency = str(account_currency).upper()  # Use actual account currency (USD, ZAR, etc.)
     
     return {
         'riskPerTrade': risk_per_trade,
@@ -12513,7 +12272,7 @@ def create_bot():
                 return jsonify({'success': False, 'error': 'User not found'}), 404
 
             cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, is_active
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, is_active, account_currency
                 FROM broker_credentials
                 WHERE credential_id = ? AND user_id = ?
             ''', (credential_id, user_id))
@@ -12591,7 +12350,10 @@ def create_bot():
                 raw_symbols = ['EURUSDm']  # Default fallback
             symbols = validate_and_correct_symbols(raw_symbols, broker_name)
             strategy = data.get('strategy', 'Trend Following')
-            sanitized_risk_config = sanitize_bot_risk_config(merged_bot_data)
+            
+            # ✅ GET ACCOUNT CURRENCY from credentials (demo USD vs live ZAR)
+            account_currency = credential_data.get('account_currency', 'USD').upper()
+            sanitized_risk_config = sanitize_bot_risk_config(merged_bot_data, account_currency)
             risk_per_trade = sanitized_risk_config['riskPerTrade']
             max_daily_loss = sanitized_risk_config['maxDailyLoss']
             profit_lock = sanitized_risk_config['profitLock']
@@ -13206,19 +12968,6 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         mt5_conn = broker_connection_cache[cache_key]
                                         logger.debug(f"♻️  Bot {bot_id}: Using cached MT5 connection (savings: 3-5s)")
                                 
-                                        # ✨ NEW: Health check for PXBT to detect session loss
-                                        if normalized_cache_broker == 'PXBT':
-                                            if not is_pxbt_connection_healthy(mt5_conn):
-                                                logger.warning(f"⚠️  Bot {bot_id}: PXBT connection health check failed - attempting auto-reconnect")
-                                                if ensure_pxbt_connection_active(mt5_conn, bot_credentials):
-                                                    logger.info(f"✅ Bot {bot_id}: PXBT reconnected successfully")
-                                                else:
-                                                    logger.error(f"❌ Bot {bot_id}: PXBT auto-reconnect failed - will retry next cycle")
-                                                    stagger_delay = random.uniform(1, 15)
-                                                    actual_wait = trading_interval + stagger_delay
-                                                    logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
-                                                    time.sleep(actual_wait)
-                                                    continue
                                     else:
                                         # Create new connection and cache it
                                         if bot_credentials:
@@ -13230,14 +12979,6 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                                 logger.info(f"Bot {bot_id}: Creating global MT5 singleton connection...")
                                                 mt5_conn = MT5Connection(bot_credentials)
                                                 set_global_mt5(mt5_conn)
-                                                # ✨ NEW: Cache PXBT credentials for auto-reconnect
-                                                if normalized_cache_broker == 'PXBT':
-                                                    cache_pxbt_credentials(
-                                                        bot_credentials.get('credential_id', 'unknown'),
-                                                        bot_credentials.get('account', ''),
-                                                        bot_credentials.get('password', ''),
-                                                        bot_credentials.get('server', '')
-                                                    )
                                             else:
                                                 logger.debug(f"Bot {bot_id}: Reusing global MT5 connection")
                                         else:
@@ -14438,7 +14179,7 @@ def quick_create_bot():
 
             # Verify credential exists and belongs to user AND is Binance
             cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, account_currency
                 FROM broker_credentials
                 WHERE credential_id = ? AND user_id = ?
             ''', (credential_id, user_id))
@@ -14506,7 +14247,8 @@ def quick_create_bot():
             profit_lock = 40
             drawdown_pause_percent = 5
             drawdown_pause_hours = 4
-            display_currency = 'USD'
+            # ✅ GET ACCOUNT CURRENCY from credentials (Binance is always USDT)
+            account_currency = credential_data.get('account_currency', 'USDT').upper()
             trading_enabled = True
 
             account_id = f"{broker_name}_{account_number}"
@@ -14544,7 +14286,7 @@ def quick_create_bot():
                 'profitLock': profit_lock,
                 'drawdownPausePercent': drawdown_pause_percent,
                 'drawdownPauseHours': drawdown_pause_hours,
-                'displayCurrency': display_currency,
+                'displayCurrency': account_currency,  # Use actual account currency (USDT, USD, etc.)
                 'enabled': trading_enabled,
                 'totalTrades': 0,
                 'winningTrades': 0,
