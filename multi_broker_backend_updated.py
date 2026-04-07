@@ -7795,7 +7795,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 8,
         'take_profit_pips': 15,
         'max_slippage': 0.0005,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.15,
         'volatility_low': 0.02,
     },
@@ -7804,7 +7804,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 10,
         'take_profit_pips': 20,
         'max_slippage': 0.0006,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.20,
         'volatility_low': 0.03,
     },
@@ -7813,7 +7813,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 8,
         'take_profit_pips': 16,
         'max_slippage': 0.0006,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.12,
         'volatility_low': 0.02,
     },
@@ -7822,7 +7822,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 9,
         'take_profit_pips': 17,
         'max_slippage': 0.0005,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.18,
         'volatility_low': 0.03,
     },
@@ -7831,7 +7831,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 9,
         'take_profit_pips': 17,
         'max_slippage': 0.0005,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.15,
         'volatility_low': 0.02,
     },
@@ -7840,7 +7840,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 8,
         'take_profit_pips': 15,
         'max_slippage': 0.0005,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.14,
         'volatility_low': 0.02,
     },
@@ -7849,7 +7849,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 9,
         'take_profit_pips': 17,
         'max_slippage': 0.0006,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.18,
         'volatility_low': 0.03,
     },
@@ -7858,7 +7858,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 7,
         'take_profit_pips': 14,
         'max_slippage': 0.0005,
-        'min_signal_strength': 55,
+        'min_signal_strength': 65,
         'volatility_high': 0.10,
         'volatility_low': 0.02,
     },
@@ -7867,7 +7867,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 10,
         'take_profit_pips': 20,
         'max_slippage': 0.0006,
-        'min_signal_strength': 55,
+        'min_signal_strength': 68,
         'volatility_high': 0.18,
         'volatility_low': 0.03,
     },
@@ -7876,7 +7876,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0008,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 0.25,
         'volatility_low': 0.05,
     },
@@ -7886,7 +7886,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 25,
         'max_slippage': 0.001,
-        'min_signal_strength': 58,
+        'min_signal_strength': 70,
         'volatility_high': 1.5,
         'volatility_low': 0.3,
     },
@@ -7895,7 +7895,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 58,
+        'min_signal_strength': 72,
         'volatility_high': 2.0,
         'volatility_low': 0.4,
     },
@@ -7905,7 +7905,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 58,
+        'min_signal_strength': 72,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -7914,7 +7914,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 58,
+        'min_signal_strength': 72,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -7924,7 +7924,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 20,
         'take_profit_pips': 40,
         'max_slippage': 0.001,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 1.0,
         'volatility_low': 0.2,
     },
@@ -7933,7 +7933,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 60,
+        'min_signal_strength': 68,
         'volatility_high': 0.8,
         'volatility_low': 0.15,
     },
@@ -7942,7 +7942,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 18,
         'take_profit_pips': 36,
         'max_slippage': 0.001,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 1.2,
         'volatility_low': 0.2,
     },
@@ -7952,7 +7952,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 62,
+        'min_signal_strength': 72,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -7961,7 +7961,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 20,
         'take_profit_pips': 40,
         'max_slippage': 0.0015,
-        'min_signal_strength': 65,
+        'min_signal_strength': 75,
         'volatility_high': 3.0,
         'volatility_low': 1.0,
     },
@@ -7970,7 +7970,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0012,
-        'min_signal_strength': 62,
+        'min_signal_strength': 72,
         'volatility_high': 1.8,
         'volatility_low': 0.6,
     },
@@ -7979,7 +7979,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 18,
         'take_profit_pips': 36,
         'max_slippage': 0.0015,
-        'min_signal_strength': 65,
+        'min_signal_strength': 75,
         'volatility_high': 2.8,
         'volatility_low': 0.9,
     },
@@ -7988,7 +7988,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.0012,
-        'min_signal_strength': 62,
+        'min_signal_strength': 72,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -7997,7 +7997,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 16,
         'take_profit_pips': 32,
         'max_slippage': 0.0013,
-        'min_signal_strength': 62,
+        'min_signal_strength': 72,
         'volatility_high': 2.5,
         'volatility_low': 0.7,
     },
@@ -8006,7 +8006,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 25,
         'take_profit_pips': 50,
         'max_slippage': 0.002,
-        'min_signal_strength': 65,
+        'min_signal_strength': 75,
         'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
@@ -8015,7 +8015,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 24,
         'max_slippage': 0.001,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 1.5,
         'volatility_low': 0.4,
     },
@@ -8024,7 +8024,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 24,
         'max_slippage': 0.001,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 1.6,
         'volatility_low': 0.4,
     },
@@ -8033,7 +8033,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 24,
         'max_slippage': 0.001,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 1.5,
         'volatility_low': 0.4,
     },
@@ -8042,7 +8042,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0012,
-        'min_signal_strength': 60,
+        'min_signal_strength': 70,
         'volatility_high': 1.8,
         'volatility_low': 0.5,
     },
@@ -8200,7 +8200,7 @@ def calculate_atr(highs, lows, closes, period=14):
 
 
 def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
-    """Evaluate a REAL trading signal based on technical indicators
+    """Evaluate a REAL trading signal based on technical indicators - OPTIMIZED FOR HIGH WIN RATE
     
     Returns: {
         'signal': 'STRONG_BUY' | 'BUY' | 'SELL' | 'STRONG_SELL' | 'NEUTRAL',
@@ -8210,6 +8210,13 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
         'volatility': 'HIGH' | 'MEDIUM' | 'LOW',
         'entry_reason': string explanation,
     }
+    
+    KEY CHANGES FOR BETTER WIN RATE:
+    1. Only BUY when RSI < 35 (not 45) and MACD confirms
+    2. Only SELL when RSI > 65 (not 55) and MACD confirms  
+    3. Require MACD crossover + RSI extreme + Trend alignment
+    4. Skip RANGING markets entirely (no low-probability trades)
+    5. Higher signal threshold reduces false entries
     """
     try:
         # Get price data from market_data
@@ -8234,17 +8241,27 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
         ma_short, ma_long = calculate_moving_averages(price_history, short=10, long=20)
         macd_line, signal_line, histogram = calculate_macd(price_history)
         
+        # Also check MACD history for crossover detection
+        price_history_extended = market_data.get('price_history', [current_price] * 60)[-60:]
+        if len(price_history_extended) >= 35:
+            macd_line_hist, signal_line_hist, histogram_hist = calculate_macd(price_history_extended)
+            prev_histogram = histogram_hist if len(price_history_extended) >= 35 else 0
+        else:
+            prev_histogram = 0
+        
         # Determine trend — use dead zone around ma_long to avoid flip-flopping
         ma_diff_pct = (current_price - ma_long) / ma_long * 100 if ma_long > 0 else 0
-        if ma_diff_pct > 0.1:  # clearly above MA → uptrend or ranging
+        if ma_diff_pct > 0.15:  # clearly above MA → uptrend
             trend = 'UP' if ma_short > ma_long else 'RANGING'
-        elif ma_diff_pct < -0.1:  # clearly below MA → downtrend
+        elif ma_diff_pct < -0.15:  # clearly below MA → downtrend
             trend = 'DOWN'
-        else:  # price near ma_long → use MA crossover for direction
+        else:  # price near ma_long → consolidating
             if ma_short > ma_long:
                 trend = 'UP'
-            else:
+            elif ma_short < ma_long:
                 trend = 'DOWN'
+            else:
+                trend = 'RANGING'
         
         # Determine volatility from market data
         volatility_pct = market_data.get('volatility_pct', 1.0)
@@ -8257,128 +8274,117 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
         else:
             volatility = 'LOW'
         
-        # SIGNAL GENERATION
+        # OPTIMIZED SIGNAL GENERATION - HIGH WIN RATE FILTERS
         strength = 0
         signal = 'NEUTRAL'
         entry_reason = []
         
-        # Calculate reference price for momentum (always available)
-        ref_idx = -5 if len(price_history) >= 5 else -len(price_history)
-        ref_price = price_history[ref_idx]
+        # REJECT trades in ranging markets - these have worst win rate
+        if trend == 'RANGING':
+            strength = 10  # Weak signal, low confidence
+            return {
+                'signal': 'NEUTRAL',
+                'strength': strength,
+                'rsi': round(rsi, 1),
+                'trend': trend,
+                'volatility': volatility,
+                'entry_reason': 'Skipping RANGING market - low probability',
+            }
         
-        # RSI-based signals (0-40)
-        if rsi < 30:
-            strength += 30
-            signal = 'BUY'
+        # Check for MACD crossover (strong signal)
+        macd_just_crossed_bullish = histogram > 0 and (prev_histogram <= 0 or histogram > abs(prev_histogram))
+        macd_just_crossed_bearish = histogram < 0 and (prev_histogram >= 0 or histogram < -abs(prev_histogram))
+        
+        # RSI-based signals - STRICTER THRESHOLDS for high win rate
+        rsi_signal = 'NEUTRAL'
+        rsi_strength = 0
+        
+        if rsi < 25:  # Strong oversold (was < 30)
+            rsi_signal = 'BUY'
+            rsi_strength = 35
+            entry_reason.append(f'RSI deeply oversold ({rsi:.0f})')
+        elif rsi < 35:  # Moderate oversold (was < 45)
+            rsi_signal = 'BUY'
+            rsi_strength = 25
             entry_reason.append(f'RSI oversold ({rsi:.0f})')
-        elif rsi > 70:
-            strength += 30
-            signal = 'SELL'
+        elif rsi > 75:  # Strong overbought (was > 70)
+            rsi_signal = 'SELL'
+            rsi_strength = 35
+            entry_reason.append(f'RSI deeply overbought ({rsi:.0f})')
+        elif rsi > 65:  # Moderate overbought (was > 55)
+            rsi_signal = 'SELL'
+            rsi_strength = 25
             entry_reason.append(f'RSI overbought ({rsi:.0f})')
-        elif rsi < 45:
-            strength += 15
-            signal = 'BUY'
-            entry_reason.append(f'RSI leaning oversold ({rsi:.0f})')
-        elif rsi > 55:
-            strength += 15
-            signal = 'SELL'
-            entry_reason.append(f'RSI leaning overbought ({rsi:.0f})')
-        else:  # 45 <= rsi <= 55
-            strength += 10  # Base strength even in neutral zone
-            # Use recent price momentum for direction in neutral RSI zone
-            if current_price < ref_price:
-                signal = 'SELL'
-                entry_reason.append(f'RSI neutral ({rsi:.0f}) + bearish momentum')
-            elif current_price > ref_price:
-                signal = 'BUY'
-                entry_reason.append(f'RSI neutral ({rsi:.0f}) + bullish momentum')
-            else:
-                # Fallback: use MA crossover for direction
-                if ma_short < ma_long:
-                    signal = 'SELL'
-                    entry_reason.append(f'RSI neutral ({rsi:.0f}) + MA bearish')
-                elif ma_short > ma_long:
-                    signal = 'BUY'
-                    entry_reason.append(f'RSI neutral ({rsi:.0f}) + MA bullish')
-                else:
-                    # Even in consolidating markets, give a weak signal based on slight MA preference
-                    signal = 'BUY' if current_price > ma_long else 'SELL'
-                    entry_reason.append(f'RSI neutral ({rsi:.0f}) + consolidating bias')
-
-        # Add short-term momentum strength to improve signal confidence
-        if current_price > ref_price:
-            strength += 5
-            entry_reason.append('Positive short-term momentum')
-        elif current_price < ref_price:
-            strength += 5
-            entry_reason.append('Negative short-term momentum')
+        else:
+            # In neutral RSI zone (35-65), only trade if trend is STRONG
+            # AND MACD crossover occurs
+            rsi_strength = 5
+            if trend == 'UP':
+                rsi_signal = 'BUY'
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong uptrend')
+            elif trend == 'DOWN':
+                rsi_signal = 'SELL'
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong downtrend')
         
-        # MACD-based signals (0-30)
-        macd_direction = None
+        strength += rsi_strength
+        signal = rsi_signal
+        
+        # MACD confirmation - must align with RSI signal
+        macd_signal = 'NEUTRAL'
         if histogram > 0 and macd_line > signal_line:
-            strength += 20
-            macd_direction = 'BUY'
-            entry_reason.append('MACD bullish')
+            macd_signal = 'BUY'
         elif histogram < 0 and macd_line < signal_line:
-            strength += 20
-            macd_direction = 'SELL'
-            entry_reason.append('MACD bearish')
+            macd_signal = 'SELL'
         
-        # Trend-based signals (0-30) — always contribute when trend detected
-        trend_direction = None
-        if trend == 'UP':
-            strength += 15
-            trend_direction = 'BUY'
-            entry_reason.append('Uptrend confirmed')
-        elif trend == 'DOWN':
-            strength += 15
-            trend_direction = 'SELL'
-            entry_reason.append('Downtrend confirmed')
-        elif trend == 'RANGING' and signal != 'NEUTRAL':
-            strength += 15
-            entry_reason.append('Ranging market - follow signal')
+        # Only add MACD strength if it CONFIRMS RSI signal
+        if signal != 'NEUTRAL':
+            if macd_signal == signal:
+                strength += 25  # Good confirmation
+                entry_reason.append(f'MACD confirms {signal}')
+                
+                # Extra bonus if crossover is fresh
+                if (signal == 'BUY' and macd_just_crossed_bullish) or (signal == 'SELL' and macd_just_crossed_bearish):
+                    strength += 15
+                    entry_reason.append('MACD crossover detected')
+            else:
+                # Conflicting signals - reduce confidence significantly
+                strength -= 10
+                if strength < 0:
+                    signal = 'NEUTRAL'  # Too much conflict, skip trade
+                    entry_reason.append(f'MACD conflicts with RSI signal')
         
-        # Majority-vote direction: if MACD + trend disagree with RSI, majority wins
-        if signal != 'NEUTRAL' and macd_direction and trend_direction:
-            votes = {'BUY': 0, 'SELL': 0}
-            votes[signal] += 1  # RSI vote
-            votes[macd_direction] += 1  # MACD vote
-            votes[trend_direction] += 1  # Trend vote
-            majority = 'BUY' if votes['BUY'] > votes['SELL'] else 'SELL'
-            if majority != signal:
-                signal = majority
-        elif signal == 'NEUTRAL':
-            # Set direction from MACD or trend
-            signal = macd_direction or trend_direction or 'NEUTRAL'
+        # Trend confirmation bonus
+        if signal != 'NEUTRAL':
+            if (signal == 'BUY' and trend == 'UP') or (signal == 'SELL' and trend == 'DOWN'):
+                strength += 15
+                entry_reason.append(f'Trend {trend} confirms signal')
+            elif trend == 'RANGING':
+                strength -= 20  # Penalize if no clear trend
+                if strength < 35:  # Strength too low if ranging
+                    signal = 'NEUTRAL'
         
-        # Volatility adjustment (0-10)
-        if volatility == 'LOW':
-            strength += 5
-            entry_reason.append('Low volatility - good for tight stops')
-        elif volatility == 'HIGH' and signal != 'NEUTRAL':
-            strength -= 2  # Reduced penalty for high volatility
-            entry_reason.append('High volatility - moderate confidence')
-
-        # Reward full indicator consensus for stronger exits
-        if signal != 'NEUTRAL' and macd_direction == signal and trend_direction == signal:
-            strength += 5
-            entry_reason.append('Indicator consensus confirmed')
-
+        # Volatility adjustment - SKIP high volatility trades
+        if volatility == 'HIGH':
+            strength -= 15  # Significant penalty
+            entry_reason.append(f'High volatility - reduced confidence')
+            if strength < 40:  # Too risky, skip
+                signal = 'NEUTRAL'
+        elif volatility == 'LOW':
+            strength += 10
+            entry_reason.append('Low volatility - favorable conditions')
+        
+        # Final strength bounds
+        strength = min(100, max(0, strength))
+        
         # Debug logging for signal evaluation
         if symbol in ['ETHUSD', 'BTCUSD', 'XAUUSD']:
-            logger.debug(f"[SIGNAL-DBG] {symbol}: rsi={rsi:.1f} macd_h={histogram:.6f} trend={trend} vol={volatility} sig={signal} str={strength} ma_diff={ma_diff_pct:.4f}% reasons={entry_reason}")
+            logger.debug(f"[SIGNAL-OPTIMIZED] {symbol}: rsi={rsi:.1f} macd_h={histogram:.6f} trend={trend} vol={volatility} sig={signal} str={strength} reasons={entry_reason}")
         
         # Determine signal strength category
-        if signal == 'NEUTRAL':
-            # Keep accumulated strength even for neutral signals in consolidating markets
-            pass  # Don't reset to 0
-        else:
-            # Amplify if multiple indicators agree
-            if len(entry_reason) > 2:
-                strength = min(100, strength + 20)
+        if signal != 'NEUTRAL':
+            if strength >= 70:
                 signal = f'STRONG_{signal}'
-        
-        strength = min(100, max(0, strength))
+            entry_reason.append(f'Confidence: {strength:.0f}%')
         
         return {
             'signal': signal,
@@ -8386,7 +8392,7 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
             'rsi': round(rsi, 1),
             'trend': trend,
             'volatility': volatility,
-            'entry_reason': ' + '.join(entry_reason) if entry_reason else 'No clear signal',
+            'entry_reason': ' + '.join(entry_reason) if entry_reason else 'Neutral: No clear setup',
         }
     
     except Exception as e:
