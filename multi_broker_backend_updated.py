@@ -956,14 +956,11 @@ class BrokerType(Enum):
     INTERACTIVE_BROKERS = "ib"
     BINANCE = "binance"
     OANDA = "oanda"
-    XM = "xm"
     PEPPERSTONE = "pepperstone"
     FXOPEN = "fxopen"
     EXNESS = "exness"
     PXBT = "pxbt"
-    DARWINEX = "darwinex"
 
-    FXM = "fxm"
     AVATRADE = "avatrade"
     FPMARKETS = "fpmarkets"
 
@@ -2493,14 +2490,17 @@ class MT5Connection(BrokerConnection):
                                     with balance_cache_lock:
                                         cache_key = get_balance_cache_key(broker_name, account)
                                         balance = float(self.account_info.get('balance', 0))
+                                        # IMPORTANT: Store all distinct metrics (not just balance for all)
                                         balance_cache[cache_key] = {
                                             'balance': balance,
                                             'equity': float(self.account_info.get('equity', 0)),
+                                            'margin': float(self.account_info.get('margin', 0)),
                                             'marginFree': float(self.account_info.get('marginFree', 0)),
+                                            'margin_level': float(self.account_info.get('margin_level', 0)),
                                             'currency': self.account_info.get('currency', 'USD'),
                                             'timestamp': time.time()
                                         }
-                                        logger.info(f"  💾 [BOT CACHE] Key='{cache_key}' Balance=${balance:.2f} (Total cache entries: {len(balance_cache)})")
+                                        logger.info(f"  💾 [BOT CACHE] Key='{cache_key}' Balance=${balance:.2f} Equity=${balance_cache[cache_key]['equity']:.2f} MarginFree=${balance_cache[cache_key]['marginFree']:.2f} (Total cache entries: {len(balance_cache)})")
                             except Exception as e:
                                 logger.warning(f"  ⚠️  Failed to cache balance after login: {e}")
                             
@@ -2745,14 +2745,17 @@ class MT5Connection(BrokerConnection):
                         with balance_cache_lock:
                             # Use consistent cache key format (also used by balance endpoint)
                             cache_key = get_balance_cache_key('Exness', account_info.login)
+                            # IMPORTANT: Store all distinct metrics (not just balance for all)
                             balance_cache[cache_key] = {
                                 'balance': float(account_info.balance),
                                 'equity': float(account_info.equity),
-                                'marginFree': float(account_info.margin_free) if hasattr(account_info, 'margin_free') else 0,
+                                'margin': float(account_info.margin) if hasattr(account_info, 'margin') else 0,
+                                'marginFree': float(account_info.margin_free) if hasattr(account_info, 'margin_free') else float(account_info.balance),
+                                'margin_level': float(account_info.margin_level) if hasattr(account_info, 'margin_level') else 0,
                                 'currency': account_info.currency if hasattr(account_info, 'currency') else 'USD',
                                 'timestamp': time.time()
                             }
-                        logger.info(f"  💾 Cached balance for {cache_key}: ${account_info.balance} (cache size: {len(balance_cache)} entries)")
+                        logger.info(f"  💾 Cached balance for {cache_key}: ${account_info.balance} equity=${account_info.equity} margin=${account_info.margin_free} (cache size: {len(balance_cache)} entries)")
                     except Exception as e:
                         logger.error(f"  ❌ Failed to update balance cache: {e}")
                     return True
@@ -4070,220 +4073,7 @@ class OANDAConnection(BrokerConnection):
         return []
 
 
-class XMConnection(BrokerConnection):
-    """XM (XM Global) Broker Connection via MT5"""
-    
-    def __init__(self, credentials: Dict = None):
-        if credentials is None:
-            credentials = {
-                'account': os.getenv('XM_ACCOUNT', ''),
-                'password': os.getenv('XM_PASSWORD', ''),
-                'server': os.getenv('XM_SERVER', 'XMGlobal-MT5'),
-                'broker': 'XM'
-            }
-        
-        super().__init__(BrokerType.XM, credentials)
-        self.connection = None
-    
-    def connect(self) -> bool:
-        """Connect to XM MT5 account.
-        CRITICAL: XM uses a DIFFERENT MT5 terminal than Exness.
-        We must NEVER call mt5.initialize()/login()/shutdown() here because
-        that would hijack/kill the shared Exness terminal used by all bots.
-        XM accounts operate in cache-only/demo mode."""
-        try:
-            account = self.credentials.get('account')
-            password = self.credentials.get('password')
-            
-            if not account or not password:
-                logger.warning(f"XM: Missing account or password credentials")
-                return False
-            
-            # CRITICAL: Do NOT call mt5.initialize() or mt5.login() here!
-            # The MT5 terminal is Exness-only. XM would need its own terminal.
-            # XM operates in cache-only/demo mode.
-            logger.info(f"ℹ️ XM account {account} uses separate MT5 terminal - operating in cache mode")
-            self.connected = True  # Mark as connected for cache-based operations
-            return True
-                
-        except Exception as e:
-            logger.error(f"Error connecting to XM: {e}")
-            return False
-    
-    def disconnect(self) -> bool:
-        """Disconnect from XM.
-        CRITICAL: Does NOT call mt5.shutdown() - that would kill the shared Exness terminal."""
-        try:
-            self.connected = False
-            logger.info("XM connection marked as disconnected (MT5 terminal preserved)")
-            return True
-        except Exception as e:
-            logger.error(f"Error disconnecting from XM: {e}")
-        return False
-    
-    def get_account_info(self) -> Dict:
-        """Get account info from XM"""
-        try:
-            if not self.connected:
-                return {}
-            
-            import MetaTrader5 as mt5
-            
-            account_info = mt5.account_info()
-            if account_info:
-                self.account_info = {
-                    'account_id': account_info.login,
-                    'balance': account_info.balance,
-                    'equity': account_info.equity,
-                    'margin': account_info.margin,
-                    'margin_free': account_info.margin_free,
-                    'broker': 'XM'
-                }
-                return self.account_info
-        except Exception as e:
-            logger.error(f"Error getting XM account info: {e}")
-        
-        return {}
-    
-    def get_positions(self) -> List[Dict]:
-        """Get open positions from XM"""
-        try:
-            if not self.connected:
-                return []
-            
-            import MetaTrader5 as mt5
-            
-            positions = mt5.positions_get()
-            if positions is None:
-                logger.warning(f'XM: mt5.positions_get() returned None: {mt5.last_error()}')
-                return []
-            result = []
-            
-            for pos in positions:
-                result.append({
-                    'ticket': pos.ticket,
-                    'symbol': pos.symbol,
-                    'type': 'BUY' if pos.type == mt5.ORDER_TYPE_BUY else 'SELL',
-                    'volume': pos.volume,
-                    'price': pos.price_open,
-                    'profit': pos.profit,
-                    'broker': 'XM'
-                })
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error getting XM positions: {e}")
-        
-        return []
-    
-    def place_order(self, symbol: str, order_type: str, volume: float, **kwargs) -> Dict:
-        """Place order on XM"""
-        try:
-            if not self.connected:
-                return {'success': False, 'error': 'Not connected to XM'}
-            
-            import MetaTrader5 as mt5
-            
-            order_type_mt5 = mt5.ORDER_TYPE_BUY if order_type.upper() == 'BUY' else mt5.ORDER_TYPE_SELL
-            
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": symbol,
-                "volume": volume,
-                "type": order_type_mt5,
-                "price": mt5.symbol_info_tick(symbol).ask if order_type.upper() == 'BUY' else mt5.symbol_info_tick(symbol).bid,
-            }
-            
-            if 'stop_loss' in kwargs:
-                request['sl'] = kwargs['stop_loss']
-            if 'take_profit' in kwargs:
-                request['tp'] = kwargs['take_profit']
-            
-            result = mt5.order_send(request)
-            
-            if result.retcode == mt5.TRADE_RETCODE_DONE:
-                return {
-                    'success': True,
-                    'ticket': result.order,
-                    'symbol': symbol,
-                    'type': order_type.upper(),
-                    'volume': volume,
-                    'broker': 'XM'
-                }
-            else:
-                return {'success': False, 'error': f'Order failed: {result.comment}'}
-                
-        except Exception as e:
-            logger.error(f"Error placing XM order: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def close_position(self, position_id: str) -> Dict:
-        """Close position on XM"""
-        try:
-            if not self.connected:
-                return {'success': False, 'error': 'Not connected to XM'}
-            
-            import MetaTrader5 as mt5
-            
-            position = mt5.positions_get(ticket=int(position_id))
-            if not position:
-                return {'success': False, 'error': 'Position not found'}
-            
-            pos = position[0]
-            order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-            
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": pos.symbol,
-                "volume": pos.volume,
-                "type": order_type,
-                "position": int(position_id),
-                "price": mt5.symbol_info_tick(pos.symbol).bid if order_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(pos.symbol).ask,
-            }
-            
-            result = mt5.order_send(request)
-            
-            if result.retcode == mt5.TRADE_RETCODE_DONE:
-                return {'success': True, 'position_id': position_id, 'broker': 'XM'}
-            else:
-                return {'success': False, 'error': f'Close failed: {result.comment}'}
-                
-        except Exception as e:
-            logger.error(f"Error closing XM position: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def get_trades(self) -> List[Dict]:
-        """Get trade history from XM"""
-        try:
-            if not self.connected:
-                return []
-            
-            import MetaTrader5 as mt5
-            
-            date_from = datetime.now() - timedelta(days=30)
-            deals = mt5.history_deals_get(date_from, datetime.now())
-            if deals is None:
-                logger.warning(f'XM: history_deals_get returned None: {mt5.last_error()}')
-                return []
-            result = []
-            
-            for deal in deals[-50:]:
-                result.append({
-                    'ticket': deal.ticket,
-                    'symbol': deal.symbol,
-                    'type': 'BUY' if deal.type == mt5.DEAL_TYPE_BUY else 'SELL',
-                    'volume': deal.volume,
-                    'price': deal.price,
-                    'profit': deal.profit,
-                    'time': datetime.fromtimestamp(deal.time).isoformat(),
-                    'broker': 'XM',
-                })
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error getting XM trades: {e}")
-        
-        return []
+
 
 
 class BrokerManager:
@@ -4305,8 +4095,6 @@ class BrokerManager:
 
             elif broker_type == BrokerType.FXM:
                 connection = FXCMConnection(credentials)
-            elif broker_type == BrokerType.XM:
-                connection = XMConnection(credentials)
             else:
                 logger.error(f"Broker {broker_type} not yet implemented")
                 return False
@@ -6743,18 +6531,24 @@ def get_account_details(credential_id):
         balance = float(cred.get('cached_balance') or 0)
         equity = float(cred.get('cached_equity') or 0)
         margin_free = float(cred.get('cached_margin_free') or 0)
-        
+        live_account_info = None
+        current_positions = []
+
         if broker_name == 'Exness':
             try:
-                import MetaTrader5 as mt5
-                existing = mt5.account_info()
-                if existing and existing.login == int(account_number):
-                    balance = existing.balance
-                    equity = existing.equity
-                    margin_free = existing.margin_free
-            except Exception:
-                pass
-        
+                _, mt5_conn = get_broker_connection(credential_id, user_id, bot_id=f'account-details:{credential_id}')
+                if mt5_conn:
+                    live_account_info = mt5_conn.get_account_info() or {}
+                    current_positions = mt5_conn.get_positions() or []
+                    mt5_conn.disconnect()
+
+                    if live_account_info:
+                        balance = float(live_account_info.get('balance', balance))
+                        equity = float(live_account_info.get('equity', equity))
+                        margin_free = float(live_account_info.get('marginFree', margin_free))
+            except Exception as e:
+                logger.warning(f"Could not read live Exness account details for {account_number}: {e}")
+
         # Get all trades for bots linked to this account
         cursor.execute('''
             SELECT t.trade_id, t.bot_id, t.symbol, t.order_type, t.volume,
@@ -6874,20 +6668,36 @@ def get_account_details(credential_id):
         net_profit = gross_profit + total_commission + total_swap  # commission and swap are usually negative
         win_rate = (winning_trades / max(winning_trades + losing_trades, 1)) * 100
         
+        detailed_account = {
+            'credentialId': credential_id,
+            'broker': broker_name,
+            'accountNumber': account_number,
+            'isLive': bool(cred['is_live']),
+            'mode': 'live' if cred['is_live'] else 'demo',
+            'server': cred.get('server'),
+            'balance': balance,
+            'equity': equity,
+            'marginFree': margin_free,
+            'activeBots': active_bots,
+            'totalBots': total_bots,
+        }
+
+        if live_account_info:
+            detailed_account['liveAccountInfo'] = {
+                'tradeMode': live_account_info.get('tradeMode'),
+                'accountType': live_account_info.get('accountType'),
+                'openPositions': live_account_info.get('openPositions'),
+                'pendingOrders': live_account_info.get('pendingOrders'),
+                'floatingPL': live_account_info.get('floatingPL'),
+                'marginLevel': live_account_info.get('marginLevel'),
+                'currency': live_account_info.get('currency'),
+                'brokerServer': live_account_info.get('broker'),
+            }
+            detailed_account['currentPositions'] = current_positions
+
         return jsonify({
             'success': True,
-            'account': {
-                'credentialId': credential_id,
-                'broker': broker_name,
-                'accountNumber': account_number,
-                'isLive': bool(cred['is_live']),
-                'server': cred.get('server'),
-                'balance': balance,
-                'equity': equity,
-                'marginFree': margin_free,
-                'activeBots': active_bots,
-                'totalBots': total_bots,
-            },
+            'account': detailed_account,
             'tradeStats': {
                 'totalTrades': len(trades),
                 'openTrades': open_trades,
@@ -8519,8 +8329,8 @@ SYMBOL_PARAMETERS = {
     # CRYPTOCURRENCIES - Extreme volatility
     'BTCUSD': {
         'atr_multiplier': 2.0,
-        'stop_loss_pips': 50000,
-        'take_profit_pips': 100000,
+        'stop_loss_pips': 200,  # Reduced from 50000 - crypto pips are 0.01 USD
+        'take_profit_pips': 600,  # Reduced from 100000 - more realistic targets
         'max_slippage': 0.002,
         'min_signal_strength': 65,
         'volatility_high': 5.0,
@@ -8528,10 +8338,10 @@ SYMBOL_PARAMETERS = {
     },
     'ETHUSD': {
         'atr_multiplier': 2.0,
-        'stop_loss_pips': 2000,
-        'take_profit_pips': 5000,
+        'stop_loss_pips': 50,  # Reduced from 2000 - crypto pips are 0.01 USD
+        'take_profit_pips': 150,  # Reduced from 5000 - more realistic targets
         'max_slippage': 0.002,
-        'min_signal_strength': 65,
+        'min_signal_strength': 55,  # Reduced from 65 - allow more trades for crypto
         'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
@@ -10873,6 +10683,14 @@ def live_market_data_updater():
                                     hist = hist[-50:]
                                 commodity_market_data[symbol]['price_history'] = hist
                             
+                            # Evaluate real trading signal using technical indicators
+                            signal_eval = evaluate_real_trade_signal(symbol, commodity_market_data[symbol])
+                            commodity_market_data[symbol]['signal_strength'] = signal_eval['strength']
+                            # Update signal with real evaluation if strength > 0
+                            if signal_eval['strength'] > 0:
+                                signal_prefix = '🟢 ' if 'BUY' in signal_eval['signal'] else '🔴 ' if 'SELL' in signal_eval['signal'] else '🟡 '
+                                commodity_market_data[symbol]['signal'] = signal_prefix + signal_eval['signal']
+                            
                             updated_count += 1
                     
                     # Re-seed price_history from M5 candles every 300s (one M5 bar)
@@ -11176,11 +10994,15 @@ def get_broker_credentials():
                 }
         
         credentials = list(seen.values())
+        demo_credentials = [c for c in credentials if not c['is_live']]
+        live_credentials = [c for c in credentials if c['is_live']]
         
         logger.info(f"✅ Retrieved {len(credentials)} unique broker credentials for user {user_id}")
         return jsonify({
             'success': True,
             'credentials': credentials,
+            'demoCredentials': demo_credentials,
+            'liveCredentials': live_credentials,
             'count': len(credentials)
         }), 200
         
@@ -12653,6 +12475,7 @@ def create_bot():
     {
         "botId": "optional_bot_name",
         "credentialId": "credential_uuid",  // ✅ REQUIRED - from broker integration
+        "mode": "demo|live",                // ✅ REQUIRED - must match the credential's is_live mode
         "symbols": ["EURUSD", "XAUUSD"],
         "strategy": "Trend Following",
         "riskPerTrade": 20,
@@ -12706,6 +12529,26 @@ def create_bot():
             account_number = credential_data['account_number']
             is_live = credential_data['is_live']
             mode = 'live' if is_live else 'demo'
+
+            # The request should explicitly state the intended mode to avoid demo/live credential mixups.
+            requested_mode = data.get('mode') or data.get('botMode')
+            if requested_mode is not None:
+                requested_mode = str(requested_mode).strip().lower()
+            elif 'is_live' in data:
+                requested_mode = 'live' if bool(data.get('is_live')) else 'demo'
+
+            if requested_mode and requested_mode not in ['demo', 'live']:
+                return jsonify({'success': False, 'error': 'mode must be either "demo" or "live"'}), 400
+
+            if requested_mode and requested_mode != mode:
+                return jsonify({
+                    'success': False,
+                    'error': f'Credential mode mismatch: credential is {mode} but request mode is {requested_mode}. Use the correct credentialId for demo or live accounts.'
+                }), 400
+
+            if not requested_mode:
+                requested_mode = mode
+                logger.info(f"Bot create request did not specify mode; inferring mode={requested_mode} from credential {credential_id}")
 
             # Fail fast for Binance credentials so users don't create bots that silently fail at runtime.
             if canonicalize_broker_name(broker_name) == 'Binance':
@@ -14841,31 +14684,7 @@ def start_bot():
             
             # Restore bot to active_bots from database
             logger.info(f"[START BOT] Restoring bot {bot_id} from database into active_bots...")
-            bot_dict = dict(db_bot)
-            bot_symbols = bot_dict.get('symbols', 'EURUSDm').split(',') if bot_dict.get('symbols') else ['EURUSDm']
-            active_bots[bot_id] = {
-                'botId': bot_id,
-                'user_id': user_id,
-                'accountId': bot_dict.get('broker_account_id', 'Unknown'),
-                'brokerName': bot_dict.get('broker_name', 'Exness'),
-                'broker_type': bot_dict.get('broker_name', 'Exness'),
-                'mode': 'live' if bot_dict.get('is_live') else 'demo',
-                'credentialId': None,  # Will be loaded next
-                'symbols': bot_symbols,
-                'strategy': bot_dict.get('strategy', 'Trend Following'),
-                'enabled': bool(bot_dict.get('enabled')),
-                'status': bot_dict.get('status', 'CREATED'),
-                'totalProfit': 0,
-                'totalTrades': 0,
-                'winningTrades': 0,
-                'totalLosses': 0,
-                'createdAt': bot_dict.get('created_at', datetime.now().isoformat()),
-                'startTime': datetime.now().isoformat(),
-                'tradeHistory': [],
-                'dailyProfits': {},
-                'profitHistory': [],
-                'open_positions': {},
-            }
+            active_bots[bot_id] = _restore_bot_runtime_state(db_bot)
             
             # Load credential_id from bot_credentials table
             conn_cred = get_db_connection()

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -14,7 +13,7 @@ import '../services/broker_credentials_service.dart';
 import '../utils/environment_config.dart';
 import '../widgets/account_display_widget.dart';
 import '../widgets/logo_widget.dart';
-import '../widgets/pxbt_session_manager.dart';
+
 import '../widgets/trading_mode_switcher.dart';
 import 'bot_analytics_screen.dart';
 import 'bot_configuration_screen.dart';
@@ -31,7 +30,6 @@ class BotDashboardScreen extends StatefulWidget {
 }
 
 class _BotDashboardScreenState extends State<BotDashboardScreen> {
-  Timer? _refreshTimer;
   String _searchQuery = '';
   String _filterStatus = 'all'; // 'all', 'active', 'inactive'
   String _tradingMode = 'DEMO'; // Current trading mode: DEMO or LIVE
@@ -42,10 +40,9 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     super.initState();
     _loadTradingMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
-    });
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted) context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
+      final botService = context.read<BotService>();
+      botService.startPolling(tradingMode: _tradingMode);
+      botService.fetchActiveBots(tradingMode: _tradingMode, force: true);
     });
   }
 
@@ -55,19 +52,23 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     setState(() => _tradingMode = mode);
     // Re-fetch bots with the correct mode
     if (mounted) {
-      context.read<BotService>().fetchActiveBots(tradingMode: mode);
+      final botService = context.read<BotService>();
+      botService.startPolling(tradingMode: mode);
+      botService.fetchActiveBots(tradingMode: mode, force: true);
     }
   }
 
   void _onModeChanged(String newMode) {
     setState(() => _tradingMode = newMode);
     // Re-fetch bots filtered by the new mode
-    context.read<BotService>().fetchActiveBots(tradingMode: newMode);
+    final botService = context.read<BotService>();
+    botService.startPolling(tradingMode: newMode);
+    botService.fetchActiveBots(tradingMode: newMode, force: true);
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    context.read<BotService>().stopPolling();
     super.dispose();
   }
 
@@ -158,7 +159,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
           child: allBots.isEmpty && botService.isLoading
               ? const Center(child: CircularProgressIndicator(color: Color(0xFF00E5FF)))
               : RefreshIndicator(
-                  onRefresh: () => botService.fetchActiveBots(tradingMode: _tradingMode),
+                  onRefresh: () => botService.fetchActiveBots(tradingMode: _tradingMode, force: true),
                   color: const Color(0xFF00E5FF),
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -207,7 +208,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                                 child: AccountDisplayWidget(
                                   tradingMode: _tradingMode,
                                   onRefresh: () {
-                                    context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
+                                    context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode, force: true);
                                   },
                                 ),
                               )
@@ -232,13 +233,6 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         ),
                       ),
 
-                      // 🔌 PXBT SESSION MANAGER - Check connection status and reconnect if needed
-                      PxbtSessionManager(
-                        onStatusChanged: () {
-                          // Refresh bot list when PXBT status changes
-                          context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode);
-                        },
-                      ),
 
                       // Summary row
                       Row(
@@ -537,7 +531,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
           Text(error, style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 13), textAlign: TextAlign.center),
           const SizedBox(height: 12),
           TextButton(
-            onPressed: () => context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode),
+            onPressed: () => context.read<BotService>().fetchActiveBots(tradingMode: _tradingMode, force: true),
             child: Text('Retry', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF))),
           ),
         ],
@@ -559,7 +553,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final todaysProfit = double.tryParse(bot['dailyProfit']?.toString() ?? '0') ?? 0;
     final accountBalance = double.tryParse(bot['accountBalance']?.toString() ?? '0') ?? 0;
     final accountEquity = double.tryParse(bot['accountEquity']?.toString() ?? '0') ?? 0;
-    final openPositions = (bot['openPositions'] as List?) ?? [];
+    final openPositions = (bot['openPositionsPreview'] as List?) ?? (bot['openPositions'] as List?) ?? [];
+    final openPositionsCount = int.tryParse(bot['openPositionsCount']?.toString() ?? '${openPositions.length}') ?? openPositions.length;
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
     final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
@@ -783,14 +778,14 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             ),
           ],
           // Open Positions
-          if (openPositions.isNotEmpty) ...[
+          if (openPositionsCount > 0) ...[
             const SizedBox(height: 10),
             Row(
               children: [
                 const Icon(Icons.candlestick_chart, color: Color(0xFFFFA726), size: 16),
                 const SizedBox(width: 6),
                 Text(
-                  'Open Positions (${openPositions.length})',
+                  'Open Positions ($openPositionsCount)',
                   style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ],
@@ -872,11 +867,11 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                 ),
               );
             }),
-            if (openPositions.length > 5)
+            if (openPositionsCount > 5)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  '+${openPositions.length - 5} more positions',
+                  '+${openPositionsCount - 5} more positions',
                   style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
                 ),
               ),

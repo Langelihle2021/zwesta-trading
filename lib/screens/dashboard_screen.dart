@@ -40,6 +40,7 @@ import 'trade_analysis_screen.dart';
 import 'trades_screen.dart';
 import 'unified_broker_dashboard_screen.dart';
 import 'user_wallet_screen.dart';
+import 'activity_log_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -895,6 +896,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _FeatureAction('Financials', Icons.attach_money, const Color(0xFF26C6DA), _openFinancials),
                 _FeatureAction('Commissions', Icons.monetization_on, const Color(0xFF69F0AE), () => _pushScreen(const CommissionDashboardScreen())),
                 _FeatureAction('Wallet', Icons.account_balance_wallet, const Color(0xFFF0B90B), () => _pushScreen(const UserWalletScreen())),
+                _FeatureAction('Activity Log', Icons.history, const Color(0xFF8D6E63), () => _pushScreen(const ActivityLogScreen())),
                 _FeatureAction('Referrals', Icons.group_add, const Color(0xFF66BB6A), _openReferralDashboard),
               ],
             ),
@@ -1218,15 +1220,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
-              Text('\$${shownTotal.toStringAsFixed(2)}',
-                style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
+          Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
           const SizedBox(height: 14),
           ...shownAccounts.map((account) {
             final broker = account['broker']?.toString() ?? 'Unknown';
