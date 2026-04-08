@@ -100,6 +100,14 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _selectedBroker.toLowerCase() == 'prime xbt';
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
 
+  String _defaultServerForSelectedBroker({bool? isLiveOverride}) {
+    final isLive = isLiveOverride ?? _isLiveMode;
+    if (_selectedBroker.toLowerCase() == 'exness') {
+      return isLive ? 'Exness-MT5Real27' : 'Exness-MT5Trial9';
+    }
+    return brokerServers[_selectedBroker] ?? '';
+  }
+
   void _loadSavedAccounts() async {
     final accounts = BrokerConnectionService.getSavedAccounts()
         .where((a) => !a.brokerName.toLowerCase().contains('xm'))
@@ -118,12 +126,15 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _passwordController.text = prefs.getString('mt5_password') ?? '';
       _apiKeyController.text = prefs.getString('broker_api_key') ?? '';
       _usernameController.text = prefs.getString('broker_username') ?? '';
-      _serverController.text = brokerServers[_selectedBroker] ?? '';
       _isConnected = prefs.getBool('broker_connected') ?? false;
       _accountBalance = prefs.getDouble('account_balance') ?? 0;
       _accountCurrency = prefs.getString('account_currency') ?? 'USD';
       _autoReconnectEnabled = prefs.getBool('auto_reconnect_enabled') ?? false;
       _isLiveMode = prefs.getBool('is_live_mode') ?? false;  // Load saved mode
+      final savedServer = prefs.getString('mt5_server') ?? '';
+      _serverController.text = savedServer.isNotEmpty
+          ? savedServer
+          : _defaultServerForSelectedBroker(isLiveOverride: _isLiveMode);
       final connectionTimeStr = prefs.getString('connection_time');
       if (connectionTimeStr != null) {
         _lastConnectionTime = DateTime.parse(connectionTimeStr);
@@ -716,7 +727,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                   if (newValue != null) {
                     setState(() {
                       _selectedBroker = newValue;
-                      _serverController.text = brokerServers[newValue] ?? '';
+                      _serverController.text = _defaultServerForSelectedBroker();
                     });
                   }
                 },
@@ -919,7 +930,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                       groupValue: _isLiveMode,
                       onChanged: (value) {
                         if (value != null) {
-                          setState(() => _isLiveMode = value);
+                          setState(() {
+                            _isLiveMode = value;
+                            _serverController.text = _defaultServerForSelectedBroker();
+                          });
                         }
                       },
                     ),
@@ -932,7 +946,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                       groupValue: _isLiveMode,
                       onChanged: (value) {
                         if (value != null) {
-                          setState(() => _isLiveMode = value);
+                          setState(() {
+                            _isLiveMode = value;
+                            _serverController.text = _defaultServerForSelectedBroker();
+                          });
                         }
                       },
                     ),

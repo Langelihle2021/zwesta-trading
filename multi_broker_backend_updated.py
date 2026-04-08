@@ -11284,6 +11284,17 @@ def test_broker_connection():
                     'success': False,
                     'error': 'Missing required fields for MT5: broker, account_number, password, server'
                 }), 400
+
+            # Exness guard: prevent accidental wrong account IDs (e.g. extra digit typos)
+            # Current known Exness account IDs in this deployment are 9-digit numeric values.
+            if broker.lower() == 'exness':
+                account_str = str(account).strip()
+                if not account_str.isdigit() or len(account_str) != 9:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid Exness account number. Enter the exact 9-digit MT5 account ID.'
+                    }), 400
+                account = account_str
             
             # Fix server name for MT5 brokers — use per-account is_live, NOT global ENVIRONMENT
             broker_l = broker.lower()
