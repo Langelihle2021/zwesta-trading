@@ -84,15 +84,6 @@ class BrokerRegistryService extends ChangeNotifier {
         description: 'Primary crypto exchange for spot and futures trading',
       ),
       BrokerConfig(
-        id: 'xm',
-        name: 'XM',
-        displayName: 'XM Global',
-        logo: '🏦',
-        accountTypes: ['DEMO', 'LIVE'],
-        isActive: true,
-        description: 'Global regulated forex and commodities broker',
-      ),
-      BrokerConfig(
         id: 'pepperstone',
         name: 'Pepperstone',
         displayName: 'Pepperstone Global',

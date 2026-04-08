@@ -55,14 +55,12 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     'Binance',     // ✅ Primary crypto spot trading path
     'PXBT',        // ✅ Prime XBT crypto trading
     'OANDA',       // ✅ REST API forex trading
-    'XM',          // ✅ MT5 with forex/indices
    // FXCM support available but requires separate API key
   ];
 
   final Map<String, String> brokerServers = {
     'Binance': 'spot',
     'OANDA': 'REST-API',
-    'XM': 'XMGlobal-MT5Demo',
     'Pepperstone': 'Pepperstone MT5 Live',
     'FxOpen': 'FxOpen-MT5',
     'Exness': 'Exness-MT5Trial9',
@@ -102,14 +100,19 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
 
   void _loadSavedAccounts() async {
-    final accounts = BrokerConnectionService.getSavedAccounts();
+    final accounts = BrokerConnectionService.getSavedAccounts()
+        .where((a) => !a.brokerName.toLowerCase().contains('xm'))
+        .toList();
     setState(() => _savedAccounts = accounts);
   }
 
   void _loadSavedCredentials() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedBroker = prefs.getString('broker') ?? 'Exness';
+    final normalizedSavedBroker =
+        savedBroker.toLowerCase().contains('xm') ? 'Exness' : savedBroker;
     setState(() {
-      _selectedBroker = prefs.getString('broker') ?? 'Exness';
+      _selectedBroker = normalizedSavedBroker;
       _accountController.text = prefs.getString('mt5_account') ?? '';
       _passwordController.text = prefs.getString('mt5_password') ?? '';
       _apiKeyController.text = prefs.getString('broker_api_key') ?? '';

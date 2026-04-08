@@ -67,8 +67,10 @@ class StatCard extends StatelessWidget {
 class TradeCard extends StatelessWidget {
 
   const TradeCard({
-    required this.symbol, required this.type, required this.quantity, required this.entryPrice, required this.currentPrice, required this.profit, required this.profitPercentage, Key? key,
+    required this.symbol, required this.entryPrice, required this.currentPrice, required this.profit, required this.profitPercentage, required this.type, required this.quantity, Key? key,
     this.onTap,
+    this.openedAt,
+    this.closedAt,
   }) : super(key: key);
   final String symbol;
   final String type;
@@ -78,6 +80,8 @@ class TradeCard extends StatelessWidget {
   final double profit;
   final double profitPercentage;
   final Function? onTap;
+  final DateTime? openedAt;
+  final DateTime? closedAt;
 
   Color get profitColor => profit >= 0 ? AppColors.successColor : AppColors.dangerColor;
 
@@ -165,6 +169,31 @@ class TradeCard extends StatelessWidget {
                   ),
                 ],
               ),
+              // Display timestamps
+              if (openedAt != null || closedAt != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (openedAt != null)
+                      Text(
+                        'Opened: ${openedAt!.toString().split('.')[0]}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey,
+                          fontSize: 11,
+                        ),
+                      ),
+                    if (closedAt != null)
+                      Text(
+                        'Closed: ${closedAt!.toString().split('.')[0]}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey,
+                          fontSize: 11,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

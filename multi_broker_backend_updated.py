@@ -6881,14 +6881,15 @@ def list_commodities():
                     symbol = item_config['symbol']
                     # Get live market data for this symbol (from the updater thread)
                     # Try exact match, then try with 'm' suffix (backward compat with cached data)
-                    live_data = commodity_market_data.get(symbol, {})
+                    live_data = commodity_market_data.get(symbol) or commodity_market_data.get(symbol + 'm')
                     if not live_data:
-                        live_data = commodity_market_data.get(symbol + 'm', {})
+                        live_data = _init_commodity_data(item_config.get('min_price', 1.0), symbol)
                     # Merge config + live data, but config symbol always wins
                     merged_item = {**item_config, **live_data, 'symbol': symbol}
                     categorized[category].append(merged_item)
                     # Also store in flat dict for easy lookup by symbol
-                    flat_market_data[symbol] = live_data
+                    flat_market_data[symbol] = merged_item
+                    flat_market_data[symbol] = merged_item
             
             # Log sample signals for debugging
             eurusd_signal = flat_market_data.get('EURUSD', {}).get('signal', 'NO DATA')
@@ -7751,7 +7752,7 @@ def validate_and_correct_symbols(symbols, broker_name=None):
                 logger.warning(f'⚠️ Unknown {broker_name} symbol {symbol} -> defaulting to EURUSDm')
                 if 'EURUSDm' not in corrected:
                     corrected.append('EURUSDm')
-        return corrected[:5] or ['EURUSDm']
+        return corrected[:10] or ['EURUSDm']
 
     if not symbols:
         return ['EURUSDm']  # Default fallback to Exness EURUSDm
@@ -7785,7 +7786,7 @@ def validate_and_correct_symbols(symbols, broker_name=None):
             final.append(s)
             seen.add(s)
     
-    return final[:5]  # Limit to 5 symbols max
+    return final[:10]  # Limit to 10 symbols max
 
 # ==================== SYMBOL-SPECIFIC TRADING PARAMETERS ====================
 SYMBOL_PARAMETERS = {
@@ -7886,7 +7887,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 25,
         'max_slippage': 0.001,
-        'min_signal_strength': 70,
+        'min_signal_strength': 65,  # Adjusted from 75 - allow more trades while maintaining quality
         'volatility_high': 1.5,
         'volatility_low': 0.3,
     },
@@ -8061,7 +8062,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 200,  # Reduced from 50000 - crypto pips are 0.01 USD
         'take_profit_pips': 600,  # Reduced from 100000 - more realistic targets
         'max_slippage': 0.002,
-        'min_signal_strength': 65,
+        'min_signal_strength': 60,  # Adjusted from 70 - allow more trades while maintaining quality
         'volatility_high': 5.0,
         'volatility_low': 1.0,
     },
@@ -8070,7 +8071,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 50,  # Reduced from 2000 - crypto pips are 0.01 USD
         'take_profit_pips': 150,  # Reduced from 5000 - more realistic targets
         'max_slippage': 0.002,
-        'min_signal_strength': 55,  # Reduced from 65 - allow more trades for crypto
+        'min_signal_strength': 55,  # Adjusted from 65 - allow more trades while maintaining quality
         'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
@@ -8241,14 +8242,10 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
         ma_short, ma_long = calculate_moving_averages(price_history, short=10, long=20)
         macd_line, signal_line, histogram = calculate_macd(price_history)
         
-        # Also check MACD history for crossover detection
-        price_history_extended = market_data.get('price_history', [current_price] * 60)[-60:]
-        if len(price_history_extended) >= 35:
-            macd_line_hist, signal_line_hist, histogram_hist = calculate_macd(price_history_extended)
-            prev_histogram = histogram_hist if len(price_history_extended) >= 35 else 0
-        else:
-            prev_histogram = 0
-        
+        # Normalize Exness-style symbols for param lookup (e.g. 'EURUSDm' -> 'EURUSD')
+        symbol_key = symbol[:-1] if symbol.endswith('m') else symbol
+        symbol_key = symbol_key.upper()
+
         # Determine trend — use dead zone around ma_long to avoid flip-flopping
         ma_diff_pct = (current_price - ma_long) / ma_long * 100 if ma_long > 0 else 0
         if ma_diff_pct > 0.15:  # clearly above MA → uptrend
@@ -8265,7 +8262,7 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
         
         # Determine volatility from market data
         volatility_pct = market_data.get('volatility_pct', 1.0)
-        params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+        params = SYMBOL_PARAMETERS.get(symbol_key, DEFAULT_SYMBOL_PARAMS)
         
         if volatility_pct > params['volatility_high']:
             volatility = 'HIGH'
@@ -8291,50 +8288,65 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
                 'entry_reason': 'Skipping RANGING market - low probability',
             }
         
-        # Check for MACD crossover (strong signal)
-        macd_just_crossed_bullish = histogram > 0 and (prev_histogram <= 0 or histogram > abs(prev_histogram))
-        macd_just_crossed_bearish = histogram < 0 and (prev_histogram >= 0 or histogram < -abs(prev_histogram))
-        
-        # RSI-based signals - STRICTER THRESHOLDS for high win rate
-        rsi_signal = 'NEUTRAL'
-        rsi_strength = 0
-        
-        if rsi < 25:  # Strong oversold (was < 30)
-            rsi_signal = 'BUY'
-            rsi_strength = 35
-            entry_reason.append(f'RSI deeply oversold ({rsi:.0f})')
-        elif rsi < 35:  # Moderate oversold (was < 45)
-            rsi_signal = 'BUY'
-            rsi_strength = 25
-            entry_reason.append(f'RSI oversold ({rsi:.0f})')
-        elif rsi > 75:  # Strong overbought (was > 70)
-            rsi_signal = 'SELL'
-            rsi_strength = 35
-            entry_reason.append(f'RSI deeply overbought ({rsi:.0f})')
-        elif rsi > 65:  # Moderate overbought (was > 55)
-            rsi_signal = 'SELL'
-            rsi_strength = 25
-            entry_reason.append(f'RSI overbought ({rsi:.0f})')
-        else:
-            # In neutral RSI zone (35-65), only trade if trend is STRONG
-            # AND MACD crossover occurs
-            rsi_strength = 5
-            if trend == 'UP':
-                rsi_signal = 'BUY'
-                entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong uptrend')
-            elif trend == 'DOWN':
-                rsi_signal = 'SELL'
-                entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong downtrend')
-        
-        strength += rsi_strength
-        signal = rsi_signal
-        
-        # MACD confirmation - must align with RSI signal
+        # Determine MACD confirmation and fresh crossover
+        macd_prev_histogram = 0
+        if len(price_history) >= 36:
+            _, _, macd_prev_histogram = calculate_macd(price_history[:-1])
+        macd_just_crossed_bullish = histogram > 0 and macd_prev_histogram <= 0
+        macd_just_crossed_bearish = histogram < 0 and macd_prev_histogram >= 0
         macd_signal = 'NEUTRAL'
         if histogram > 0 and macd_line > signal_line:
             macd_signal = 'BUY'
         elif histogram < 0 and macd_line < signal_line:
             macd_signal = 'SELL'
+        macd_strength = abs(histogram)
+        trend_gap_pct = abs(ma_short - ma_long) / ma_long * 100 if ma_long > 0 else 0
+        strong_trend = trend_gap_pct >= 0.18
+        
+        # RSI-based signals - STRICTER THRESHOLDS for high win rate
+        rsi_signal = 'NEUTRAL'
+        rsi_strength = 0
+        
+        if rsi < 28:  # Strong oversold
+            rsi_signal = 'BUY'
+            rsi_strength = 35
+            entry_reason.append(f'RSI deeply oversold ({rsi:.0f})')
+        elif rsi < 35:  # Moderate oversold
+            rsi_signal = 'BUY'
+            rsi_strength = 25
+            entry_reason.append(f'RSI oversold ({rsi:.0f})')
+        elif rsi < 45 and trend == 'UP' and macd_signal == 'BUY' and strong_trend:
+            rsi_signal = 'BUY'
+            rsi_strength = 20
+            entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong uptrend + MACD')
+        elif rsi > 72:  # Strong overbought
+            rsi_signal = 'SELL'
+            rsi_strength = 35
+            entry_reason.append(f'RSI deeply overbought ({rsi:.0f})')
+        elif rsi > 65:  # Moderate overbought
+            rsi_signal = 'SELL'
+            rsi_strength = 25
+            entry_reason.append(f'RSI overbought ({rsi:.0f})')
+        elif rsi > 55 and trend == 'DOWN' and macd_signal == 'SELL' and strong_trend:
+            rsi_signal = 'SELL'
+            rsi_strength = 20
+            entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong downtrend + MACD')
+        else:
+            # Neutral RSI zone can still trade if trend and MACD are aligned strongly
+            if trend == 'UP' and macd_signal == 'BUY' and strong_trend:
+                rsi_signal = 'BUY'
+                rsi_strength = 15
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + trend/MD confirmation')
+            elif trend == 'DOWN' and macd_signal == 'SELL' and strong_trend:
+                rsi_signal = 'SELL'
+                rsi_strength = 15
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + trend/MD confirmation')
+            else:
+                rsi_strength = 0
+                entry_reason.append(f'RSI neutral ({rsi:.0f})')
+        
+        strength += rsi_strength
+        signal = rsi_signal
         
         # Only add MACD strength if it CONFIRMS RSI signal
         if signal != 'NEUTRAL':
@@ -8347,11 +8359,11 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
                     strength += 15
                     entry_reason.append('MACD crossover detected')
             else:
-                # Conflicting signals - reduce confidence significantly
-                strength -= 10
+                strength -= 15
+                entry_reason.append(f'MACD conflicts with RSI signal')
                 if strength < 0:
-                    signal = 'NEUTRAL'  # Too much conflict, skip trade
-                    entry_reason.append(f'MACD conflicts with RSI signal')
+                    signal = 'NEUTRAL'
+                    entry_reason.append('Dropped due to conflicting momentum')
         
         # Trend confirmation bonus
         if signal != 'NEUTRAL':
@@ -10490,23 +10502,8 @@ def _init_commodity_data(price, symbol_name):
     }
 
 commodity_market_data = {
-    # ===== EXNESS STANDARD ACCOUNT MARKET DATA DEFAULTS (no 'm' suffix) =====
-    'EURUSD': _init_commodity_data(1.0890, 'EURUSD'),
-    'USDJPY': _init_commodity_data(149.50, 'USDJPY'),
-    'XAUUSD': _init_commodity_data(2076.44, 'XAUUSD'),
-    'BTCUSD': _init_commodity_data(43560.00, 'BTCUSD'),
-    'ETHUSD': _init_commodity_data(2280.45, 'ETHUSD'),
-    'AAPL': _init_commodity_data(215.40, 'AAPL'),
-    'AMD': _init_commodity_data(182.30, 'AMD'),
-    'MSFT': _init_commodity_data(428.15, 'MSFT'),
-    'NVDA': _init_commodity_data(932.75, 'NVDA'),
-    'JPM': _init_commodity_data(198.60, 'JPM'),
-    'BAC': _init_commodity_data(41.80, 'BAC'),
-    'WFC': _init_commodity_data(58.40, 'WFC'),
-    'GOOGL': _init_commodity_data(176.20, 'GOOGL'),
-    'META': _init_commodity_data(498.35, 'META'),
-    'ORCL': _init_commodity_data(144.70, 'ORCL'),
-    'TSM': _init_commodity_data(162.25, 'TSM'),
+    symbol: _init_commodity_data(1.0, symbol)
+    for symbol in sorted(VALID_SYMBOLS)
 }
 
 # Store active bots configuration
@@ -18736,20 +18733,8 @@ def validate_exness_server(server_name):
     return server_name in valid_servers
 
 def get_exness_available_symbols():
-    """Return list of available Exness symbols (50+ pairs)"""
-    return [
-        # Forex - Major Pairs (8)
-        'EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCNH',
-        # Metals (4)
-        'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD',
-        # Energy (2)
-        'OILK', 'NATGASUS',
-        # Indices (4)
-        'SP500m', 'DAX', 'US300', 'US100',
-        # Additional forex pairs (12+)
-        'EURJPY', 'EURGBP', 'EURCHF', 'EURCAD', 'GBPJPY', 'GBPCHF', 'CHFJPY',
-        'CADCHF', 'CADJPY', 'AUDCAD', 'AUDCHF', 'AUDJPY',
-    ]
+    """Return list of available Exness symbols based on VALID_SYMBOLS"""
+    return get_mt5_ready_symbols_for_broker('Exness')
 
 @app.route('/api/broker/exness/login', methods=['POST'])
 def exness_login():

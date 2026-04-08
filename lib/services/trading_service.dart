@@ -76,7 +76,7 @@ class TradingService extends ChangeNotifier {
 
   // Account metrics getters
   double get accountBalance => primaryAccount?.balance ?? 0.0;
-  double get accountEquity => (primaryAccount?.balance ?? 0.0) - (primaryAccount?.usedMargin ?? 0.0);
+  double get accountEquity => (primaryAccount?.balance ?? 0.0) + (primaryAccount?.profit ?? 0.0);
   double get freeMargin => primaryAccount?.availableMargin ?? 0.0;
   double get accountProfit => primaryAccount?.profit ?? 0.0;
 
@@ -203,51 +203,138 @@ class TradingService extends ChangeNotifier {
       try {
         final prefs = await SharedPreferences.getInstance();
         final sessionToken = prefs.getString('auth_token');
+        if (sessionToken == null || sessionToken.isEmpty) {
+          _errorMessage = 'Session token missing. Please login again.';
+          _trades = [];
+          _isLoading = false;
+          notifyListeners();
+          return;
+        }
+
+        DateTime _parseBackendTime(dynamic raw) {
+          if (raw == null) return DateTime.now();
+          if (raw is int) {
+            // MT5 timestamps are unix seconds.
+            return DateTime.fromMillisecondsSinceEpoch(raw * 1000);
+          }
+          final s = raw.toString();
+          final asInt = int.tryParse(s);
+          if (asInt != null) {
+            return DateTime.fromMillisecondsSinceEpoch(asInt * 1000);
+          }
+          return DateTime.tryParse(s) ?? DateTime.now();
+        }
+
+        double _asDouble(dynamic raw, [double fallback = 0.0]) {
+          if (raw == null) return fallback;
+          if (raw is num) return raw.toDouble();
+          return double.tryParse(raw.toString()) ?? fallback;
+        }
         
         final allTrades = <Trade>[];
-        
-        // Fetch 1: Database stored trades from /api/trades-public
+
+        // Fetch 1: Closed trade history (user-scoped)
         try {
           final response = await http.get(
-            Uri.parse('$_apiUrl/api/trades-public'),
+            Uri.parse('$_apiUrl/api/trades/history?days=30'),
             headers: {
               'Content-Type': 'application/json',
-              if (sessionToken != null && sessionToken.isNotEmpty)
-                'X-Session-Token': sessionToken,
+              'X-Session-Token': sessionToken,
             },
           ).timeout(const Duration(seconds: 10));
 
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body);
             final tradesData = data['trades'] as List;
-            
+
             allTrades.addAll(tradesData.map((t) => Trade(
                 id: t['ticket'].toString(),
                 symbol: t['symbol'],
                 type: t['type'] == 'BUY' ? TradeType.buy : TradeType.sell,
                 quantity: (t['volume'] as num).toDouble(),
-                entryPrice: (t['price'] as num).toDouble(),
-                currentPrice: ((t['currentPrice'] ?? t['price']) as num).toDouble(),
+                entryPrice: ((t['openPrice'] ?? t['price']) as num).toDouble(),
+                currentPrice: ((t['openPrice'] ?? t['price']) as num).toDouble(),
                 takeProfit: null,
                 stopLoss: null,
-                status: TradeStatus.open,
-                openedAt: DateTime.parse(t['time'] ?? DateTime.now().toIso8601String()),
+                status: TradeStatus.closed,
+                openedAt: _parseBackendTime(t['openTime'] ?? t['time']),
+                closedAt: _parseBackendTime(t['closeTime']),
                 profit: ((t['profit'] ?? 0) as num).toDouble(),
                 profitPercentage: null,
               )));
           }
         } catch (e) {
-          print('Error fetching database trades: $e');
+          print('Error fetching closed trade history: $e');
         }
-        
-          // Fetch 2: Live MT5 positions from /api/positions/all
+
+        // Fetch 1b: User bot/database trades (user-scoped)
         try {
-          final posResponse = await http.get(
-            Uri.parse('$_apiUrl/api/positions/all'),
+          final dbTradesResponse = await http.get(
+            Uri.parse('$_apiUrl/api/trades'),
             headers: {
               'Content-Type': 'application/json',
-              if (sessionToken != null && sessionToken.isNotEmpty)
-                'X-Session-Token': sessionToken,
+              'X-Session-Token': sessionToken,
+            },
+          ).timeout(const Duration(seconds: 10));
+
+          if (dbTradesResponse.statusCode == 200) {
+            final data = jsonDecode(dbTradesResponse.body);
+            final tradesData = data['trades'] as List? ?? [];
+
+            allTrades.addAll(tradesData.map((tRaw) {
+              final t = (tRaw as Map).cast<String, dynamic>();
+              final typeRaw = (t['type'] ?? t['order_type'] ?? t['direction'] ?? 'BUY')
+                  .toString()
+                  .toUpperCase();
+              final statusRaw =
+                  (t['status'] ?? (t['time_close'] != null ? 'closed' : 'open'))
+                      .toString()
+                      .toLowerCase();
+
+              TradeStatus status;
+              if (statusRaw == 'closed') {
+                status = TradeStatus.closed;
+              } else if (statusRaw == 'open') {
+                status = TradeStatus.open;
+              } else {
+                status = TradeStatus.pending;
+              }
+
+              return Trade(
+                id: (t['ticket'] ?? t['trade_id'] ?? t['id'] ?? DateTime.now().millisecondsSinceEpoch)
+                    .toString(),
+                symbol: (t['symbol'] ?? 'UNKNOWN').toString(),
+                type: typeRaw == 'SELL' ? TradeType.sell : TradeType.buy,
+                quantity: _asDouble(t['volume'] ?? t['quantity']),
+                entryPrice: _asDouble(t['openPrice'] ?? t['price'] ?? t['entryPrice']),
+                currentPrice: _asDouble(
+                  t['currentPrice'] ?? t['closePrice'] ?? t['openPrice'] ?? t['price']),
+                takeProfit: t['takeProfit'] != null ? _asDouble(t['takeProfit']) : null,
+                stopLoss: t['stopLoss'] != null ? _asDouble(t['stopLoss']) : null,
+                status: status,
+                openedAt: _parseBackendTime(
+                    t['time_open'] ?? t['openTime'] ?? t['entryTime'] ?? t['time']),
+                closedAt: status == TradeStatus.closed
+                    ? _parseBackendTime(t['time_close'] ?? t['closeTime'])
+                    : null,
+                profit: _asDouble(t['profit']),
+                profitPercentage: t['profitPercentage'] != null
+                    ? _asDouble(t['profitPercentage'])
+                    : null,
+              );
+            }));
+          }
+        } catch (e) {
+          print('Error fetching user database trades: $e');
+        }
+
+        // Fetch 2: Live open positions (user-scoped)
+        try {
+          final posResponse = await http.get(
+            Uri.parse('$_apiUrl/api/positions/detailed'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Session-Token': sessionToken,
             },
           ).timeout(const Duration(seconds: 10));
 
@@ -269,21 +356,28 @@ class TradingService extends ChangeNotifier {
                 takeProfit: null,
                 stopLoss: null,
                 status: TradeStatus.open, // MT5 positions are always open
-                openedAt: DateTime.parse(p['time'] ?? DateTime.now().toIso8601String()),
-                profit: ((p['profit'] ?? 0) as num).toDouble(),
-                profitPercentage: ((p['profitPercent'] ?? 0) as num).toDouble(),
+                openedAt: _parseBackendTime(p['openTime'] ?? p['time']),
+                profit: ((p['pnl'] ?? p['profit'] ?? 0) as num).toDouble(),
+                profitPercentage: ((p['pnlPercentage'] ?? p['profitPercent'] ?? 0) as num).toDouble(),
               )));
           }
         } catch (e) {
           print('Note: Live MT5 positions not available: $e');
         }
-        
-        _trades = allTrades;
+
+        // De-duplicate by ticket/id and keep recent first for the Trades screen.
+        final deduped = <String, Trade>{};
+        for (final trade in allTrades) {
+          deduped[trade.id] = trade;
+        }
+        final mergedTrades = deduped.values.toList();
+        mergedTrades.sort((a, b) => b.openedAt.compareTo(a.openedAt));
+        _trades = mergedTrades;
         _errorMessage = null;
       } catch (e) {
         print('Error fetching trades from API: $e');
-        _useApi = false;
-        _initializeMockData();
+        _errorMessage = 'Failed to fetch real trades: $e';
+        _trades = [];
       }
     } else {
       // Use mock data
@@ -300,14 +394,20 @@ class TradingService extends ChangeNotifier {
       try {
         final prefs = await SharedPreferences.getInstance();
         final sessionToken = prefs.getString('auth_token');
+        if (sessionToken == null || sessionToken.isEmpty) {
+          _errorMessage = 'Session token missing. Please login again.';
+          _accounts = [];
+          _isLoading = false;
+          notifyListeners();
+          return;
+        }
         
         // Use detailed endpoint to get all account metrics including profit
         final response = await http.get(
           Uri.parse('$_apiUrl/api/account/detailed'),
           headers: {
             'Content-Type': 'application/json',
-            if (sessionToken != null && sessionToken.isNotEmpty)
-              'X-Session-Token': sessionToken,
+            'X-Session-Token': sessionToken,
           },
         ).timeout(const Duration(seconds: 10));
 
@@ -332,11 +432,14 @@ class TradingService extends ChangeNotifier {
           ];
 
           _errorMessage = null;
+        } else {
+          _errorMessage = 'Failed to fetch account details (${response.statusCode})';
+          _accounts = [];
         }
       } catch (e) {
         print('Error fetching accounts from API: $e');
-        _useApi = false;
-        _initializeMockData();
+        _errorMessage = 'Failed to fetch real account details: $e';
+        _accounts = [];
       }
     } else {
       _initializeMockData();

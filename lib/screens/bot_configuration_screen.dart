@@ -2918,33 +2918,33 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // Commission Withdrawal Automation Button (auto-select XM Global)
+                  // Commission Withdrawal Automation Button (auto-select Exness)
                   ElevatedButton.icon(
                     onPressed: () async {
                       final amount = await _showAmountInputDialog(context,
                           title: 'Commission Withdrawal Amount');
                       if (amount != null) {
-                        // Auto-select XM Global account for withdrawal
-                        BrokerCredential? xmAccount;
+                        // Auto-select Exness account for withdrawal
+                        BrokerCredential? exnessAccount;
                         try {
-                          xmAccount = _brokerService.credentials.firstWhere(
-                            (cred) => cred.broker.toLowerCase().contains('xm'),
+                          exnessAccount = _brokerService.credentials.firstWhere(
+                            (cred) => cred.broker.toLowerCase().contains('exness'),
                           );
                         } catch (_) {
-                          xmAccount = null;
+                          exnessAccount = null;
                         }
-                        if (xmAccount == null) {
+                        if (exnessAccount == null) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                                 content: Text(
-                                    'No XM Global account found for withdrawal.')),
+                                    'No Exness account found for withdrawal.')),
                           );
                           return;
                         }
-                        // Trigger fund transfer to XM account
+                        // Trigger fund transfer to Exness account
                         final fromAccount =
                             _brokerService.activeCredential?.accountNumber;
-                        final toAccount = xmAccount.accountNumber;
+                        final toAccount = exnessAccount.accountNumber;
                         final fundSuccess = await _fundService.transferFunds(
                             fromAccount ?? '', toAccount, amount);
                         if (fundSuccess) {
@@ -2954,7 +2954,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                   content: Text(
-                                      'Commission withdrawal sent to XM Global account!')),
+                                      'Commission withdrawal sent to Exness account!')),
                             );
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -2968,13 +2968,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                                 content: Text(_fundService.errorMessage ??
-                                    'Fund transfer to IG/XM failed')),
+                                    'Fund transfer to broker account failed')),
                           );
                         }
                       }
                     },
                     icon: const Icon(Icons.attach_money),
-                    label: const Text('Automate Commission Withdrawal (IG/XM)'),
+                    label: const Text('Automate Commission Withdrawal (Exness)'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange,
                       padding: const EdgeInsets.symmetric(

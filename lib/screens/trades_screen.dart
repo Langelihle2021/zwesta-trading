@@ -597,6 +597,8 @@ class _TradesScreenState extends State<TradesScreen> {
           currentPrice: trade.currentPrice ?? trade.entryPrice,
           profit: trade.profit ?? 0,
           profitPercentage: trade.profitPercentage ?? 0,
+          openedAt: trade.openedAt,
+          closedAt: trade.closedAt,
           onTap: () {
             tradingService.selectTrade(trade);
             _showTradeDetailsDialog(context, trade, tradingService);

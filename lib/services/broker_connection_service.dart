@@ -12,19 +12,6 @@ import 'connection_analytics_service.dart';
 
 class BrokerConnectionService {
   static final Map<String, BrokerRequirements> _brokerRequirements = {
-    'XM': BrokerRequirements(
-      brokerName: 'XM',
-      minBalance: 50,
-      minLeverage: 1,
-      maxLeverage: 888,
-      minSpread: 0.6,
-      maxSpread: 2,
-      tradableAssets: ['Forex', 'Metals', 'Indices', 'Stocks'],
-      hasCommission: false,
-      commissionRate: 0,
-      supportsScalping: true,
-      supportsEA: true,
-    ),
     'Pepperstone': BrokerRequirements(
       brokerName: 'Pepperstone',
       minBalance: 200,
