@@ -5800,6 +5800,28 @@ def warm_trading_mode_credential(user_id: str, credential_id: str, mode: str):
         'error': None,
     }
 
+
+def get_user_trading_mode_value(user_id: str) -> str:
+    """Return the persisted user trading mode, defaulting to DEMO."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        ensure_user_preferences_table(cursor)
+        cursor.execute(
+            '''
+            SELECT trading_mode
+            FROM user_preferences
+            WHERE user_id = ?
+            ''',
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return (row['trading_mode'] if row and row['trading_mode'] else 'DEMO').upper()
+    except Exception as exc:
+        logger.warning(f"Could not read trading mode for user {user_id}: {exc}")
+        return 'DEMO'
+
 @app.route('/api/user/trading-mode', methods=['GET'])
 @require_api_key
 def get_trading_mode():
@@ -13143,6 +13165,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     logger.info(f"⏸️  Bot {bot_id}: {market_status} - will wait for next cycle")
                     logger.info(f"   ⏰ Next check in {trading_interval} seconds")
                     time.sleep(trading_interval)
+                    continue
+
+                current_user_mode = get_user_trading_mode_value(user_id).lower()
+                bot_mode = str(bot_config.get('mode') or ('live' if bot_credentials.get('is_live') else 'demo')).lower()
+                if bot_mode != current_user_mode:
+                    logger.info(
+                        f"⏸️ Bot {bot_id}: Idle because bot mode is {bot_mode.upper()} while user trading mode is {current_user_mode.upper()}"
+                    )
+                    time.sleep(min(trading_interval, 60))
                     continue
                 
                 # Detect broker type
