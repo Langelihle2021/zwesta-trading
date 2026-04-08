@@ -80,6 +80,20 @@ class TradingService extends ChangeNotifier {
   double get freeMargin => primaryAccount?.availableMargin ?? 0.0;
   double get accountProfit => primaryAccount?.profit ?? 0.0;
 
+  /// Currency code for the primary (first) account, e.g. 'USD', 'ZAR'
+  String get accountCurrency => primaryAccount?.currency ?? 'USD';
+
+  /// Currency symbol for display: '$' for USD, 'R' for ZAR, '£' for GBP, etc.
+  String get accountCurrencySymbol {
+    switch (accountCurrency.toUpperCase()) {
+      case 'ZAR': return 'R';
+      case 'GBP': return '£';
+      case 'EUR': return '€';
+      case 'USD':
+      default:    return r'$';
+    }
+  }
+
   Account? get primaryAccount => _accounts.isNotEmpty ? _accounts[0] : null;
 
   List<Trade> get activeTrades => _trades.where((t) => t.status == TradeStatus.open).toList();

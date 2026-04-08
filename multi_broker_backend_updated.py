@@ -2423,6 +2423,50 @@ class MT5Connection(BrokerConnection):
             
             logger.info(f"Attempting login to account {account}...")
             
+            # FAST PATH: If MT5 terminal is already running (initialized), switch accounts
+            # using mt5.login() — this takes ~1-2s vs mt5.initialize() which can block for 30s+.
+            # This is critical for single-terminal VPS mode where one terminal serves all accounts.
+            try:
+                _ver = self.mt5.version()  # Returns non-None when MT5 is already initialized
+                if _ver is not None:
+                    logger.info(f"  🔑 MT5 already running (v{_ver}) — using fast mt5.login() to switch to account {account}")
+                    login_ok = self.mt5.login(int(account), password=str(password), server=str(server))
+                    if login_ok:
+                        time.sleep(1)  # Brief stabilisation
+                        acct_check = self.mt5.account_info()
+                        if acct_check and acct_check.login == int(account):
+                            self.connected = True
+                            logger.info(f"✅ Fast-switched to MT5 account {account} ({getattr(acct_check, 'currency', 'USD')}) in single-terminal mode")
+                            with mt5_account_lock:
+                                mt5_current_account = int(account)
+                            self.get_account_info()
+                            try:
+                                if self.account_info:
+                                    with balance_cache_lock:
+                                        ck = get_balance_cache_key(broker_name, account)
+                                        bal = float(self.account_info.get('balance', 0))
+                                        balance_cache[ck] = {
+                                            'balance': bal,
+                                            'equity': float(self.account_info.get('equity', 0)),
+                                            'margin': float(self.account_info.get('margin', 0)),
+                                            'marginFree': float(self.account_info.get('marginFree', 0)),
+                                            'margin_level': float(self.account_info.get('margin_level', 0)),
+                                            'currency': self.account_info.get('currency', 'USD'),
+                                            'timestamp': time.time()
+                                        }
+                                        logger.info(f"  💾 [FAST-SWITCH CACHE] {ck} = {bal:.2f} {balance_cache[ck]['currency']}")
+                            except Exception as ce:
+                                logger.warning(f"  ⚠️  Failed to cache balance after fast-switch: {ce}")
+                            self._subscribe_symbols()
+                            return True
+                        else:
+                            logger.warning(f"  ⚠️ Fast login succeeded but account verification failed — falling back to initialize()")
+                    else:
+                        err = self.mt5.last_error()
+                        logger.warning(f"  ⚠️ Fast mt5.login() failed: {err} — falling back to initialize()")
+            except Exception as fe:
+                logger.debug(f"  (Fast-path mt5.login() not attempted: {fe})")
+            
             # Retry logic: balance checks get 1 attempt (fast fail), trading gets 3
             is_balance_check = self.credentials.get('is_balance_check', False)
             max_retries = 1 if is_balance_check else 3
@@ -6088,6 +6132,7 @@ def get_account_balances():
             'accounts': [],
             'totalBalance': 0,
             'totalEquity': 0,
+            'totalByCurrency': {},  # e.g. {'USD': 168199.26, 'ZAR': 180.00}
             'brokers': {},  # Grouped by broker: {Exness: {...}, XM: {...}, Binance: {...}}
         }
         
@@ -6214,7 +6259,10 @@ def get_account_balances():
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
                 
-                # Accumulate totals
+                # Accumulate totals per currency (do NOT mix ZAR into USD total)
+                _cur = account_entry.get('currency', 'USD').upper()
+                accounts_summary['totalByCurrency'].setdefault(_cur, 0.0)
+                accounts_summary['totalByCurrency'][_cur] += account_entry['balance']
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
             else:
@@ -6284,13 +6332,17 @@ def get_account_balances():
                     accounts_summary['brokers'][broker_name] = []
                 accounts_summary['brokers'][broker_name].append(account_entry)
                 
-                # Accumulate totals from cache (better than $0)
+                # Accumulate totals from cache per currency (do NOT mix ZAR into USD total)
+                _cur = account_entry.get('currency', 'USD').upper()
+                accounts_summary['totalByCurrency'].setdefault(_cur, 0.0)
+                accounts_summary['totalByCurrency'][_cur] += account_entry['balance']
                 accounts_summary['totalBalance'] += account_entry['balance']
                 accounts_summary['totalEquity'] += account_entry['equity']
             
             accounts_summary['accounts'].append(account_entry)
         
-        logger.info(f"✅ Fetched account balances for user {user_id}: {len(accounts_summary['accounts'])} accounts, Total: ${accounts_summary['totalBalance']:.2f}")
+        _by_cur_str = ', '.join(f"{c}: {v:.2f}" for c, v in accounts_summary['totalByCurrency'].items())
+        logger.info(f"✅ Fetched account balances for user {user_id}: {len(accounts_summary['accounts'])} accounts | {_by_cur_str}")
         
         return jsonify(accounts_summary)
     
@@ -7113,7 +7165,8 @@ def get_trades_public():
                 trades_list.extend(bot['tradeHistory'][-100:])  # Last 100 trades per bot
         
         # Sort by recent first and limit to 1000 total
-        trades_list = sorted(trades_list, key=lambda x: x.get('time', ''), reverse=True)[:1000]
+        # Normalize sort key to str to prevent TypeError when mixing int and str timestamps
+        trades_list = sorted(trades_list, key=lambda x: str(x.get('time', '')), reverse=True)[:1000]
         
         logger.info(f"Returning {len(trades_list)} public trades from active bots")
         return jsonify({
@@ -7188,7 +7241,7 @@ def get_unified_trades():
                     trades_list.append(trade)
         
         # Sort by time (most recent first)
-        trades_list = sorted(trades_list, key=lambda x: x.get('time', ''), reverse=True)[:500]
+        trades_list = sorted(trades_list, key=lambda x: str(x.get('time', '')), reverse=True)[:500]
         
         logger.info(f"✅ Returning {len(trades_list)} unified trades for user {user_id}")
         
@@ -11219,6 +11272,7 @@ def test_broker_connection():
             actual_margin_used = 0.00
             actual_margin_level = 0.00
             actual_profit = 0.00
+            actual_currency = 'USD'  # Default; overwritten below from MT5 account_info().currency
             got_real_balance = False
             
             # FIRST: Check global balance_cache (populated on startup with hardcoded demo balances)
@@ -11229,8 +11283,9 @@ def test_broker_connection():
                     if cache_key in balance_cache:
                         cached_info = balance_cache[cache_key]
                         actual_balance = cached_info.get('balance', actual_balance)
+                        actual_currency = cached_info.get('currency', actual_currency)
                         got_real_balance = True
-                        logger.info(f"💰 Got balance from global cache: {cache_key} = ${actual_balance}")
+                        logger.info(f"💰 Got balance from global cache: {cache_key} = {actual_balance:.2f} {actual_currency}")
             except Exception as e:
                 logger.warning(f"Could not fetch from global cache: {e}")
             
@@ -11252,8 +11307,9 @@ def test_broker_connection():
                             acct_info = cached_conn.account_info or cached_conn.get_account_info()
                             if acct_info and str(acct_info.get('accountNumber', '')) == str(account):
                                 actual_balance = acct_info.get('balance', actual_balance)
+                                actual_currency = acct_info.get('currency', actual_currency)
                                 got_real_balance = True
-                                logger.info(f"💰 Got real balance from cached {cached_connection_id}: ${actual_balance}")
+                                logger.info(f"💰 Got real balance from cached {cached_connection_id}: {actual_balance:.2f} {actual_currency}")
                 except Exception as e:
                     logger.warning(f"Could not fetch cached balance: {e}")
             
@@ -11261,41 +11317,75 @@ def test_broker_connection():
             if not got_real_balance:
                 try:
                     import MetaTrader5 as mt5_mod
-                    lock_acquired = mt5_connection_lock.acquire(timeout=2.0)  # Short timeout for balance check
-                    if lock_acquired:
-                        try:
-                            terminal_path = find_mt5_terminal_path(broker, is_live=is_live)
-                            init_ok = False
-                            if terminal_path:
-                                init_ok = mt5_mod.initialize(
-                                    path=terminal_path,
-                                    login=int(account),
-                                    password=str(password),
-                                    server=str(server),
-                                )
-                            else:
-                                init_ok = mt5_mod.initialize(login=int(account), password=str(password), server=str(server))
+                    # Before re-initializing MT5: check what account it is currently on.
+                    # Calling mt5_mod.initialize() while MT5 is already connected to a DIFFERENT account
+                    # blocks synchronously for 1-2+ minutes and disrupts the running bot session.
+                    # Strategy:
+                    #   1) Already on target account → read balance directly (no lock needed)
+                    #   2) On a different account    → skip re-init; credential is saved; balance
+                    #                                   will be refreshed by the bot trading loop
+                    #   3) MT5 not connected         → proceed with guarded quick-login as before
+                    try:
+                        _current_info = mt5_mod.account_info()
+                    except Exception:
+                        _current_info = None
 
-                            login_ok = init_ok
-                            if login_ok:
-                                info = mt5_mod.account_info()
-                                if info:
-                                    actual_balance = info.balance
-                                    actual_equity = getattr(info, 'equity', actual_balance)
-                                    actual_margin_free = getattr(info, 'margin_free', 0)
-                                    actual_margin_used = getattr(info, 'margin', 0)
-                                    actual_margin_level = getattr(info, 'margin_level', 0)
-                                    actual_profit = getattr(info, 'profit', 0)
-                                    got_real_balance = True
-                                    logger.info(f"💰 Got real balance via quick MT5 login: ${actual_balance} | Equity: ${actual_equity} | Free Margin: ${actual_margin_free} | P/L: ${actual_profit}")
-                            else:
-                                err = mt5_mod.last_error()
-                                logger.warning(f"⚠️ Quick MT5 login failed: {err} - using default balance")
-                            mt5_mod.shutdown()
-                        finally:
-                            mt5_connection_lock.release()
+                    if _current_info is not None and str(_current_info.login) == str(account):
+                        # MT5 is already on this exact account – read balance without re-init
+                        actual_balance = _current_info.balance
+                        actual_equity = getattr(_current_info, 'equity', actual_balance)
+                        actual_margin_free = getattr(_current_info, 'margin_free', 0)
+                        actual_margin_used = getattr(_current_info, 'margin', 0)
+                        actual_margin_level = getattr(_current_info, 'margin_level', 0)
+                        actual_profit = getattr(_current_info, 'profit', 0)
+                        actual_currency = getattr(_current_info, 'currency', 'USD')
+                        got_real_balance = True
+                        logger.info(f"💰 Got real balance from active MT5 session (account {account}): {actual_balance:.2f} {actual_currency}")
+                    elif _current_info is not None:
+                        # MT5 is on a different account – do NOT call initialize(); it would block
+                        logger.warning(
+                            f"⚠️ MT5 already connected to account {_current_info.login} (target: {account}) "
+                            f"- skipping quick login to avoid 1-2 min blocking hang. "
+                            f"Credential saved; balance will refresh once a bot connects to this account."
+                        )
                     else:
-                        logger.warning(f"⚠️ Could not acquire MT5 lock for balance check - using default")
+                        # MT5 not connected – safe to attempt quick login under lock
+                        lock_acquired = mt5_connection_lock.acquire(timeout=2.0)  # Short timeout for balance check
+                        if lock_acquired:
+                            try:
+                                terminal_path = find_mt5_terminal_path(broker, is_live=is_live)
+                                init_ok = False
+                                if terminal_path:
+                                    init_ok = mt5_mod.initialize(
+                                        path=terminal_path,
+                                        login=int(account),
+                                        password=str(password),
+                                        server=str(server),
+                                    )
+                                else:
+                                    init_ok = mt5_mod.initialize(login=int(account), password=str(password), server=str(server))
+
+                                login_ok = init_ok
+                                if login_ok:
+                                    info = mt5_mod.account_info()
+                                    if info:
+                                        actual_balance = info.balance
+                                        actual_equity = getattr(info, 'equity', actual_balance)
+                                        actual_margin_free = getattr(info, 'margin_free', 0)
+                                        actual_margin_used = getattr(info, 'margin', 0)
+                                        actual_margin_level = getattr(info, 'margin_level', 0)
+                                        actual_profit = getattr(info, 'profit', 0)
+                                        actual_currency = getattr(info, 'currency', 'USD')
+                                        got_real_balance = True
+                                        logger.info(f"💰 Got real balance via quick MT5 login: {actual_balance:.2f} {actual_currency} | Equity: {actual_equity:.2f} | Free Margin: {actual_margin_free:.2f} | P/L: {actual_profit:.2f}")
+                                else:
+                                    err = mt5_mod.last_error()
+                                    logger.warning(f"⚠️ Quick MT5 login failed: {err} - using default balance")
+                                mt5_mod.shutdown()
+                            finally:
+                                mt5_connection_lock.release()
+                        else:
+                            logger.warning(f"⚠️ Could not acquire MT5 lock for balance check - using default")
                 except Exception as e:
                     logger.warning(f"Could not fetch balance via quick login: {e} - using default")
             
@@ -11317,7 +11407,8 @@ def test_broker_connection():
                     UPDATE broker_credentials
                     SET password = ?, server = ?, is_live = ?, is_active = 1, updated_at = ?,
                         cached_balance = ?, cached_equity = ?, cached_margin_free = ?, 
-                        cached_margin = ?, cached_margin_level = ?, cached_profit = ?
+                        cached_margin = ?, cached_margin_level = ?, cached_profit = ?,
+                        account_currency = ?
                     WHERE credential_id = ?
                 ''', (password, server, int(is_live), datetime.now().isoformat(),
                       actual_balance if got_real_balance else None,
@@ -11326,16 +11417,17 @@ def test_broker_connection():
                       actual_margin_used if got_real_balance else None,
                       actual_margin_level if got_real_balance else None,
                       actual_profit if got_real_balance else None,
+                      actual_currency,
                       credential_id))
-                logger.info(f"ℹ️  Updated broker credential: {broker} | Account: {account}")
+                logger.info(f"ℹ️  Updated broker credential: {broker} | Account: {account} | Currency: {actual_currency}")
             else:
                 credential_id = str(uuid.uuid4())
                 cursor.execute('''
                     INSERT INTO broker_credentials 
                     (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, created_at, updated_at,
-                     cached_balance, cached_equity, cached_margin_free, cached_margin, cached_margin_level, cached_profit)
+                     cached_balance, cached_equity, cached_margin_free, cached_margin, cached_margin_level, cached_profit, account_currency)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?,
-                            ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?, ?, ?)
                 ''', (credential_id, user_id, broker, account, password, server, int(is_live), 
                       datetime.now().isoformat(), datetime.now().isoformat(),
                       actual_balance if got_real_balance else None,
@@ -11343,8 +11435,9 @@ def test_broker_connection():
                       actual_margin_free if got_real_balance else None,
                       actual_margin_used if got_real_balance else None,
                       actual_margin_level if got_real_balance else None,
-                      actual_profit if got_real_balance else None))
-                logger.info(f"✅ Created broker credential: {broker} | Account: {account}")
+                      actual_profit if got_real_balance else None,
+                      actual_currency))
+                logger.info(f"✅ Created broker credential: {broker} | Account: {account} | Currency: {actual_currency}")
             
             conn.commit()
 
@@ -11403,6 +11496,7 @@ def test_broker_connection():
                 'margin': round(actual_margin_used, 2) if got_real_balance else 0,
                 'margin_level': round(actual_margin_level, 2) if got_real_balance else 0,
                 'total_pl': round(actual_profit, 2) if got_real_balance else 0,
+                'currency': actual_currency,
                 'is_live': is_live,
                 'status': 'CONNECTED',
                 'connection_status': connection_status,

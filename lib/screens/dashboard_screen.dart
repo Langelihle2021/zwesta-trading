@@ -1230,6 +1230,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final mode = account['mode']?.toString() ?? '';
             final connected = account['connected'] == true;
             final error = account['error']?.toString();
+            final acctCurrency = (account['currency'] as String? ?? 'USD').toUpperCase();
+            final acctSymbol = acctCurrency == 'ZAR' ? 'R' : (acctCurrency == 'GBP' ? '£' : r'$');
 
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
@@ -1272,10 +1274,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text('\$${balance.toStringAsFixed(2)}',
+                        Text('$acctSymbol${balance.toStringAsFixed(2)} $acctCurrency',
                           style: GoogleFonts.poppins(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
                         ),
-                        Text('Equity: \$${equity.toStringAsFixed(2)}',
+                        Text('Equity: $acctSymbol${equity.toStringAsFixed(2)}',
                           style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10)),
                       ],
                     ),

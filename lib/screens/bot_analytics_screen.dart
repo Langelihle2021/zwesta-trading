@@ -1199,6 +1199,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     final available = (_igBalance!['available'] ?? 0).toDouble();
     final pnl = (_igBalance!['profitLoss'] ?? 0).toDouble();
     final currency = _igBalance!['currency'] ?? 'USD';
+    final igSym = currency == 'ZAR' ? 'R' : (currency == 'GBP' ? '£' : (currency == 'EUR' ? '€' : r'$'));
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1216,10 +1217,10 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           Row(
             children: [
               _balanceStat(
-                  'Balance', '\$${balance.toStringAsFixed(2)}', Colors.white),
-              _balanceStat('Available', '\$${available.toStringAsFixed(2)}',
+                  'Balance', '$igSym${balance.toStringAsFixed(2)}', Colors.white),
+              _balanceStat('Available', '$igSym${available.toStringAsFixed(2)}',
                   Colors.blue),
-              _balanceStat('P&L', '\$${pnl.toStringAsFixed(2)}',
+              _balanceStat('P&L', '$igSym${pnl.toStringAsFixed(2)}',
                   pnl >= 0 ? Colors.green : Colors.red),
             ],
           ),
@@ -1817,6 +1818,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   Widget _buildBalanceCard() {
     final balance = (_botData['accountBalance'] ?? 0).toDouble();
     final equity = (_botData['accountEquity'] ?? 0).toDouble();
+    final acctCur = ((_botData['accountCurrency'] ?? _botData['currency'] ?? 'USD') as String).toUpperCase();
+    final acctSym = acctCur == 'ZAR' ? 'R' : (acctCur == 'GBP' ? '£' : (acctCur == 'EUR' ? '€' : r'$'));
 
     if (balance <= 0 && equity <= 0) {
       return const SizedBox.shrink();
@@ -1868,7 +1871,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       style: TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 4),
                   Text(
-                    '\$${balance.toStringAsFixed(2)}',
+                    '$acctSym${balance.toStringAsFixed(2)} $acctCur',
                     style: const TextStyle(
                         color: Colors.cyan,
                         fontSize: 22,
@@ -1883,7 +1886,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       style: TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 4),
                   Text(
-                    '\$${equity.toStringAsFixed(2)}',
+                    '$acctSym${equity.toStringAsFixed(2)}',
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,

@@ -46,6 +46,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   bool _isLiveMode = false;  // DEMO by default
   DateTime? _lastConnectionTime;
   double _accountBalance = 0;
+  String _accountCurrency = 'USD';  // Actual currency of the connected account (USD, ZAR, etc.)
   List<BrokerAccount> _savedAccounts = [];
   BrokerAccount? _activeAccount;
 
@@ -120,6 +121,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _serverController.text = brokerServers[_selectedBroker] ?? '';
       _isConnected = prefs.getBool('broker_connected') ?? false;
       _accountBalance = prefs.getDouble('account_balance') ?? 0;
+      _accountCurrency = prefs.getString('account_currency') ?? 'USD';
       _autoReconnectEnabled = prefs.getBool('auto_reconnect_enabled') ?? false;
       _isLiveMode = prefs.getBool('is_live_mode') ?? false;  // Load saved mode
       final connectionTimeStr = prefs.getString('connection_time');
@@ -378,10 +380,12 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       if (!mounted) return;
 
       if (result['success'] == true) {
-        // Backend returns: credential_id, broker, account_number, balance, status, timestamp
+        // Backend returns: credential_id, broker, account_number, balance, currency, status, timestamp
         final credentialId = result['credential_id'] as String?;
         final balance = (result['balance'] ?? 10000.0).toDouble();
         final isDemo = !(result['is_live'] == true);
+        final currency = (result['currency'] as String? ?? 'USD').toUpperCase();
+        final currencySymbol = currency == 'ZAR' ? 'R' : (currency == 'GBP' ? '£' : (currency == 'EUR' ? '€' : r'$'));
         
         // Create BrokerAccount from backend response
         final account = BrokerAccount(
@@ -405,6 +409,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
           _activeAccount = account;
           _lastConnectionTime = DateTime.now();
           _accountBalance = balance;
+          _accountCurrency = currency;
         });
 
         final prefs = await SharedPreferences.getInstance();
@@ -412,6 +417,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         await prefs.setString('connection_time', _lastConnectionTime!.toIso8601String());
         await prefs.setDouble('account_balance', _accountBalance);
         await prefs.setBool('is_live_mode', _isLiveMode);
+        await prefs.setString('account_currency', currency);
         if (credentialId != null) {
           await prefs.setString('credential_id', credentialId);
           await prefs.setString('broker_name', _selectedBroker);
@@ -429,7 +435,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ Connected! Balance: \$${balance.toStringAsFixed(2)}'),
+            content: Text('✓ Connected! Balance: $currencySymbol${balance.toStringAsFixed(2)} $currency'),
             backgroundColor: AppColors.successColor,
             duration: const Duration(seconds: 3),
           ),
@@ -1061,7 +1067,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                         const SizedBox(height: 8),
                         _buildStatusInfoRow('Connection', _lastConnectionTime?.toString().split('.')[0] ?? 'N/A'),
                         const SizedBox(height: 8),
-                        _buildStatusInfoRow('Balance', '\$${_accountBalance.toStringAsFixed(2)}'),
+                        _buildStatusInfoRow('Balance', '${_accountCurrency == 'ZAR' ? 'R' : (_accountCurrency == 'GBP' ? '£' : r'$')}${_accountBalance.toStringAsFixed(2)} $_accountCurrency'),
                       ],
                     ),
                   ),

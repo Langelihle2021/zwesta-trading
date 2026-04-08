@@ -515,7 +515,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      'Balance: \$${account.balance.toStringAsFixed(2)}',
+                      'Balance: ${account.currency == 'ZAR' ? 'R' : r'$'}${account.balance.toStringAsFixed(2)} ${account.currency}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -554,11 +554,11 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                         _buildDetailRow('Leverage', account.leverage),
                         _buildDetailRow(
                           'Used Margin',
-                          '\$${account.usedMargin.toStringAsFixed(2)}',
+                          '${account.currency == 'ZAR' ? 'R' : r'$'}${account.usedMargin.toStringAsFixed(2)}',
                         ),
                         _buildDetailRow(
                           'Available Margin',
-                          '\$${account.availableMargin.toStringAsFixed(2)}',
+                          '${account.currency == 'ZAR' ? 'R' : r'$'}${account.availableMargin.toStringAsFixed(2)}',
                         ),
                         _buildDetailRow(
                           'Margin Usage',
