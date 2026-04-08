@@ -344,8 +344,9 @@ class TradingService extends ChangeNotifier {
 
         // Fetch 2: Live open positions (user-scoped)
         try {
+          final tradingMode = (prefs.getString('trading_mode') ?? 'DEMO').toUpperCase();
           final posResponse = await http.get(
-            Uri.parse('$_apiUrl/api/positions/detailed'),
+            Uri.parse('$_apiUrl/api/positions/detailed?mode=$tradingMode'),
             headers: {
               'Content-Type': 'application/json',
               'X-Session-Token': sessionToken,
@@ -408,6 +409,7 @@ class TradingService extends ChangeNotifier {
       try {
         final prefs = await SharedPreferences.getInstance();
         final sessionToken = prefs.getString('auth_token');
+        final tradingMode = (prefs.getString('trading_mode') ?? 'DEMO').toUpperCase();
         if (sessionToken == null || sessionToken.isEmpty) {
           _errorMessage = 'Session token missing. Please login again.';
           _accounts = [];
@@ -418,7 +420,7 @@ class TradingService extends ChangeNotifier {
         
         // Use detailed endpoint to get all account metrics including profit
         final response = await http.get(
-          Uri.parse('$_apiUrl/api/account/detailed'),
+          Uri.parse('$_apiUrl/api/account/detailed?mode=$tradingMode'),
           headers: {
             'Content-Type': 'application/json',
             'X-Session-Token': sessionToken,

@@ -7630,18 +7630,23 @@ def get_account_detailed():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        preferred_mode = get_user_trading_mode_value(user_id)
+        requested_mode = str(request.args.get('mode') or '').strip().upper()
+        preferred_mode = requested_mode if requested_mode in ['LIVE', 'DEMO'] else get_user_trading_mode_value(user_id)
         desired_live = 1 if preferred_mode == 'LIVE' else 0
         
         cursor.execute('''
-            SELECT credential_id, broker_name, account_number, password, server, is_live
+            SELECT credential_id, broker_name, account_number, password, server, is_live,
+                   cached_balance, cached_equity, cached_margin_free, cached_margin,
+                   cached_margin_level, cached_profit, account_currency, last_update, updated_at
             FROM broker_credentials 
-            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness' AND is_live = ?
-            ORDER BY credential_id
-            LIMIT 2
+            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY CASE WHEN is_live = ? THEN 0 ELSE 1 END,
+                     COALESCE(updated_at, last_update, '') DESC,
+                     credential_id DESC
+            LIMIT 5
         ''', (user_id, desired_live))
         
-        creds = cursor.fetchall()
+        creds = [dict(row) for row in cursor.fetchall()]
         conn.close()
         
         if not creds:
@@ -7649,20 +7654,26 @@ def get_account_detailed():
                 'success': False,
                 'error': f'No Exness credentials found for current {preferred_mode} mode'
             }), 404
+
+        matching_mode_creds = [cred for cred in creds if int(cred.get('is_live') or 0) == desired_live]
+        mode_fallback_used = not matching_mode_creds
+        ordered_creds = matching_mode_creds or creds
         
         # CRITICAL FIX: Read from existing MT5 session instead of re-initializing
         import MetaTrader5 as mt5
         account_info = None
+        selected_credential = ordered_creds[0]
         
         # First, try to use the currently logged-in MT5 session (where bots are actually trading)
         try:
             existing = mt5.account_info()
             if existing:
                 # Check if ANY of the user's accounts matches the currently logged-in account
-                for cred in creds:
-                    if existing.login == int(cred[2]):
+                for cred in ordered_creds:
+                    if existing.login == int(cred['account_number']):
+                        selected_credential = cred
                         account_info = {
-                            'accountNumber': cred[2],
+                            'accountNumber': cred['account_number'],
                             'balance': existing.balance,
                             'equity': existing.equity,
                             'marginFree': existing.margin_free,
@@ -7675,8 +7686,10 @@ def get_account_detailed():
                             'name': existing.name,
                             'server': existing.server,
                             'trade_mode': existing.trade_mode,
+                            'mode': 'Live' if cred['is_live'] else 'Demo',
+                            'dataSource': 'live',
                         }
-                        persist_account_snapshot('Exness', cred[2], account_info, credential_id=cred[0], user_id=user_id)
+                        persist_account_snapshot('Exness', cred['account_number'], account_info, credential_id=cred['credential_id'], user_id=user_id)
                         logger.info(f"✅ Account detailed: Read from existing MT5 session for {existing.login}")
                         break
         except Exception as e:
@@ -7684,39 +7697,86 @@ def get_account_detailed():
         
         # If existing session doesn't match any credential, try connecting to each (demo first)
         if not account_info:
-            for cred in creds:
+            for cred in ordered_creds:
                 try:
-                    logger.info(f"Attempting to connect to Exness account {cred[2]} (is_live={cred[5]})")
+                    logger.info(f"Attempting to connect to Exness account {cred['account_number']} (is_live={cred['is_live']})")
                     mt5_conn = MT5Connection({
-                        'account': int(cred[2]),
-                        'password': cred[3],
-                        'server': cred[4],
+                        'account': int(cred['account_number']),
+                        'password': cred['password'],
+                        'server': cred['server'],
                         'broker': 'Exness',
-                        'is_live': bool(cred[5]),
+                        'is_live': bool(cred['is_live']),
+                        'lock_timeout': 8,
                     })
                     if mt5_conn.connect():
+                        selected_credential = cred
                         account_info = mt5_conn.get_account_info()
                         if isinstance(account_info, dict):
-                            persist_account_snapshot('Exness', cred[2], account_info, credential_id=cred[0], user_id=user_id)
+                            account_info['mode'] = 'Live' if cred['is_live'] else 'Demo'
+                            account_info['dataSource'] = 'live'
+                            persist_account_snapshot('Exness', cred['account_number'], account_info, credential_id=cred['credential_id'], user_id=user_id)
                         mt5_conn.disconnect()
-                        logger.info(f"✅ Successfully connected to account {cred[2]}")
+                        logger.info(f"✅ Successfully connected to account {cred['account_number']}")
                         break
                     else:
-                        logger.warning(f"Failed to connect to account {cred[2]}")
+                        logger.warning(f"Failed to connect to account {cred['account_number']}")
                 except Exception as e:
-                    logger.warning(f"Exception connecting to account {cred[2]}: {e}")
+                    logger.warning(f"Exception connecting to account {cred['account_number']}: {e}")
+
+        if not account_info:
+            for cred in ordered_creds:
+                cached_balance = float(cred.get('cached_balance') or 0)
+                cached_equity = float(cred.get('cached_equity') or cached_balance)
+                cached_margin_free = float(cred.get('cached_margin_free') or 0)
+                cached_margin = float(cred.get('cached_margin') or 0)
+                cached_margin_level = float(cred.get('cached_margin_level') or 0)
+                cached_profit = float(cred.get('cached_profit') or 0)
+                account_currency = str(cred.get('account_currency') or 'USD').upper()
+
+                if any([
+                    cached_balance,
+                    cached_equity,
+                    cached_margin_free,
+                    cached_margin,
+                    cached_margin_level,
+                    cached_profit,
+                ]):
+                    selected_credential = cred
+                    account_info = {
+                        'accountNumber': cred['account_number'],
+                        'balance': cached_balance,
+                        'equity': cached_equity,
+                        'marginFree': cached_margin_free,
+                        'margin': cached_margin,
+                        'margin_level': cached_margin_level,
+                        'profit': cached_profit,
+                        'currency': account_currency,
+                        'leverage': None,
+                        'broker': 'Exness',
+                        'name': None,
+                        'server': cred.get('server'),
+                        'trade_mode': None,
+                        'mode': 'Live' if cred['is_live'] else 'Demo',
+                        'dataSource': 'cache',
+                        'warning': 'Showing last cached account snapshot while MT5 is attached to a different account or still reconnecting.',
+                    }
+                    logger.info(f"ℹ️ Account detailed: Using cached snapshot for {cred['account_number']} ({account_currency})")
+                    break
         
         if account_info:
             return jsonify({
                 'success': True,
                 'account': account_info,
+                'modeRequested': preferred_mode,
+                'modeReturned': account_info.get('mode'),
+                'modeFallbackUsed': mode_fallback_used,
+                'credential_id': selected_credential.get('credential_id') if isinstance(selected_credential, dict) else None,
                 'lastUpdate': datetime.utcnow().isoformat(),
             })
         else:
-            # Return error that allows Flutter to use cached balance instead of mock data
             return jsonify({
                 'success': False,
-                'error': 'Could not connect to Exness - MT5 terminal may not be ready'
+                'error': 'Could not connect to Exness and no cached account snapshot is available yet'
             }), 503
             
     except Exception as e:
@@ -7736,14 +7796,15 @@ def get_positions_detailed():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        preferred_mode = get_user_trading_mode_value(user_id)
+        requested_mode = str(request.args.get('mode') or '').strip().upper()
+        preferred_mode = requested_mode if requested_mode in ['LIVE', 'DEMO'] else get_user_trading_mode_value(user_id)
         desired_live = 1 if preferred_mode == 'LIVE' else 0
         
         cursor.execute('''
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
-            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness' AND is_live = ?
-            ORDER BY credential_id
+            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY CASE WHEN is_live = ? THEN 0 ELSE 1 END, credential_id DESC
             LIMIT 1
         ''', (user_id, desired_live))
         
