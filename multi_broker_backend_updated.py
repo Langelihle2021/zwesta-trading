@@ -1575,10 +1575,10 @@ def init_database():
             config_id TEXT PRIMARY KEY,
             developer_id TEXT DEFAULT 'developer',
             developer_direct_rate REAL DEFAULT 0.25,
-            developer_referral_rate REAL DEFAULT 0.20,
+            developer_referral_rate REAL DEFAULT 0.25,
             recruiter_rate REAL DEFAULT 0.05,
             ig_commission_enabled BOOLEAN DEFAULT 1,
-            ig_developer_rate REAL DEFAULT 0.20,
+            ig_developer_rate REAL DEFAULT 0.25,
             ig_recruiter_rate REAL DEFAULT 0.05,
             multi_tier_enabled BOOLEAN DEFAULT 0,
             tier2_rate REAL DEFAULT 0.02,
@@ -1595,7 +1595,7 @@ def init_database():
             (config_id, developer_id, developer_direct_rate, developer_referral_rate,
              recruiter_rate, ig_commission_enabled, ig_developer_rate, ig_recruiter_rate,
              multi_tier_enabled, tier2_rate, updated_at)
-            VALUES ('default', 'developer', 0.25, 0.20, 0.05, 1, 0.20, 0.05, 0, 0.02, ?)
+            VALUES ('default', 'developer', 0.25, 0.25, 0.05, 1, 0.25, 0.05, 0, 0.02, ?)
         ''', (datetime.now().isoformat(),))
         logger.info("✅ Seeded default commission config")
 
@@ -12133,19 +12133,44 @@ def _get_commission_config(cursor):
     cursor.execute('SELECT * FROM commission_config WHERE config_id = ?', ('default',))
     row = cursor.fetchone()
     if row:
-        return dict(row)
+        cfg = dict(row)
+        direct_rate = float(cfg.get('developer_direct_rate', 0.25) or 0.25)
+        cfg['developer_direct_rate'] = direct_rate
+        cfg['developer_referral_rate'] = max(float(cfg.get('developer_referral_rate', direct_rate) or direct_rate), direct_rate)
+        cfg['ig_developer_rate'] = max(float(cfg.get('ig_developer_rate', direct_rate) or direct_rate), direct_rate)
+        cfg['recruiter_rate'] = float(cfg.get('recruiter_rate', 0.05) or 0.05)
+        cfg['ig_recruiter_rate'] = float(cfg.get('ig_recruiter_rate', 0.05) or 0.05)
+        cfg['tier2_rate'] = float(cfg.get('tier2_rate', 0.02) or 0.02)
+        return cfg
     # Fallback defaults
     return {
         'developer_id': 'developer',
         'developer_direct_rate': 0.25,
-        'developer_referral_rate': 0.20,
+        'developer_referral_rate': 0.25,
         'recruiter_rate': 0.05,
         'ig_commission_enabled': 1,
-        'ig_developer_rate': 0.20,
+        'ig_developer_rate': 0.25,
         'ig_recruiter_rate': 0.05,
         'multi_tier_enabled': 0,
         'tier2_rate': 0.02,
     }
+
+
+def _insert_commission_record(cursor, earner_id: str, client_id: str, bot_id: str, profit_amount: float, commission_rate: float, commission_amount: float, now: str, entry_type: str):
+    commission_id = str(uuid.uuid4())
+    cursor.execute('''
+        INSERT INTO commissions
+        (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, now))
+    cursor.execute('''
+        INSERT INTO commission_ledger
+        (entry_id, commission_id, user_id, source_user_id, type, amount, payout_status, bot_id, trading_profit, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+    ''', (str(uuid.uuid4()), commission_id, earner_id, client_id, entry_type, commission_amount, bot_id, profit_amount, now))
+    cursor.execute('''
+        UPDATE users SET total_commission = COALESCE(total_commission, 0) + ? WHERE user_id = ?
+    ''', (commission_amount, earner_id))
 
 
 def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float, source: str = 'MT5'):
@@ -12170,12 +12195,12 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
                 conn.close()
                 logger.info(f"IG commission disabled — skipping for profit ${profit_amount:.2f}")
                 return
-            DEV_REFERRAL_RATE = float(cfg.get('ig_developer_rate', 0.20))
+            DEV_REFERRAL_RATE = float(cfg.get('ig_developer_rate', 0.25))
             RECRUITER_RATE = float(cfg.get('ig_recruiter_rate', 0.05))
-            DEV_DIRECT_RATE = DEV_REFERRAL_RATE + RECRUITER_RATE
+            DEV_DIRECT_RATE = float(cfg.get('developer_direct_rate', 0.25))
         else:
             DEV_DIRECT_RATE = float(cfg.get('developer_direct_rate', 0.25))
-            DEV_REFERRAL_RATE = float(cfg.get('developer_referral_rate', 0.20))
+            DEV_REFERRAL_RATE = float(cfg.get('developer_referral_rate', 0.25))
             RECRUITER_RATE = float(cfg.get('recruiter_rate', 0.05))
 
         MULTI_TIER = bool(cfg.get('multi_tier_enabled', 0))
@@ -12193,23 +12218,13 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
         now = datetime.now().isoformat()
 
         if has_referrer:
-            # Developer portion (reduced rate)
+            # Developer always earns the full platform rate even when a recruiter exists.
             developer_commission = profit_amount * DEV_REFERRAL_RATE
-            cursor.execute('''
-                INSERT INTO commissions
-                (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (str(uuid.uuid4()), DEVELOPER_ID, user_id, bot_id,
-                  profit_amount, DEV_REFERRAL_RATE, developer_commission, now))
+            _insert_commission_record(cursor, DEVELOPER_ID, user_id, bot_id, profit_amount, DEV_REFERRAL_RATE, developer_commission, now, 'profit_share')
 
             # Recruiter portion
             recruiter_commission = profit_amount * RECRUITER_RATE
-            cursor.execute('''
-                INSERT INTO commissions
-                (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (str(uuid.uuid4()), referrer_id, user_id, bot_id,
-                  profit_amount, RECRUITER_RATE, recruiter_commission, now))
+            _insert_commission_record(cursor, referrer_id, user_id, bot_id, profit_amount, RECRUITER_RATE, recruiter_commission, now, 'referral')
 
             logger.info(
                 f"💰 [{source}] Commission split: Developer gets ${developer_commission:.2f} ({DEV_REFERRAL_RATE*100:.0f}%), "
@@ -12226,22 +12241,12 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
                 if tier2_row:
                     tier2_id = tier2_row[0]
                     tier2_commission = profit_amount * TIER2_RATE
-                    cursor.execute('''
-                        INSERT INTO commissions
-                        (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (str(uuid.uuid4()), tier2_id, user_id, bot_id,
-                          profit_amount, TIER2_RATE, tier2_commission, now))
+                    _insert_commission_record(cursor, tier2_id, user_id, bot_id, profit_amount, TIER2_RATE, tier2_commission, now, 'affiliate')
                     logger.info(f"💰 [{source}] Tier-2: {tier2_id} gets ${tier2_commission:.2f} ({TIER2_RATE*100:.0f}%)")
         else:
             # Full developer rate (no recruiter)
             developer_commission = profit_amount * DEV_DIRECT_RATE
-            cursor.execute('''
-                INSERT INTO commissions
-                (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (str(uuid.uuid4()), DEVELOPER_ID, user_id, bot_id,
-                  profit_amount, DEV_DIRECT_RATE, developer_commission, now))
+            _insert_commission_record(cursor, DEVELOPER_ID, user_id, bot_id, profit_amount, DEV_DIRECT_RATE, developer_commission, now, 'profit_share')
             logger.info(f"💰 [{source}] Commission: Developer gets ${developer_commission:.2f} ({DEV_DIRECT_RATE*100:.0f}%) from ${profit_amount:.2f} [Direct signup]")
 
         conn.commit()
@@ -17657,12 +17662,12 @@ def preview_commission_split():
         conn.close()
 
         if source == 'IG':
-            dev_rate = float(cfg.get('ig_developer_rate', 0.20))
+            dev_rate = float(cfg.get('ig_developer_rate', 0.25))
             rec_rate = float(cfg.get('ig_recruiter_rate', 0.05))
-            direct_rate = dev_rate + rec_rate
+            direct_rate = float(cfg.get('developer_direct_rate', 0.25))
         else:
             direct_rate = float(cfg.get('developer_direct_rate', 0.25))
-            dev_rate = float(cfg.get('developer_referral_rate', 0.20))
+            dev_rate = float(cfg.get('developer_referral_rate', 0.25))
             rec_rate = float(cfg.get('recruiter_rate', 0.05))
 
         tier2_rate = float(cfg.get('tier2_rate', 0.02))
