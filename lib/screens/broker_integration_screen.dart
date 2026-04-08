@@ -132,9 +132,11 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _autoReconnectEnabled = prefs.getBool('auto_reconnect_enabled') ?? false;
       _isLiveMode = prefs.getBool('is_live_mode') ?? false;  // Load saved mode
       final savedServer = prefs.getString('mt5_server') ?? '';
-      _serverController.text = savedServer.isNotEmpty
+      final computedServer = _defaultServerForSelectedBroker(isLiveOverride: _isLiveMode);
+      final useSavedServer = !(_selectedBroker.toLowerCase() == 'exness' && savedServer != computedServer);
+      _serverController.text = useSavedServer && savedServer.isNotEmpty
           ? savedServer
-          : _defaultServerForSelectedBroker(isLiveOverride: _isLiveMode);
+          : computedServer;
       final connectionTimeStr = prefs.getString('connection_time');
       if (connectionTimeStr != null) {
         _lastConnectionTime = DateTime.parse(connectionTimeStr);

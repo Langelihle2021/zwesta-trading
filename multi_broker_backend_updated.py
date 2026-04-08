@@ -117,6 +117,7 @@ mt5_lock_metrics = {
 # DIFFERENT accounts wait for their turn.
 mt5_current_account = None       # Account number currently logged in
 mt5_account_lock = threading.Lock()  # Protects mt5_current_account reads/writes
+mt5_priority_mode_switch = threading.Event()  # Blocks background bot reconnects during manual mode switches
 logger.info("✅ MT5 account queue initialized - supports multi-user account switching")
 
 # ==================== BOT CREATION LOCK ====================
@@ -2302,6 +2303,15 @@ class MT5Connection(BrokerConnection):
         OPTIMIZED: Reduced lock timeout and added exponential backoff for racing bots
         """
         global mt5_connection_lock
+        is_priority_mode_switch = bool(self.credentials.get('priority_mode_switch'))
+
+        if mt5_priority_mode_switch.is_set() and not is_priority_mode_switch:
+            logger.info("⏸️ MT5 priority mode switch in progress - skipping background reconnect attempt")
+            return False
+
+        if is_priority_mode_switch:
+            mt5_priority_mode_switch.set()
+            logger.info("🚦 MT5 priority mode switch activated - background bots will back off during this connect")
         
         # Acquire lock with timeout - INCREASED from 10s to 25s for trading loops
         # Balance checks use 0.1s timeout (non-blocking) to avoid stalling
@@ -2347,6 +2357,9 @@ class MT5Connection(BrokerConnection):
         finally:
             # CRITICAL: Always release the lock, even if connection fails
             mt5_connection_lock.release()
+            if is_priority_mode_switch:
+                mt5_priority_mode_switch.clear()
+                logger.info("✅ MT5 priority mode switch completed - background bot reconnects may resume")
     
     def _connect_with_lock(self) -> bool:
         """Internal connection method - always called within mt5_connection_lock"""
@@ -2437,6 +2450,7 @@ class MT5Connection(BrokerConnection):
             # FAST PATH: If MT5 terminal is already running (initialized), switch accounts
             # using mt5.login() — this takes ~1-2s vs mt5.initialize() which can block for 30s+.
             # This is critical for single-terminal VPS mode where one terminal serves all accounts.
+            force_initialize_on_selected_path = False
             try:
                 _ver = self.mt5.version()  # Returns non-None when MT5 is already initialized
                 if _ver is not None:
@@ -2453,6 +2467,7 @@ class MT5Connection(BrokerConnection):
                     )
 
                     if _path_mismatch:
+                        force_initialize_on_selected_path = True
                         logger.info(
                             f"  🔁 MT5 is attached to terminal '{_current_path}', but account {account} needs '{normalized_path}' — forcing initialize() on the correct terminal"
                         )
@@ -2503,6 +2518,9 @@ class MT5Connection(BrokerConnection):
                 
                 try:
                     init_ok = False
+                    if force_initialize_on_selected_path and attempt == 1:
+                        logger.info("  ⏳ Waiting 10s for the selected MT5 terminal to expose its IPC channel before initialize()...")
+                        time.sleep(10)
                     
                     # On retry attempts, just wait longer for IPC - DON'T kill MT5 terminal
                     # Killing the terminal causes loss of login session and requires manual re-login
@@ -14346,6 +14364,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 'server': server,
                 'broker': broker_for_mt5,
                 'is_live': bool(is_live),
+                'priority_mode_switch': bool(bot_id and str(bot_id).startswith('mode-switch:')),
             })
             
             if mt5_conn.connect():
