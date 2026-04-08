@@ -100,6 +100,36 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _selectedBroker.toLowerCase() == 'prime xbt';
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
 
+  String _modePrefKey(String baseKey, bool isLive) => '${baseKey}_${isLive ? 'live' : 'demo'}';
+
+  Future<void> _persistModeScopedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_modePrefKey('mt5_account', _isLiveMode), _accountController.text);
+    await prefs.setString(_modePrefKey('mt5_password', _isLiveMode), _passwordController.text);
+    await prefs.setString(_modePrefKey('mt5_server', _isLiveMode), _serverController.text);
+  }
+
+  Future<void> _restoreModeScopedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final modeAccount = prefs.getString(_modePrefKey('mt5_account', _isLiveMode));
+    final modePassword = prefs.getString(_modePrefKey('mt5_password', _isLiveMode));
+    final modeServer = prefs.getString(_modePrefKey('mt5_server', _isLiveMode));
+    final fallbackAccount = prefs.getString('account_number') ?? prefs.getString('mt5_account') ?? '';
+    final fallbackPassword = prefs.getString('mt5_password') ?? '';
+    final fallbackServer = prefs.getString('mt5_server') ?? '';
+    final computedServer = _defaultServerForSelectedBroker(isLiveOverride: _isLiveMode);
+
+    setState(() {
+      _accountController.text = modeAccount ?? fallbackAccount;
+      _passwordController.text = modePassword ?? fallbackPassword;
+      _serverController.text = (modeServer != null && modeServer.isNotEmpty)
+          ? modeServer
+          : ((fallbackServer.isNotEmpty && !_isExnessBroker) ? fallbackServer : computedServer);
+      _isConnected = false;
+      _activeAccount = null;
+    });
+  }
+
   String _defaultServerForSelectedBroker({bool? isLiveOverride}) {
     final isLive = isLiveOverride ?? _isLiveMode;
     if (_selectedBroker.toLowerCase() == 'exness') {
@@ -120,18 +150,22 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
     final savedBroker = prefs.getString('broker') ?? 'Exness';
     final normalizedSavedBroker =
         savedBroker.toLowerCase().contains('xm') ? 'Exness' : savedBroker;
+    final savedMode = prefs.getBool('is_live_mode') ?? false;
+    final modeAccount = prefs.getString(_modePrefKey('mt5_account', savedMode));
+    final modePassword = prefs.getString(_modePrefKey('mt5_password', savedMode));
+    final modeServer = prefs.getString(_modePrefKey('mt5_server', savedMode));
     setState(() {
       _selectedBroker = normalizedSavedBroker;
-      _accountController.text = prefs.getString('mt5_account') ?? '';
-      _passwordController.text = prefs.getString('mt5_password') ?? '';
+      _isLiveMode = savedMode;  // Load saved mode
+      _accountController.text = modeAccount ?? prefs.getString('account_number') ?? prefs.getString('mt5_account') ?? '';
+      _passwordController.text = modePassword ?? prefs.getString('mt5_password') ?? '';
       _apiKeyController.text = prefs.getString('broker_api_key') ?? '';
       _usernameController.text = prefs.getString('broker_username') ?? '';
       _isConnected = prefs.getBool('broker_connected') ?? false;
       _accountBalance = prefs.getDouble('account_balance') ?? 0;
       _accountCurrency = prefs.getString('account_currency') ?? 'USD';
       _autoReconnectEnabled = prefs.getBool('auto_reconnect_enabled') ?? false;
-      _isLiveMode = prefs.getBool('is_live_mode') ?? false;  // Load saved mode
-      final savedServer = prefs.getString('mt5_server') ?? '';
+      final savedServer = modeServer ?? prefs.getString('mt5_server') ?? '';
       final computedServer = _defaultServerForSelectedBroker(isLiveOverride: _isLiveMode);
       final useSavedServer = !(_selectedBroker.toLowerCase() == 'exness' && savedServer != computedServer);
       _serverController.text = useSavedServer && savedServer.isNotEmpty
@@ -194,6 +228,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       await prefs.setString('connection_time', DateTime.now().toIso8601String());
       await prefs.setDouble('account_balance', _accountBalance);
     }
+
+    await _persistModeScopedCredentials();
 
     if (mounted) {
       // Save to backend via BrokerCredentialsService
@@ -404,7 +440,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         final account = BrokerAccount(
           id: credentialId ?? '${_selectedBroker}_${_accountController.text}',
           brokerName: _selectedBroker,
-          accountNumber: _accountController.text,
+          accountNumber: (result['account_number'] as String?) ?? _accountController.text,
           server: _serverController.text,
           isDemo: isDemo,
           accountBalance: balance,
@@ -423,6 +459,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
           _lastConnectionTime = DateTime.now();
           _accountBalance = balance;
           _accountCurrency = currency;
+          _accountController.text = account.accountNumber;
         });
 
         final prefs = await SharedPreferences.getInstance();
@@ -434,8 +471,11 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         if (credentialId != null) {
           await prefs.setString('credential_id', credentialId);
           await prefs.setString('broker_name', _selectedBroker);
-          await prefs.setString('account_number', _accountController.text);
+          await prefs.setString('account_number', account.accountNumber);
+          await prefs.setString('mt5_account', account.accountNumber);
         }
+
+        await _persistModeScopedCredentials();
 
         if (mounted) {
           final tradingService = Provider.of<TradingService>(context, listen: false);
@@ -934,8 +974,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                         if (value != null) {
                           setState(() {
                             _isLiveMode = value;
-                            _serverController.text = _defaultServerForSelectedBroker();
                           });
+                          _restoreModeScopedCredentials();
                         }
                       },
                     ),
@@ -950,8 +990,8 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                         if (value != null) {
                           setState(() {
                             _isLiveMode = value;
-                            _serverController.text = _defaultServerForSelectedBroker();
                           });
+                          _restoreModeScopedCredentials();
                         }
                       },
                     ),
