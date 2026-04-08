@@ -13,6 +13,7 @@ class BrokerCredential {
     required this.broker,
     required this.accountNumber,
     required this.server,
+    required this.accountCurrency,
     required this.isLive,
     required this.isActive,
     required this.createdAt,
@@ -24,6 +25,7 @@ class BrokerCredential {
       broker: json['broker'] ?? '',
       accountNumber: json['account_number'] ?? '',
       server: json['server'] ?? '',
+      accountCurrency: (json['account_currency'] ?? 'USD').toString().toUpperCase(),
       isLive: json['is_live'] ?? false,
       isActive: json['is_active'] ?? true,
       createdAt: DateTime.parse(json['created_at'] ?? DateTime.now().toString()),
@@ -33,6 +35,7 @@ class BrokerCredential {
   final String broker;
   final String accountNumber;
   final String server;
+  final String accountCurrency;
   final bool isLive;
   final bool isActive;
   final DateTime createdAt;
@@ -43,6 +46,7 @@ class BrokerCredential {
     'broker': broker,
     'account_number': accountNumber,
     'server': server,
+    'account_currency': accountCurrency,
     'is_live': isLive,
     'is_active': isActive,
     'created_at': createdAt.toIso8601String(),

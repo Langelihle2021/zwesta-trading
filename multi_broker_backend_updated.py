@@ -5536,7 +5536,9 @@ def get_small_account_presets():
                 'compounding': _compound_projection(balance),
                 'riskManagement': {
                     'riskPerTradePercent': 1.0,
+                    'maxRiskPerTradeAmount': round(balance * 0.01, 2),
                     'maxRiskPerTradeDollars': round(balance * 0.01, 2),
+                    'currency': request.args.get('currency', 'USD').upper(),
                     'rewardToRiskRatio': '1:2 minimum (1:3 ideal)',
                     'maxOpenTrades': preset['maxOpenPositions'],
                     'recommendedTimeframes': '4H + Daily charts',
@@ -9210,6 +9212,142 @@ class DynamicPositionSizer:
         return round(final_size, 2)
 
 
+def infer_symbol_quote_currency(symbol: str) -> Optional[str]:
+    normalized = ''.join(ch for ch in str(symbol or '').upper() if ch.isalpha())
+    if not normalized:
+        return None
+
+    for suffix in ('USDT', 'USDC', 'USD', 'EUR', 'GBP', 'ZAR', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'):
+        if normalized.endswith(suffix):
+            return suffix
+
+    if len(normalized) >= 6:
+        return normalized[3:6]
+
+    return None
+
+
+def _get_mt5_mid_rate(mt5_api, broker_name: str, symbol_name: str) -> Optional[float]:
+    candidates = []
+    normalized_symbol = normalize_symbol_for_broker(symbol_name, broker_name)
+    if normalized_symbol:
+        candidates.append(normalized_symbol)
+    if symbol_name not in candidates:
+        candidates.append(symbol_name)
+
+    for candidate in candidates:
+        try:
+            mt5_api.symbol_select(candidate, True)
+            tick = mt5_api.symbol_info_tick(candidate)
+            if tick is None:
+                continue
+
+            bid = float(getattr(tick, 'bid', 0.0) or 0.0)
+            ask = float(getattr(tick, 'ask', 0.0) or 0.0)
+            if bid > 0 and ask > 0:
+                return (bid + ask) / 2.0
+            if bid > 0:
+                return bid
+            if ask > 0:
+                return ask
+        except Exception:
+            continue
+
+    return None
+
+
+def convert_amount_between_currencies(
+    amount: float,
+    from_currency: str,
+    to_currency: str,
+    broker_name: str,
+    mt5_api=None,
+) -> tuple[float, Optional[str]]:
+    from_currency = str(from_currency or '').upper()
+    to_currency = str(to_currency or '').upper()
+
+    if amount <= 0 or not from_currency or not to_currency or from_currency == to_currency:
+        return amount, None
+
+    if mt5_api is None:
+        return amount, None
+
+    direct_symbol = f"{to_currency}{from_currency}"
+    direct_rate = _get_mt5_mid_rate(mt5_api, broker_name, direct_symbol)
+    if direct_rate and direct_rate > 0:
+        converted = amount / direct_rate
+        return converted, f"{amount:.2f} {from_currency} -> {converted:.2f} {to_currency} via {direct_symbol}"
+
+    reverse_symbol = f"{from_currency}{to_currency}"
+    reverse_rate = _get_mt5_mid_rate(mt5_api, broker_name, reverse_symbol)
+    if reverse_rate and reverse_rate > 0:
+        converted = amount * reverse_rate
+        return converted, f"{amount:.2f} {from_currency} -> {converted:.2f} {to_currency} via {reverse_symbol}"
+
+    return amount, None
+
+
+def estimate_fixed_trade_volume(
+    trade_amount: float,
+    symbol: str,
+    account_currency: str,
+    broker_name: str,
+    mt5_api=None,
+    market_price: float = 0.0,
+) -> tuple[float, Dict[str, Any]]:
+    details: Dict[str, Any] = {
+        'account_currency': str(account_currency or 'USD').upper(),
+        'quote_currency': infer_symbol_quote_currency(symbol),
+        'contract_size': None,
+        'price': None,
+        'method': 'fallback',
+        'conversion_note': None,
+    }
+
+    if not trade_amount or trade_amount <= 0:
+        return 0.0, details
+
+    quote_amount = float(trade_amount)
+    if details['quote_currency']:
+        quote_amount, conversion_note = convert_amount_between_currencies(
+            float(trade_amount),
+            details['account_currency'],
+            details['quote_currency'],
+            broker_name,
+            mt5_api=mt5_api,
+        )
+        details['conversion_note'] = conversion_note
+
+    contract_size = 0.0
+    current_price = float(market_price or 0.0)
+
+    if mt5_api is not None:
+        try:
+            mt5_api.symbol_select(symbol, True)
+            sym_info = mt5_api.symbol_info(symbol)
+            tick = mt5_api.symbol_info_tick(symbol)
+            if sym_info is not None:
+                contract_size = float(getattr(sym_info, 'trade_contract_size', 0.0) or 0.0)
+            if tick is not None:
+                bid = float(getattr(tick, 'bid', 0.0) or 0.0)
+                ask = float(getattr(tick, 'ask', 0.0) or 0.0)
+                current_price = ask if ask > 0 else bid if bid > 0 else current_price
+        except Exception:
+            pass
+
+    if contract_size > 0 and current_price > 0:
+        details['contract_size'] = contract_size
+        details['price'] = current_price
+        details['method'] = 'symbol-metadata'
+        estimated_volume = quote_amount / (current_price * contract_size)
+        return max(estimated_volume, 0.0), details
+
+    estimated_volume = quote_amount / 100000.0
+    details['method'] = 'fallback-100000'
+    details['price'] = current_price if current_price > 0 else None
+    return max(estimated_volume, 0.0), details
+
+
 # Initialize trackers
 strategy_tracker = StrategyPerformanceTracker()
 position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
@@ -9393,7 +9531,8 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         symbol = tracked_pos.get('symbol', '?')
         profit = tracked_pos.get('profit', 0)
         
-        logger.info(f"🧠 Bot {bot_id}: CLOSING underperformer {symbol} (ticket {ticket}, P&L: ${profit:.2f}) — better opportunity found")
+        display_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
+        logger.info(f"🧠 Bot {bot_id}: CLOSING underperformer {symbol} (ticket {ticket}, P&L: {profit:.2f} {display_currency}) — better opportunity found")
         
         try:
             if is_mt5 and mt5_conn:
@@ -11047,7 +11186,7 @@ def get_broker_credentials():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT credential_id, broker_name, account_number, server, is_live, is_active, created_at
+            SELECT credential_id, broker_name, account_number, server, is_live, is_active, created_at, account_currency
             FROM broker_credentials
             WHERE user_id = ? AND is_active = 1
             ORDER BY broker_name, account_number, created_at DESC
@@ -11070,6 +11209,7 @@ def get_broker_credentials():
                     'is_live': bool(row[4]),
                     'is_active': bool(row[5]),
                     'created_at': row[6],
+                    'account_currency': (row[7] or 'USD').upper(),
                 }
         
         credentials = list(seen.values())
@@ -11273,11 +11413,14 @@ def save_broker_credentials():
             'success': True,
             'credential': {
                 'credential_id': credential_id,
+                'broker': broker_name,
                 'broker_name': broker_name,
                 'account_number': account_number or username,
+                'server': server or '',
                 'is_live': is_live,
                 'is_active': True,
                 'created_at': created_at,
+                'account_currency': (locals().get('account_currency') or 'USD').upper(),
             }
         }), 201
         
@@ -12630,7 +12773,7 @@ def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[
         'dynamicSizing': dynamic_sizing,
         'managementMode': management_mode,
         'managementProfile': management_profile,
-        'displayCurrency': display_currency,  # Always USD
+        'displayCurrency': display_currency,
         'warnings': warnings,
     }
 
@@ -12842,7 +12985,7 @@ def create_bot():
             management_profile = sanitized_risk_config['managementProfile']
             display_currency = sanitized_risk_config['displayCurrency']
             trading_enabled = data.get('enabled', True)
-            trade_amount = data.get('tradeAmount')  # Fixed dollar trade amount (overrides risk %)
+            trade_amount = data.get('tradeAmount')  # Fixed amount in the broker account currency (overrides risk %)
             if trade_amount is not None:
                 try:
                     trade_amount = float(trade_amount)
@@ -13702,11 +13845,25 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
 
                         # Dynamic position sizing
                         fixed_trade_amount = bot_config.get('tradeAmount')
+                        bot_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
+                        fixed_trade_volume = None
+                        mt5_api = mt5_conn.mt5 if (is_mt5 and mt5_conn and hasattr(mt5_conn, 'mt5')) else None
                         if fixed_trade_amount:
-                            # Fixed dollar amount: convert to lot size
-                            # Standard lot = 100,000 units, so $amount / 100000 gives lots
-                            position_size = max(0.01, round(fixed_trade_amount / 100000, 2))
-                            logger.info(f"💵 Bot {bot_id}: Using fixed trade amount ${fixed_trade_amount} -> {position_size} lots")
+                            fixed_trade_volume, volume_details = estimate_fixed_trade_volume(
+                                float(fixed_trade_amount),
+                                symbol,
+                                bot_currency,
+                                broker_type,
+                                mt5_api=mt5_api,
+                            )
+                            position_size = 1.0
+                            conversion_note = volume_details.get('conversion_note')
+                            if conversion_note:
+                                logger.info(f"💱 Bot {bot_id}: Fixed trade amount conversion for {symbol}: {conversion_note}")
+                            logger.info(
+                                f"💵 Bot {bot_id}: Using fixed trade amount {float(fixed_trade_amount):.2f} {bot_currency} -> "
+                                f"target volume {fixed_trade_volume:.4f} lots ({volume_details.get('method')})"
+                            )
                         elif bot_config.get('dynamicSizing', True):
                             position_size = position_sizer.calculate_position_size(
                                 bot_config,
@@ -13722,6 +13879,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             market_data = commodity_market_data[symbol[:-1]]  # Try without 'm' suffix
                         else:
                             market_data = {'current_price': 0, 'volatility_pct': 1.0, 'price_history': [0]}
+
+                        if fixed_trade_amount and mt5_api is None:
+                            fixed_trade_volume, volume_details = estimate_fixed_trade_volume(
+                                float(fixed_trade_amount),
+                                symbol,
+                                bot_currency,
+                                broker_type,
+                                market_price=float(market_data.get('current_price', 0.0) or 0.0),
+                            )
                         
                         # Get trade direction from REAL signal-based strategy
                         trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'], market_data)
@@ -13731,7 +13897,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             logger.info(f"⏭️ Bot {bot_id}: Skipping {symbol} - signal strength insufficient")
                             continue
                         
-                        adjusted_volume = trade_params['volume'] * position_size
+                        adjusted_volume = fixed_trade_volume if fixed_trade_volume is not None else trade_params['volume'] * position_size
                         order_type = trade_params['type']
                         
                         # Log signal details
@@ -14300,7 +14466,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     except Exception as comm_e:
                                         logger.error(f"Bot {bot_id}: Commission error: {comm_e}")
                                 
-                                logger.info(f"💰 Bot {bot_id}: Position CLOSED by TP/SL | {tracked.get('symbol')} | Real P&L: ${real_profit:.2f}")
+                                display_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
+                                logger.info(f"💰 Bot {bot_id}: Position CLOSED by TP/SL | {tracked.get('symbol')} | Real P&L: {real_profit:.2f} {display_currency}")
                         
                         # Remove closed positions from tracker
                         for t in closed_tickets:
@@ -14443,7 +14610,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 
                 # Log cycle summary with position status for debugging
                 open_pos_count = len(bot_config.get('open_positions', {}))
-                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Open positions: {open_pos_count} | Total P&L: ${bot_config.get('totalProfit', 0):.2f}")
+                display_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
+                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Open positions: {open_pos_count} | Total P&L: {bot_config.get('totalProfit', 0):.2f} {display_currency}")
                 
                 # DUAL MODE: TIME-BASED vs SIGNAL-DRIVEN waiting
                 if trading_mode == 'signal-driven':

@@ -655,6 +655,119 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
   }
 
+  double _usdToAccountCurrencyRate(String currencyCode) {
+    switch (currencyCode.toUpperCase()) {
+      case 'ZAR':
+        return 18.5;
+      case 'GBP':
+        return 0.80;
+      case 'EUR':
+        return 0.92;
+      default:
+        return 1.0;
+    }
+  }
+
+  double _symbolMinimumUsd(String symbol) {
+    final normalized = symbol.toUpperCase();
+    if (normalized.contains('BTC') || normalized.contains('ETH')) {
+      return 15.0;
+    }
+    if (normalized.contains('XAU') || normalized.contains('XAG') || normalized.contains('OIL')) {
+      return 10.0;
+    }
+    if (normalized.contains('US30') || normalized.contains('US500') || normalized.contains('USTEC')) {
+      return 12.0;
+    }
+    if ({'NVDA', 'AAPL', 'MSFT', 'META', 'GOOGL', 'TSLA', 'AMD'}.contains(normalized)) {
+      return 20.0;
+    }
+    return 5.0;
+  }
+
+  Map<String, dynamic>? _fixedTradeAmountWarningData(BuildContext context) {
+    final rawAmount = double.tryParse(_investmentAmountController.text.trim());
+    if (rawAmount == null || rawAmount <= 0 || _selectedSymbols.isEmpty) {
+      return null;
+    }
+
+    final currencyCode = _activeAccountCurrencyCode(context);
+    final rate = _usdToAccountCurrencyRate(currencyCode);
+    final symbolMinimums = <Map<String, dynamic>>[];
+    for (final symbol in _selectedSymbols) {
+      final usdMinimum = _symbolMinimumUsd(symbol);
+      symbolMinimums.add({
+        'symbol': symbol,
+        'minimum': usdMinimum * rate,
+      });
+    }
+
+    symbolMinimums.sort((a, b) => (b['minimum'] as double).compareTo(a['minimum'] as double));
+    final highest = symbolMinimums.first;
+    final estimatedMinimum = highest['minimum'] as double;
+
+    if (rawAmount + 1e-9 >= estimatedMinimum) {
+      return null;
+    }
+
+    final limitedSymbols = symbolMinimums.take(3).map((item) => item['symbol']).join(', ');
+    return {
+      'entered': rawAmount,
+      'currency': currencyCode,
+      'minimum': estimatedMinimum,
+      'symbols': limitedSymbols,
+      'primarySymbol': highest['symbol'],
+    };
+  }
+
+  Future<bool> _confirmLowFixedTradeAmount(BuildContext context, Map<String, dynamic> warning) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Low Trade Amount'),
+        content: Text(
+          'You entered ${warning['entered'].toStringAsFixed(2)} ${warning['currency']} per trade, '
+          'but ${warning['primarySymbol']} usually needs about '
+          '${warning['minimum'].toStringAsFixed(2)} ${warning['currency']} or more to clear minimum lot sizing.\n\n'
+          'The bot may round up to the broker minimum or place smaller-than-expected exposure. Continue anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Back'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+
+    return proceed == true;
+  }
+
+  String _activeAccountCurrencyCode(BuildContext context) {
+    final credentialCurrency = _brokerService.activeCredential?.accountCurrency;
+    if (credentialCurrency != null && credentialCurrency.trim().isNotEmpty) {
+      return credentialCurrency.trim().toUpperCase();
+    }
+    return _currencyCode(context.read<CurrencyProvider>().currency);
+  }
+
+  String _currencyPrefixForCode(String currencyCode) {
+    switch (currencyCode.toUpperCase()) {
+      case 'ZAR':
+        return 'R ';
+      case 'GBP':
+        return '£ ';
+      case 'EUR':
+        return '€ ';
+      default:
+        return r'$ ';
+    }
+  }
+
   Widget _binanceQuickActionButton({
     required IconData icon,
     required String label,
@@ -1111,6 +1224,17 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
       final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
       final signalThreshold = _recommendedSignalThreshold();
+      final accountCurrency = credential.accountCurrency.toUpperCase();
+      final fixedAmountWarning = _fixedTradeAmountWarningData(context);
+      if (fixedAmountWarning != null) {
+        final shouldContinue = await _confirmLowFixedTradeAmount(context, fixedAmountWarning);
+        if (!shouldContinue) {
+          setState(() {
+            _isCreating = false;
+          });
+          return;
+        }
+      }
 
       // STEP 2: Create bot with credential_id
       final botPayload = {
@@ -1129,8 +1253,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'signalThreshold': signalThreshold,
         if (_investmentAmountController.text.isNotEmpty)
           'tradeAmount': double.tryParse(_investmentAmountController.text),
-        'displayCurrency':
-            _currencyCode(context.read<CurrencyProvider>().currency),
+        'displayCurrency': accountCurrency,
         'allowedVolatility': _allowedVolatility,
         'autoSwitch': true,
         'dynamicSizing': true,
@@ -2333,18 +2456,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                           // Trade Amount Input
                           Builder(
                             builder: (context) {
-                              final curr =
-                                  context.watch<CurrencyProvider>().currency;
-                              final prefix = curr == AppCurrency.zar
-                                  ? 'R '
-                                  : curr == AppCurrency.gbp
-                                      ? '£ '
-                                      : r'$ ';
-                              final currLabel = curr == AppCurrency.zar
-                                  ? 'ZAR'
-                                  : curr == AppCurrency.gbp
-                                      ? 'GBP'
-                                      : 'USD';
+                              final currLabel = _activeAccountCurrencyCode(context);
+                              final prefix = _currencyPrefixForCode(currLabel);
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -2358,12 +2471,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   const SizedBox(height: 8),
                                   TextField(
                                     controller: _investmentAmountController,
+                                    onChanged: (_) => setState(() {}),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
                                             decimal: true),
                                     decoration: InputDecoration(
                                       hintText:
-                                          'Fixed amount per trade (optional)',
+                                        'Fixed amount per trade in this account currency (optional)',
                                       prefixText: prefix,
                                       border: OutlineInputBorder(
                                           borderRadius:
@@ -2377,13 +2491,36 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                     style: TextStyle(
                                         fontSize: 11, color: Colors.grey[400]),
                                   ),
+                                  if (_fixedTradeAmountWarningData(context) case final warning?) ...[
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withOpacity(0.10),
+                                        border: Border.all(color: Colors.orange.withOpacity(0.45)),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Entered amount looks low for ${warning['symbols']}. Estimated minimum is about '
+                                              '${(warning['minimum'] as double).toStringAsFixed(2)} ${warning['currency']}.',
+                                              style: TextStyle(fontSize: 11, color: Colors.grey[300]),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               );
                             },
                           ),
                           const SizedBox(height: 16),
-
-                          // Risk % Slider
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
