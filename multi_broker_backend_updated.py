@@ -2386,6 +2386,17 @@ class MT5Connection(BrokerConnection):
             )
             if route_diagnostic.get('selected_path'):
                 self.mt5_path = route_diagnostic['selected_path']
+
+            normalized_path = None
+            if self.mt5_path:
+                normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
+                if os.path.isdir(normalized_path):
+                    candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
+                    candidate_32 = os.path.join(normalized_path, 'terminal.exe')
+                    if os.path.isfile(candidate_64):
+                        normalized_path = candidate_64
+                    elif os.path.isfile(candidate_32):
+                        normalized_path = candidate_32
             
             # Ensure account is integer for proper comparison with MT5 login field
             account = int(account)
@@ -2429,41 +2440,58 @@ class MT5Connection(BrokerConnection):
             try:
                 _ver = self.mt5.version()  # Returns non-None when MT5 is already initialized
                 if _ver is not None:
-                    logger.info(f"  🔑 MT5 already running (v{_ver}) — using fast mt5.login() to switch to account {account}")
-                    login_ok = self.mt5.login(int(account), password=str(password), server=str(server))
-                    if login_ok:
-                        time.sleep(1)  # Brief stabilisation
-                        acct_check = self.mt5.account_info()
-                        if acct_check and acct_check.login == int(account):
-                            self.connected = True
-                            logger.info(f"✅ Fast-switched to MT5 account {account} ({getattr(acct_check, 'currency', 'USD')}) in single-terminal mode")
-                            with mt5_account_lock:
-                                mt5_current_account = int(account)
-                            self.get_account_info()
-                            try:
-                                if self.account_info:
-                                    with balance_cache_lock:
-                                        ck = get_balance_cache_key(broker_name, account)
-                                        bal = float(self.account_info.get('balance', 0))
-                                        balance_cache[ck] = {
-                                            'balance': bal,
-                                            'equity': float(self.account_info.get('equity', 0)),
-                                            'margin': float(self.account_info.get('margin', 0)),
-                                            'marginFree': float(self.account_info.get('marginFree', 0)),
-                                            'margin_level': float(self.account_info.get('margin_level', 0)),
-                                            'currency': self.account_info.get('currency', 'USD'),
-                                            'timestamp': time.time()
-                                        }
-                                        logger.info(f"  💾 [FAST-SWITCH CACHE] {ck} = {bal:.2f} {balance_cache[ck]['currency']}")
-                            except Exception as ce:
-                                logger.warning(f"  ⚠️  Failed to cache balance after fast-switch: {ce}")
-                            self._subscribe_symbols()
-                            return True
-                        else:
-                            logger.warning(f"  ⚠️ Fast login succeeded but account verification failed — falling back to initialize()")
+                    _term_info = None
+                    try:
+                        _term_info = self.mt5.terminal_info()
+                    except Exception:
+                        _term_info = None
+
+                    _current_path = str(getattr(_term_info, 'path', '') or '').strip().strip('"').strip("'")
+                    _path_mismatch = bool(
+                        normalized_path and _current_path and
+                        os.path.normcase(os.path.normpath(_current_path)) != os.path.normcase(os.path.normpath(normalized_path))
+                    )
+
+                    if _path_mismatch:
+                        logger.info(
+                            f"  🔁 MT5 is attached to terminal '{_current_path}', but account {account} needs '{normalized_path}' — forcing initialize() on the correct terminal"
+                        )
                     else:
-                        err = self.mt5.last_error()
-                        logger.warning(f"  ⚠️ Fast mt5.login() failed: {err} — falling back to initialize()")
+                        logger.info(f"  🔑 MT5 already running (v{_ver}) — using fast mt5.login() to switch to account {account}")
+                        login_ok = self.mt5.login(int(account), password=str(password), server=str(server))
+                        if login_ok:
+                            time.sleep(1)  # Brief stabilisation
+                            acct_check = self.mt5.account_info()
+                            if acct_check and acct_check.login == int(account):
+                                self.connected = True
+                                logger.info(f"✅ Fast-switched to MT5 account {account} ({getattr(acct_check, 'currency', 'USD')}) in single-terminal mode")
+                                with mt5_account_lock:
+                                    mt5_current_account = int(account)
+                                self.get_account_info()
+                                try:
+                                    if self.account_info:
+                                        with balance_cache_lock:
+                                            ck = get_balance_cache_key(broker_name, account)
+                                            bal = float(self.account_info.get('balance', 0))
+                                            balance_cache[ck] = {
+                                                'balance': bal,
+                                                'equity': float(self.account_info.get('equity', 0)),
+                                                'margin': float(self.account_info.get('margin', 0)),
+                                                'marginFree': float(self.account_info.get('marginFree', 0)),
+                                                'margin_level': float(self.account_info.get('margin_level', 0)),
+                                                'currency': self.account_info.get('currency', 'USD'),
+                                                'timestamp': time.time()
+                                            }
+                                            logger.info(f"  💾 [FAST-SWITCH CACHE] {ck} = {bal:.2f} {balance_cache[ck]['currency']}")
+                                except Exception as ce:
+                                    logger.warning(f"  ⚠️  Failed to cache balance after fast-switch: {ce}")
+                                self._subscribe_symbols()
+                                return True
+                            else:
+                                logger.warning(f"  ⚠️ Fast login succeeded but account verification failed — falling back to initialize()")
+                        else:
+                            err = self.mt5.last_error()
+                            logger.warning(f"  ⚠️ Fast mt5.login() failed: {err} — falling back to initialize()")
             except Exception as fe:
                 logger.debug(f"  (Fast-path mt5.login() not attempted: {fe})")
             
@@ -2492,16 +2520,7 @@ class MT5Connection(BrokerConnection):
                         continue
                     
                     # Initialize with broker-specific path only
-                    normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
-                    if os.path.isdir(normalized_path):
-                        candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
-                        candidate_32 = os.path.join(normalized_path, 'terminal.exe')
-                        if os.path.isfile(candidate_64):
-                            normalized_path = candidate_64
-                        elif os.path.isfile(candidate_32):
-                            normalized_path = candidate_32
-
-                    if os.path.isfile(normalized_path):
+                    if normalized_path and os.path.isfile(normalized_path):
                         # Pass login credentials directly in initialize() to avoid MT5 auth races.
                         logger.info(f"  🔑 Calling mt5.initialize(path='{normalized_path}', login={account}, server='{server}')")
                         init_ok = self.mt5.initialize(
@@ -5813,6 +5832,23 @@ def switch_trading_mode():
 
         ensure_user_preferences_table(cursor)
 
+        cursor.execute('''
+            SELECT trading_mode, live_account, live_server
+            FROM user_preferences
+            WHERE user_id = ?
+        ''', (user_id,))
+        existing_pref = cursor.fetchone()
+        saved_live_account = None
+        saved_live_server = None
+        if existing_pref:
+            saved_live_account = existing_pref['live_account']
+            saved_live_server = existing_pref['live_server']
+
+        if mode == 'LIVE' and not preferred_account and saved_live_account:
+            preferred_account = str(saved_live_account)
+        if mode == 'LIVE' and not data.get('server') and saved_live_server:
+            data['server'] = saved_live_server
+
         preferred_credential = get_preferred_mode_credential(
             cursor,
             user_id,
@@ -6109,7 +6145,7 @@ def get_account_balances():
         
         # Get all active broker credentials for this user
         cursor.execute('''
-            SELECT credential_id, broker_name, account_number, is_live, api_key, password, server
+            SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, account_currency
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1
         ''', (user_id,))
@@ -11395,14 +11431,16 @@ def test_broker_connection():
             ensure_user_preferences_table(cursor)
             
             cursor.execute('''
-                SELECT credential_id FROM broker_credentials
+                SELECT credential_id, account_currency FROM broker_credentials
                 WHERE user_id = ? AND broker_name = ? AND account_number = ?
             ''', (user_id, broker, account))
             
             existing = cursor.fetchone()
             
             if existing:
-                credential_id = existing[0]
+                credential_id = existing['credential_id']
+                if not got_real_balance and existing['account_currency']:
+                    actual_currency = str(existing['account_currency']).upper()
                 cursor.execute('''
                     UPDATE broker_credentials
                     SET password = ?, server = ?, is_live = ?, is_active = 1, updated_at = ?,
@@ -11475,7 +11513,26 @@ def test_broker_connection():
                         actual_margin_used = account_info.get('margin', actual_margin_used)
                         actual_margin_level = account_info.get('margin_level', account_info.get('marginLevel', actual_margin_level))
                         actual_profit = account_info.get('profit', actual_profit)
+                        actual_currency = str(account_info.get('currency', actual_currency)).upper()
                         got_real_balance = True
+                        cursor.execute('''
+                            UPDATE broker_credentials
+                            SET cached_balance = ?, cached_equity = ?, cached_margin_free = ?,
+                                cached_margin = ?, cached_margin_level = ?, cached_profit = ?,
+                                account_currency = ?, updated_at = ?
+                            WHERE credential_id = ?
+                        ''', (
+                            actual_balance,
+                            actual_equity,
+                            actual_margin_free,
+                            actual_margin_used,
+                            actual_margin_level,
+                            actual_profit,
+                            actual_currency,
+                            datetime.now().isoformat(),
+                            credential_id,
+                        ))
+                        conn.commit()
                 else:
                     connection_status = 'connection-failed'
                     warning = warm_result.get('error')
