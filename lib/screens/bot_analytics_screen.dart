@@ -102,6 +102,12 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
       final sessionToken = prefs.getString('auth_token');
       final botId = _botData['botId'];
 
+      if (sessionToken == null || sessionToken.isEmpty) {
+        debugPrint('Skipping analytics refresh: missing session token');
+        _refreshTimer?.cancel();
+        return;
+      }
+
       if (botId == null || botId.toString().isEmpty) {
         return;
       }
@@ -113,8 +119,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         Uri.parse(url),
         headers: {
           'Content-Type': 'application/json',
-          if (sessionToken != null && sessionToken.isNotEmpty)
-            'X-Session-Token': sessionToken,
+          'X-Session-Token': sessionToken,
         },
       ).timeout(const Duration(seconds: 10));
 
@@ -128,6 +133,9 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
             });
           }
         }
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        debugPrint('Stopping analytics refresh due to unauthorized session');
+        _refreshTimer?.cancel();
       }
     } catch (e) {
       debugPrint('Error refreshing analytics: $e');

@@ -27,6 +27,7 @@ class BotService extends ChangeNotifier {
   List<Map<String, dynamic>> _activeBots = [];
   SharedPreferences? _prefs;
   Timer? _pollTimer;
+  bool _authPollingDisabled = false;
   DateTime? _lastFetchAt;
   String? _lastTradingMode;
   Future<void>? _inFlightFetch;
@@ -47,7 +48,7 @@ class BotService extends ChangeNotifier {
   void startPolling({String? tradingMode, Duration interval = const Duration(seconds: 15)}) {
     final mode = tradingMode ?? _lastTradingMode;
     _pollTimer?.cancel();
-    if (mode == null || mode.isEmpty) {
+    if (mode == null || mode.isEmpty || _authPollingDisabled) {
       return;
     }
     _pollTimer = Timer.periodic(interval, (_) {
@@ -157,6 +158,16 @@ class BotService extends ChangeNotifier {
       final sessionToken = prefs.getString('auth_token');
       _lastTradingMode = mode;
 
+      // Avoid hammering protected endpoints without auth header.
+      if (sessionToken == null || sessionToken.isEmpty) {
+        _authPollingDisabled = true;
+        stopPolling();
+        _isLoading = false;
+        _errorMessage = 'Session token missing. Please login again.';
+        notifyListeners();
+        return;
+      }
+
       var url = '$_apiUrl/api/bot/summary?mode=$mode';
       if (userId != null && userId.isNotEmpty) {
         url += '&user_id=$userId';
@@ -166,12 +177,12 @@ class BotService extends ChangeNotifier {
         Uri.parse(url),
         headers: {
           'Content-Type': 'application/json',
-          if (sessionToken != null && sessionToken.isNotEmpty)
-            'X-Session-Token': sessionToken,
+          'X-Session-Token': sessionToken,
         },
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
+        _authPollingDisabled = false;
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
           _activeBots = List<Map<String, dynamic>>.from(data['bots'] ?? []);
@@ -184,6 +195,10 @@ class BotService extends ChangeNotifier {
         }
       } else {
         _errorMessage = 'Backend returned status ${response.statusCode}';
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          _authPollingDisabled = true;
+          stopPolling();
+        }
         // Don't wipe _activeBots - preserve previous data on error
       }
     } catch (e) {

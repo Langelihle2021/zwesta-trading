@@ -100,6 +100,16 @@ def get_stripe_module():
 mt5_connection_lock = threading.Lock()
 logger.info("✅ MT5 connection lock initialized - ensures sequential MT5 connections")
 
+# Lightweight MT5 lock contention telemetry.
+mt5_lock_metrics_lock = threading.Lock()
+mt5_lock_metrics = {
+    'pending_waiters': 0,
+    'acquire_count': 0,
+    'timeout_count': 0,
+    'total_wait_seconds': 0.0,
+    'max_wait_seconds': 0.0,
+}
+
 # ==================== MT5 ACCOUNT QUEUE (Multi-User Support) ====================
 # When multiple users have different MT5 accounts, the single MT5 process must
 # switch between accounts. This queue serializes access per-account to minimize
@@ -114,6 +124,21 @@ logger.info("✅ MT5 account queue initialized - supports multi-user account swi
 # Only ONE bot should be created at a time to avoid MT5 lock contention
 bot_creation_lock = threading.Lock()
 logger.info("✅ Bot creation lock initialized - prevents concurrent bot creation")
+
+# Session log throttling to prevent repeated identical 401 log spam.
+_session_log_throttle = {}
+_session_log_throttle_lock = threading.Lock()
+
+
+def should_log_session_event(event_key: str, interval_seconds: int = 30) -> bool:
+    """Return True when an auth event should be logged; suppress duplicates briefly."""
+    now_ts = time.time()
+    with _session_log_throttle_lock:
+        last_ts = _session_log_throttle.get(event_key, 0)
+        if now_ts - last_ts >= interval_seconds:
+            _session_log_throttle[event_key] = now_ts
+            return True
+    return False
 
 # ==================== BALANCE CACHE ====================
 # CRITICAL FIX: Cache balances updated from successful MT5 connections
@@ -749,14 +774,17 @@ def require_session(f):
         
         # Log all headers to diagnose missing token issue
         if not session_token:
-            logger.warning(f"🚨 [CRITICAL] MISSING X-Session-Token for {request.method} {request.path}")
-            logger.warning(f"📋 Headers received: {dict(request.headers)}")
-            logger.warning(f"🌐 Client IP: {request.remote_addr}")
+            event_key = f"missing_token:{request.method}:{request.path}:{request.remote_addr}"
+            if should_log_session_event(event_key, 30):
+                logger.warning(f"🚨 [CRITICAL] MISSING X-Session-Token for {request.method} {request.path}")
+                logger.warning(f"📋 Headers received: {dict(request.headers)}")
+                logger.warning(f"🌐 Client IP: {request.remote_addr}")
         else:
             logger.debug(f"[SESSION CHECK] Endpoint: {request.endpoint}, Token received: {session_token[:20]}...")
         
         if not session_token:
-            logger.error(f"[SESSION FAIL] Missing X-Session-Token header for {request.endpoint}")
+            if should_log_session_event(f"missing_token_fail:{request.endpoint}:{request.remote_addr}", 30):
+                logger.error(f"[SESSION FAIL] Missing X-Session-Token header for {request.endpoint}")
             return jsonify({'success': False, 'error': 'Missing session token in X-Session-Token header'}), 401
 
         cached_session = TEMP_SESSION_CACHE.get(session_token)
@@ -790,15 +818,18 @@ def require_session(f):
                 cursor2 = conn2.cursor()
                 cursor2.execute('SELECT token, is_active FROM user_sessions WHERE token = ?', (session_token,))
                 all_sessions = cursor2.fetchall()
-                logger.info(f"[🔍 TOKEN STATUS] Found {len(all_sessions)} matching token(s): {all_sessions}")
+                if should_log_session_event(f"token_status:{request.endpoint}:{request.remote_addr}", 30):
+                    logger.info(f"[🔍 TOKEN STATUS] Found {len(all_sessions)} matching token(s): {all_sessions}")
                 conn2.close()
-                logger.error(f"[SESSION FAIL] Token not found in DB or inactive: {session_token[:20]}...")
+                if should_log_session_event(f"invalid_token:{request.endpoint}:{request.remote_addr}", 30):
+                    logger.error(f"[SESSION FAIL] Token not found in DB or inactive: {session_token[:20]}...")
                 return jsonify({'success': False, 'error': 'Invalid or inactive session token'}), 401
             
             # Check expiration
             expires_at = datetime.fromisoformat(session['expires_at'])
             if expires_at < datetime.now():
-                logger.error(f"[SESSION FAIL] Token expired for user {session['user_id']}")
+                if should_log_session_event(f"expired_token:{session['user_id']}:{request.endpoint}", 30):
+                    logger.error(f"[SESSION FAIL] Token expired for user {session['user_id']}")
                 return jsonify({'success': False, 'error': 'Session token expired'}), 401
             
             # Attach user_id to request for use in the route handler
@@ -1776,6 +1807,23 @@ def init_database():
         except Exception as e:
             logger.debug(f"account_currency column might already exist: {e}")
 
+    # Product migration: XM has been retired from active workflows; deactivate legacy XM credentials.
+    try:
+        cursor.execute(
+            '''
+            UPDATE broker_credentials
+            SET is_active = 0,
+                updated_at = ?
+            WHERE is_active = 1
+              AND broker_name IN ('XM', 'XM Global')
+            ''',
+            (datetime.now().isoformat(),),
+        )
+        if cursor.rowcount and cursor.rowcount > 0:
+            logger.info(f"✅ Migration: Deactivated {cursor.rowcount} retired XM credential(s)")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not deactivate XM credentials automatically: {e}")
+
     # Market Pause Events table - tracks when markets are paused/halted
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS pause_events (
@@ -2267,16 +2315,34 @@ class MT5Connection(BrokerConnection):
         else:
             logger.info(f"⏳ Waiting for exclusive MT5 connection lock (max {lock_timeout} seconds, sequential mode)...")
         
+        wait_start = time.monotonic()
+        with mt5_lock_metrics_lock:
+            mt5_lock_metrics['pending_waiters'] += 1
         lock_acquired = mt5_connection_lock.acquire(timeout=float(lock_timeout))
+        wait_seconds = time.monotonic() - wait_start
+        with mt5_lock_metrics_lock:
+            mt5_lock_metrics['pending_waiters'] = max(0, mt5_lock_metrics['pending_waiters'] - 1)
+            mt5_lock_metrics['acquire_count'] += 1
+            mt5_lock_metrics['total_wait_seconds'] += wait_seconds
+            if wait_seconds > mt5_lock_metrics['max_wait_seconds']:
+                mt5_lock_metrics['max_wait_seconds'] = wait_seconds
         
         if not lock_acquired:
+            with mt5_lock_metrics_lock:
+                mt5_lock_metrics['timeout_count'] += 1
             logger.warning(f"⚠️ TIMEOUT: Could not acquire MT5 lock after {lock_timeout} seconds - system is busy")
             retry_delay = self.credentials.get('tradingInterval', 300) + random.uniform(1, 10)  # Add 1-10s random delay
             logger.warning(f"   Will retry in {retry_delay:.0f}s with staggered delay to reduce lock contention")
+            logger.info(
+                f"[MT5 LOCK METRICS] wait={wait_seconds:.2f}s pending={mt5_lock_metrics.get('pending_waiters', 0)} "
+                f"timeouts={mt5_lock_metrics.get('timeout_count', 0)}"
+            )
             return False  # Return False to signal connection failed, bot will retry next cycle
         
         try:
-            logger.info(f"✅ Acquired MT5 connection lock - proceeding with connection")
+            logger.info(
+                f"✅ Acquired MT5 connection lock after {wait_seconds:.2f}s - proceeding with connection"
+            )
             return self._connect_with_lock()
         finally:
             # CRITICAL: Always release the lock, even if connection fails
@@ -6031,6 +6097,12 @@ def get_account_balances():
             account_num = cred['account_number']
             is_live = cred['is_live']
             mode = 'Live' if is_live else 'Demo'
+
+            # XM has been retired from the product UI; skip it from balance payloads.
+            if broker_name in ['XM', 'XM Global']:
+                logger.info(f"ℹ️ Skipping retired broker in balances endpoint: {broker_name} {account_num}")
+                continue
+
             # GET ACTUAL ACCOUNT CURRENCY from database (demo USD vs live ZAR)
             account_currency = cred.get('account_currency', 'USD').upper()
             
