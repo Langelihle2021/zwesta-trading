@@ -15448,7 +15448,7 @@ def bot_status():
         
         bots_list = []
         for bot in active_bots.values():
-            # Only return bots for authenticated user
+         hi   # Only return bots for authenticated user
             if bot.get('user_id') != user_id:
                 continue
             if bot_id_filter and bot.get('botId') != bot_id_filter:
