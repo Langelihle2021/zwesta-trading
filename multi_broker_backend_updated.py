@@ -6381,49 +6381,70 @@ def get_account_balances():
             
             try:
                 if broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
-                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint.
-                    # Live and demo accounts have separate MT5 credentials — each account's
-                    # balance is populated into balance_cache by the bot trading loop when
-                    # that account is actively connected.  This prevents cross-contamination
-                    # between live and demo balances and avoids MT5 lock contention.
+                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint unless cache is empty and no bots are running.
                     logger.info(f"ℹ️ Balance: {broker_name} {account_num} ({account_currency}) — using cache only (MT5 disconnected in balance endpoint)")
                     error_msg = f"Using cached balance ({account_currency}) — MT5 reads handled by trading loop"
 
-                    if broker_name == 'Exness':
-                        live_session_info = None
+                    live_session_info = None
+                    cache_key = get_balance_cache_key(broker_name, account_num)
+                    cache_empty = True
+                    with balance_cache_lock:
+                        if cache_key in balance_cache and balance_cache[cache_key].get('balance', 0) > 0:
+                            cache_empty = False
+
+                    # Diagnostics: Log cache status
+                    if cache_empty:
+                        logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Checking DB fallback and considering live MT5 fallback.")
+                    else:
+                        logger.info(f"[DIAGNOSTIC] Cached balance present for {broker_name} {account_num}.")
+
+                    # If cache is empty and no bots are running, try a live MT5 connection (with lock and timeout)
+                    if broker_name == 'Exness' and cache_empty and active_bot_count == 0:
+                        logger.warning(f"[FALLBACK] Attempting live MT5 connection for {broker_name} {account_num} as cache is empty and no bots are running.")
                         try:
                             import MetaTrader5 as mt5_mod
-                            current_info = mt5_mod.account_info()
-                            if current_info is not None and str(current_info.login) == str(account_num):
-                                live_session_info = {
-                                    'accountNumber': str(current_info.login),
-                                    'balance': float(current_info.balance),
-                                    'equity': float(getattr(current_info, 'equity', current_info.balance)),
-                                    'marginFree': float(getattr(current_info, 'margin_free', current_info.balance)),
-                                    'margin': float(getattr(current_info, 'margin', 0)),
-                                    'margin_level': float(getattr(current_info, 'margin_level', 0) or 0),
-                                    'profit': float(getattr(current_info, 'profit', 0) or 0),
-                                    'currency': str(getattr(current_info, 'currency', account_currency) or account_currency).upper(),
-                                    'broker': broker_name,
-                                }
+                            acquired = mt5_connection_lock.acquire(timeout=8)
+                            if not acquired:
+                                logger.error(f"[FALLBACK] Could not acquire MT5 lock for live balance fetch (timeout)")
+                            else:
+                                try:
+                                    if mt5_mod.initialize():
+                                        current_info = mt5_mod.account_info()
+                                        if current_info is not None and str(current_info.login) == str(account_num):
+                                            live_session_info = {
+                                                'accountNumber': str(current_info.login),
+                                                'balance': float(current_info.balance),
+                                                'equity': float(getattr(current_info, 'equity', current_info.balance)),
+                                                'marginFree': float(getattr(current_info, 'margin_free', current_info.balance)),
+                                                'margin': float(getattr(current_info, 'margin', 0)),
+                                                'margin_level': float(getattr(current_info, 'margin_level', 0) or 0),
+                                                'profit': float(getattr(current_info, 'profit', 0) or 0),
+                                                'currency': str(getattr(current_info, 'currency', account_currency) or account_currency).upper(),
+                                                'broker': broker_name,
+                                            }
+                                            logger.info(f"[FALLBACK] Live MT5 balance fetch succeeded for {broker_name} {account_num}: {live_session_info['balance']}")
+                                        else:
+                                            logger.warning(f"[FALLBACK] Live MT5 session did not match account or returned None.")
+                                    else:
+                                        logger.error(f"[FALLBACK] MT5 initialize() failed for live balance fetch.")
+                                finally:
+                                    mt5_connection_lock.release()
                         except Exception as live_exc:
-                            logger.debug(f"Could not read active MT5 session for {account_num}: {live_exc}")
+                            logger.error(f"[FALLBACK] Exception during live MT5 balance fetch: {live_exc}")
 
-                        if live_session_info:
-                            account_info = live_session_info
-                            error_msg = None
-                            persist_account_snapshot(
-                                broker_name,
-                                account_num,
-                                account_info,
-                                credential_id=cred['credential_id'],
-                                user_id=user_id,
-                            )
-                        elif active_bot_count == 0:
-                            logger.info(
-                                f"ℹ️ Balance: Skipping on-demand MT5 reconnect for {broker_name} {account_num}; "
-                                "waiting for a mode switch or bot session to warm the cache"
-                            )
+                    if live_session_info:
+                        account_info = live_session_info
+                        error_msg = None
+                        persist_account_snapshot(
+                            broker_name,
+                            account_num,
+                            account_info,
+                            credential_id=cred['credential_id'],
+                            user_id=user_id,
+                        )
+                    elif cache_empty:
+                        logger.warning(f"[WARNING] No cached or live balance for {broker_name} {account_num}. Returning $0 and warning in API response.")
+                        error_msg = "No cached or live balance available. Start a bot to update balance."
                 
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
