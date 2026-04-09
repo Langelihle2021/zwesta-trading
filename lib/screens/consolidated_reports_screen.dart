@@ -21,6 +21,36 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  String _normalizeCurrency(dynamic value) {
+    final currency = value?.toString().trim().toUpperCase();
+    return currency == null || currency.isEmpty ? 'USD' : currency;
+  }
+
+  String _currencySymbol(String currency) {
+    switch (_normalizeCurrency(currency)) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return 'GBP';
+      case 'USD':
+      default:
+        return r'$';
+    }
+  }
+
+  String _formatMoney(num amount, String currency, {bool includeSign = false}) {
+    final prefix = includeSign && amount > 0 ? '+' : '';
+    return '$prefix${_currencySymbol(currency)}${amount.toStringAsFixed(2)}';
+  }
+
+  String _formatBreakdown(Map<String, double> totals) {
+    if (totals.isEmpty) {
+      return _formatMoney(0, 'USD');
+    }
+    final entries = totals.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    return entries.map((entry) => _formatMoney(entry.value, entry.key)).join(' • ');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -175,21 +205,23 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
   Widget _buildSummaryCard(Map<String, dynamic> reports) {
     double totalTrades = 0;
     double totalWins = 0;
-    double totalProfit = 0;
+    final totalProfitByCurrency = <String, double>{};
     var accountCount = 0;
     double totalWinRate = 0;
 
     reports.forEach((key, report) {
       if (report is Map) {
+        final currency = _normalizeCurrency(report['currency']);
         totalTrades += report['totalTrades']?.toDouble() ?? 0;
         totalWins += report['winningTrades']?.toDouble() ?? 0;
-        totalProfit += report['netProfit']?.toDouble() ?? 0;
+        totalProfitByCurrency[currency] = (totalProfitByCurrency[currency] ?? 0.0) + ((report['netProfit'] ?? 0).toDouble());
         totalWinRate += report['winRate']?.toDouble() ?? 0;
         accountCount++;
       }
     });
 
     final avgWinRate = accountCount > 0 ? totalWinRate / accountCount : 0;
+    final totalProfit = totalProfitByCurrency.values.fold<double>(0, (sum, value) => sum + value);
 
     return Card(
       elevation: 4,
@@ -237,7 +269,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
                 Expanded(
                   child: _buildSummaryStatistic(
                     'Net Profit',
-                    '\$${totalProfit.toStringAsFixed(2)}',
+                    _formatBreakdown(totalProfitByCurrency),
                     totalProfit >= 0 ? Colors.green : Colors.red,
                   ),
                 ),
@@ -280,6 +312,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
   Widget _buildAccountReportCard(String accountId, Map<String, dynamic> report) {
     final netProfit = report['netProfit'] as double? ?? 0;
     final isProfit = netProfit >= 0;
+    final currency = _normalizeCurrency(report['currency']);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -326,7 +359,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    '\$${netProfit.toStringAsFixed(2)}',
+                    _formatMoney(netProfit, currency),
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: isProfit ? Colors.green : Colors.red,
@@ -361,21 +394,21 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
                   const Divider(height: 12),
                   _buildReportRow(
                     'Total Profit',
-                    '\$${(report['totalProfit'] ?? 0).toStringAsFixed(2)}',
+                    _formatMoney((report['totalProfit'] ?? 0) as num, currency),
                     color: Colors.green,
                   ),
                   _buildReportRow(
                     'Total Loss',
-                    '-\$${(report['totalLoss'] ?? 0).toStringAsFixed(2)}',
+                    _formatMoney(-((report['totalLoss'] ?? 0) as num), currency),
                     color: Colors.red,
                   ),
                   _buildReportRow(
                     'Largest Win',
-                    '\$${(report['largestWin'] ?? 0).toStringAsFixed(2)}',
+                    _formatMoney((report['largestWin'] ?? 0) as num, currency),
                   ),
                   _buildReportRow(
                     'Largest Loss',
-                    '-\$${(report['largestLoss']?.abs() ?? 0).toStringAsFixed(2)}',
+                    _formatMoney(-((report['largestLoss']?.abs() ?? 0) as num), currency),
                   ),
                 ],
               ),

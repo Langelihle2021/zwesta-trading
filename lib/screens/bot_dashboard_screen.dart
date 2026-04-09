@@ -94,19 +94,52 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     }
   }
 
+  String _normalizeCurrencyCode(dynamic value) {
+    final currency = value?.toString().trim().toUpperCase();
+    return currency == null || currency.isEmpty ? 'USD' : currency;
+  }
+
+  String _symbolForCode(String currencyCode) {
+    switch (_normalizeCurrencyCode(currencyCode)) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return 'GBP';
+      case 'USD':
+      default:
+        return r'$';
+    }
+  }
+
   String _formatAmount(
     CurrencyProvider currencyProvider,
     double amount, {
     int decimals = 2,
+    String? currencyCode,
   }) {
-    // Always display as USD - no currency conversion (backend enforces USD)
-    const symbol = r'$';
+    final symbol = _symbolForCode(currencyCode ?? _currencyCode(currencyProvider.currency));
     final absoluteAmount = amount.abs().toStringAsFixed(decimals);
 
     if (amount < 0) {
       return '-$symbol$absoluteAmount';
     }
     return '$symbol$absoluteAmount';
+  }
+
+  String _formatBotAggregate(CurrencyProvider currencyProvider, List<Map<String, dynamic>> bots, String field, {int decimals = 2}) {
+    final totals = <String, double>{};
+    for (final bot in bots) {
+      final currency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+      final amount = double.tryParse(bot[field]?.toString() ?? '0') ?? 0.0;
+      totals[currency] = (totals[currency] ?? 0.0) + amount;
+    }
+    if (totals.isEmpty) {
+      return _formatAmount(currencyProvider, 0, decimals: decimals);
+    }
+    final entries = totals.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    return entries
+        .map((entry) => _formatAmount(currencyProvider, entry.value, decimals: decimals, currencyCode: entry.key))
+        .join(' • ');
   }
 
   @override
@@ -243,7 +276,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                           const SizedBox(width: 10),
                           _summaryChip(
                             totalProfit >= 0 ? Icons.trending_up : Icons.trending_down,
-                            _formatAmount(currencyProvider, totalProfit),
+                            _formatBotAggregate(currencyProvider, allBots, 'profit'),
                             totalProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                           ),
                         ],
@@ -558,6 +591,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
     final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
+    final displayCurrency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
     final symbolStr = symbols is List ? symbols.join(', ') : symbols.toString();
     final runtime = bot['runtimeFormatted'] ?? '--';
     final drawdownPauseUntilText = bot['drawdownPauseUntil']?.toString();
@@ -698,7 +732,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               Text(runtime, style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
               const Spacer(),
               Text("Today's Profit ", style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-              Text(_formatAmount(currencyProvider, todaysProfit), style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontWeight: FontWeight.bold, fontSize: 13)),
+              Text(_formatAmount(currencyProvider, todaysProfit, currencyCode: displayCurrency), style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 10),
@@ -706,15 +740,15 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             children: [
               _botStat('Trades', '$totalTrades', const Color(0xFF00E5FF)),
               _botStat('Win Rate', '${winRate.toStringAsFixed(1)}%', const Color(0xFF69F0AE)),
-              _botStat('Profit', _formatAmount(currencyProvider, profit), profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)),
+              _botStat('Profit', _formatAmount(currencyProvider, profit, currencyCode: displayCurrency), profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               _botStat('ROI', '${roi.toStringAsFixed(1)}%', const Color(0xFFFFA726)),
-              _botStat('Avg/Trade', _formatAmount(currencyProvider, avgTrade, decimals: 0), const Color(0xFFAB47BC)),
-              _botStat('Max Drawdown', _formatAmount(currencyProvider, maxDrawdown, decimals: 0), const Color(0xFFFF8A80)),
+              _botStat('Avg/Trade', _formatAmount(currencyProvider, avgTrade, decimals: 0, currencyCode: displayCurrency), const Color(0xFFAB47BC)),
+              _botStat('Max Drawdown', _formatAmount(currencyProvider, maxDrawdown, decimals: 0, currencyCode: displayCurrency), const Color(0xFFFF8A80)),
             ],
           ),
           // Account Balance & Equity
@@ -743,7 +777,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       ),
                       Flexible(
                         child: Text(
-                          _formatAmount(currencyProvider, accountBalance),
+                          _formatAmount(currencyProvider, accountBalance, currencyCode: displayCurrency),
                           style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontWeight: FontWeight.w700, fontSize: 14),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -765,7 +799,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         ),
                         Flexible(
                           child: Text(
-                            _formatAmount(currencyProvider, accountEquity),
+                            _formatAmount(currencyProvider, accountEquity, currencyCode: displayCurrency),
                             style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -854,7 +888,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     if (posCurrent > 0 || posProfit != 0) ...[
                       const SizedBox(width: 6),
                       Text(
-                        '\$${posProfit.toStringAsFixed(2)}',
+                        _formatAmount(currencyProvider, posProfit, currencyCode: displayCurrency),
                         style: GoogleFonts.poppins(
                           color: posProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                           fontSize: 11,
@@ -1421,6 +1455,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final botId = bot['botId'] ?? 'Unknown';
     final isEnabled = bot['enabled'] == true;
     final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
+    final displayCurrency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
 
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotAnalyticsScreen(bot: bot))),
@@ -1449,7 +1484,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               ],
             ),
             Text(
-              '\$${profit.toStringAsFixed(2)}',
+              '${_symbolForCode(displayCurrency)}${profit.toStringAsFixed(2)}',
               style: GoogleFonts.poppins(
                 color: profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                 fontSize: 14,

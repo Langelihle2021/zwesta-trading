@@ -200,6 +200,7 @@ class FinancialService extends ChangeNotifier {
       final statement = FinancialStatement(
         id: 'fin_stmt_${DateTime.now().millisecondsSinceEpoch}',
         accountId: account.id,
+        currency: account.currency,
         startDate: startDate,
         endDate: endDate,
         capitalInvested: capitalInvested,

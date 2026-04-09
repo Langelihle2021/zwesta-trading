@@ -22,6 +22,37 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
   String? _error;
   int _selectedBotIndex = -1;
 
+  String _normalizeCurrency(dynamic value) {
+    final currency = value?.toString().trim().toUpperCase();
+    return currency == null || currency.isEmpty ? 'USD' : currency;
+  }
+
+  String _currencySymbol(String currency) {
+    switch (_normalizeCurrency(currency)) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return 'GBP';
+      case 'USD':
+      default:
+        return r'$';
+    }
+  }
+
+  String _formatMoney(num amount, String currency, {int decimals = 2}) {
+    return '${_currencySymbol(currency)}${amount.toStringAsFixed(decimals)}';
+  }
+
+  String _formatBreakdown(Map<String, dynamic>? totals, {int decimals = 2}) {
+    if (totals == null || totals.isEmpty) {
+      return _formatMoney(0, 'USD', decimals: decimals);
+    }
+    final entries = totals.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    return entries
+        .map((entry) => _formatMoney((entry.value as num?) ?? 0, entry.key, decimals: decimals))
+        .join(' • ');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +80,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
               'botsRunning': data['botsRunning'] ?? 0,
               'totalBalance': data['totalBalance'] ?? 0.0,
               'totalProfit': data['totalProfit'] ?? 0.0,
+              'totalBalanceByCurrency': Map<String, dynamic>.from(data['totalBalanceByCurrency'] ?? {}),
+              'totalProfitByCurrency': Map<String, dynamic>.from(data['totalProfitByCurrency'] ?? {}),
             };
             _loading = false;
           });
@@ -149,6 +182,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     final stats = _dashboardStats;
     final totalBalance = stats['totalBalance'] ?? 0.0;
     final totalProfit = stats['totalProfit'] ?? 0.0;
+    final totalBalanceByCurrency = stats['totalBalanceByCurrency'] as Map<String, dynamic>?;
+    final totalProfitByCurrency = stats['totalProfitByCurrency'] as Map<String, dynamic>?;
     final profitColor = totalProfit >= 0 ? Colors.greenAccent : Colors.redAccent;
 
     return Column(
@@ -158,7 +193,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
             Expanded(
               child: _buildStatsCard(
                 'Total Balance',
-                '\$${totalBalance.toStringAsFixed(2)}',
+                _formatBreakdown(totalBalanceByCurrency),
                 Icons.account_balance_wallet,
                 Colors.blueAccent,
               ),
@@ -167,7 +202,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
             Expanded(
               child: _buildStatsCard(
                 'Total Profit',
-                '\$${totalProfit.toStringAsFixed(2)}',
+                _formatBreakdown(totalProfitByCurrency),
                 Icons.trending_up,
                 profitColor,
               ),
@@ -225,8 +260,9 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
           ),
           const SizedBox(height: 8),
           Text(value,
+            textAlign: TextAlign.left,
             style: GoogleFonts.poppins(color: color, fontWeight: FontWeight.w600, fontSize: 18),
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
         ],
@@ -238,6 +274,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     final isExpanded = _selectedBotIndex == index;
     final balance = bot['balance'] ?? 0.0;
     final profit = bot['profit'] ?? 0.0;
+    final displayCurrency = _normalizeCurrency(bot['displayCurrency'] ?? bot['currency']);
     final profitColor = profit >= 0 ? Colors.greenAccent : Colors.redAccent;
     final winRate = bot['winRate'] ?? 0.0;
 
@@ -345,8 +382,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _buildQuickStat('Balance', '\$${balance.toStringAsFixed(2)}', Colors.blueAccent),
-                      _buildQuickStat('Profit', '\$${profit.toStringAsFixed(2)}', profitColor),
+                      _buildQuickStat('Balance', _formatMoney(balance, displayCurrency), Colors.blueAccent),
+                      _buildQuickStat('Profit', _formatMoney(profit, displayCurrency), profitColor),
                       _buildQuickStat('Trades', '${bot['trades'] ?? 0}', Colors.orange),
                       _buildQuickStat('Win Rate', '${winRate.toStringAsFixed(1)}%', winRate >= 50 ? Colors.green : Colors.red),
                     ],
@@ -398,8 +435,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
             _buildDetailRow('Winning Trades', '${(bot['trades'] ?? 0) > 0 ? (bot['trades'] * (bot['winRate'] ?? 0) / 100).toStringAsFixed(0) : '0'}'),
             _buildDetailRow('Losing Trades', '${(bot['trades'] ?? 0) > 0 ? (bot['trades'] * (100 - (bot['winRate'] ?? 50)) / 100).toStringAsFixed(0) : '0'}'),
             _buildDetailRow('Win Rate', '${(bot['winRate'] ?? 0).toStringAsFixed(1)}%'),
-            _buildDetailRow('Current Balance', '\$${(bot['balance'] ?? 0).toStringAsFixed(2)}'),
-            _buildDetailRow('Total Profit', '\$${(bot['profit'] ?? 0).toStringAsFixed(2)}'),
+            _buildDetailRow('Current Balance', _formatMoney((bot['balance'] ?? 0) as num, _normalizeCurrency(bot['displayCurrency'] ?? bot['currency']))),
+            _buildDetailRow('Total Profit', _formatMoney((bot['profit'] ?? 0) as num, _normalizeCurrency(bot['displayCurrency'] ?? bot['currency']))),
             _buildDetailRow('Trading Symbol', bot['symbol'] ?? 'EURUSD'),
             
             const SizedBox(height: 16),
@@ -465,6 +502,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
     );
 
   void _showBotDetails(Map<String, dynamic> bot) {
+    final displayCurrency = _normalizeCurrency(bot['displayCurrency'] ?? bot['currency']);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -483,8 +521,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
               _dialogDetailRow('Created', bot['createdAt']),
               _dialogDetailRow('Broker', bot['broker']?['type'] ?? 'N/A'),
               _dialogDetailRow('Account #', bot['broker']?['accountNumber'] ?? 'N/A'),
-              _dialogDetailRow('Current Balance', '\$${(bot['balance'] ?? 0).toStringAsFixed(2)}'),
-              _dialogDetailRow('Total Profit', '\$${(bot['profit'] ?? 0).toStringAsFixed(2)}'),
+              _dialogDetailRow('Current Balance', _formatMoney((bot['balance'] ?? 0) as num, displayCurrency)),
+              _dialogDetailRow('Total Profit', _formatMoney((bot['profit'] ?? 0) as num, displayCurrency)),
             ],
           ),
         ),
@@ -499,6 +537,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
   }
 
   void _showTradesHistory(Map<String, dynamic> bot) {
+    final displayCurrency = _normalizeCurrency(bot['displayCurrency'] ?? bot['currency']);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -514,7 +553,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
               _dialogDetailRow('Winning Trades', '${((bot['trades'] ?? 0) * (bot['winRate'] ?? 0) / 100).toStringAsFixed(0)}'),
               _dialogDetailRow('Losing Trades', '${((bot['trades'] ?? 0) * (100 - (bot['winRate'] ?? 50)) / 100).toStringAsFixed(0)}'),
               _dialogDetailRow('Win Rate', '${(bot['winRate'] ?? 0).toStringAsFixed(1)}%'),
-              _dialogDetailRow('Total Profit', '\$${(bot['profit'] ?? 0).toStringAsFixed(2)}'),
+              _dialogDetailRow('Total Profit', _formatMoney((bot['profit'] ?? 0) as num, displayCurrency)),
             ],
           ),
         ),
@@ -529,6 +568,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
   }
 
   void _showCommissions(Map<String, dynamic> bot) {
+    final displayCurrency = _normalizeCurrency(bot['displayCurrency'] ?? bot['currency']);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -546,8 +586,8 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
               const SizedBox(height: 16),
               _dialogDetailRow('Bot Name', bot['botName']),
               _dialogDetailRow('Broker', bot['broker']?['type'] ?? 'N/A'),
-              _dialogDetailRow('Current Balance', '\$${(bot['balance'] ?? 0).toStringAsFixed(2)}'),
-              _dialogDetailRow('Profit Generated', '\$${(bot['profit'] ?? 0).toStringAsFixed(2)}'),
+              _dialogDetailRow('Current Balance', _formatMoney((bot['balance'] ?? 0) as num, displayCurrency)),
+              _dialogDetailRow('Profit Generated', _formatMoney((bot['profit'] ?? 0) as num, displayCurrency)),
               const SizedBox(height: 12),
               const Divider(color: Colors.white12),
               const SizedBox(height: 12),

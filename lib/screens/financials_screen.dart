@@ -22,6 +22,10 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
   late DateTime endDate;
   FinancialStatement? selectedStatement;
 
+  String _formatCurrency(FinancialStatement stmt, double amount) {
+    return FinancialMetrics.formatCurrency(amount, stmt.currency);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -261,12 +265,12 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
             const SizedBox(height: 16),
             _buildMetricRow(
               'Initial Capital Invested',
-              FinancialMetrics.formatCurrency(stmt.capitalInvested),
+              _formatCurrency(stmt, stmt.capitalInvested),
               Colors.blue,
             ),
             _buildMetricRow(
               'Additional Investments',
-              FinancialMetrics.formatCurrency(stmt.additionalInvestments),
+              _formatCurrency(stmt, stmt.additionalInvestments),
               Colors.lightBlue,
             ),
             Container(
@@ -278,7 +282,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
               ),
               child: _buildMetricRow(
                 'Total Capital',
-                FinancialMetrics.formatCurrency(stmt.totalCapital),
+                _formatCurrency(stmt, stmt.totalCapital),
                 Colors.cyan,
               ),
             ),
@@ -301,22 +305,22 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
             const SizedBox(height: 16),
             _buildMetricRow(
               'Trading Profit',
-              FinancialMetrics.formatCurrency(stmt.tradingProfit),
+              _formatCurrency(stmt, stmt.tradingProfit),
               Colors.green,
             ),
             _buildMetricRow(
               'Dividends',
-              FinancialMetrics.formatCurrency(stmt.dividends),
+              _formatCurrency(stmt, stmt.dividends),
               Colors.greenAccent,
             ),
             _buildMetricRow(
               'Interest Income',
-              FinancialMetrics.formatCurrency(stmt.interest),
+              _formatCurrency(stmt, stmt.interest),
               Colors.lightGreen,
             ),
             _buildMetricRow(
               'Other Income',
-              FinancialMetrics.formatCurrency(stmt.otherIncome),
+              _formatCurrency(stmt, stmt.otherIncome),
               Colors.lime,
             ),
             Container(
@@ -328,7 +332,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
               ),
               child: _buildMetricRow(
                 'Total Revenue',
-                FinancialMetrics.formatCurrency(stmt.totalRevenue),
+                _formatCurrency(stmt, stmt.totalRevenue),
                 Colors.greenAccent,
               ),
             ),
@@ -351,27 +355,27 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
             const SizedBox(height: 16),
             _buildMetricRow(
               'Trading Commissions',
-              FinancialMetrics.formatCurrency(stmt.commissions),
+              _formatCurrency(stmt, stmt.commissions),
               Colors.orange,
             ),
             _buildMetricRow(
               'Bid-Ask Spreads',
-              FinancialMetrics.formatCurrency(stmt.spreads),
+              _formatCurrency(stmt, stmt.spreads),
               Colors.orangeAccent,
             ),
             _buildMetricRow(
               'Platform Fees',
-              FinancialMetrics.formatCurrency(stmt.platformFees),
+              _formatCurrency(stmt, stmt.platformFees),
               Colors.deepOrange,
             ),
             _buildMetricRow(
               'Withdrawal Fees',
-              FinancialMetrics.formatCurrency(stmt.withdrawalFees),
+              _formatCurrency(stmt, stmt.withdrawalFees),
               Colors.deepOrangeAccent,
             ),
             _buildMetricRow(
               'Other Costs',
-              FinancialMetrics.formatCurrency(stmt.otherCosts),
+              _formatCurrency(stmt, stmt.otherCosts),
               Colors.amber,
             ),
             Container(
@@ -383,7 +387,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
               ),
               child: _buildMetricRow(
                 'Total Costs',
-                FinancialMetrics.formatCurrency(stmt.totalCosts),
+                _formatCurrency(stmt, stmt.totalCosts),
                 Colors.redAccent,
               ),
             ),
@@ -427,12 +431,12 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
             const SizedBox(height: 16),
             _buildMetricRow(
               'Gross Profit',
-              FinancialMetrics.formatCurrency(stmt.grossProfit),
+              _formatCurrency(stmt, stmt.grossProfit),
               Colors.lightGreen,
             ),
             _buildMetricRow(
               'Operating Profit',
-              FinancialMetrics.formatCurrency(stmt.operatingProfit),
+              _formatCurrency(stmt, stmt.operatingProfit),
               Colors.green,
             ),
             Container(
@@ -446,7 +450,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                 children: [
                   _buildMetricRow(
                     'Net Profit/Loss',
-                    FinancialMetrics.formatCurrency(stmt.netProfit),
+                    _formatCurrency(stmt, stmt.netProfit),
                     isProfitable ? Colors.lightGreen : Colors.red[300]!,
                   ),
                   const SizedBox(height: 8),
@@ -505,12 +509,12 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
             const SizedBox(height: 16),
             _buildMetricRow(
               'Total Cash In',
-              FinancialMetrics.formatCurrency(stmt.totalCashIn),
+              _formatCurrency(stmt, stmt.totalCashIn),
               Colors.green,
             ),
             _buildMetricRow(
               'Total Cash Out',
-              FinancialMetrics.formatCurrency(stmt.totalCashOut),
+              _formatCurrency(stmt, stmt.totalCashOut),
               Colors.red,
             ),
             Container(
@@ -522,7 +526,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
               ),
               child: _buildMetricRow(
                 'Net Cash Flow',
-                FinancialMetrics.formatCurrency(stmt.netCashFlow),
+                _formatCurrency(stmt, stmt.netCashFlow),
                 isCashFlowPositive ? Colors.lightGreen : Colors.red[300]!,
               ),
             ),
@@ -553,7 +557,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                           ),
                         ),
                         Text(
-                          FinancialMetrics.formatCurrency(e.amount),
+                          _formatCurrency(stmt, e.amount),
                           style: const TextStyle(color: Colors.green),
                         ),
                       ],
@@ -587,7 +591,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                           ),
                         ),
                         Text(
-                          FinancialMetrics.formatCurrency(e.amount),
+                          _formatCurrency(stmt, e.amount),
                           style: const TextStyle(color: Colors.red),
                         ),
                       ],
@@ -615,12 +619,12 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
             const SizedBox(height: 16),
             _buildMetricRow(
               'Opening Balance',
-              FinancialMetrics.formatCurrency(stmt.openingBalance),
+              _formatCurrency(stmt, stmt.openingBalance),
               Colors.blue,
             ),
             _buildMetricRow(
               'Closing Balance',
-              FinancialMetrics.formatCurrency(stmt.closingBalance),
+              _formatCurrency(stmt, stmt.closingBalance),
               Colors.blue,
             ),
             Container(
@@ -632,7 +636,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
               ),
               child: _buildMetricRow(
                 'Total Change',
-                FinancialMetrics.formatCurrency(stmt.balanceChange),
+                _formatCurrency(stmt, stmt.balanceChange),
                 stmt.balanceChange >= 0 ? Colors.lightGreen : Colors.red[300]!,
               ),
             ),
@@ -675,7 +679,7 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
                     ),
                   ),
                   subtitle: Text(
-                    'Net Profit: ${FinancialMetrics.formatCurrency(stmt.netProfit)} | ROI: ${FinancialMetrics.formatPercentage(stmt.ROI)}',
+                    'Net Profit: ${_formatCurrency(stmt, stmt.netProfit)} | ROI: ${FinancialMetrics.formatPercentage(stmt.ROI)}',
                     style: TextStyle(color: Colors.grey[400]),
                   ),
                   trailing: IconButton(

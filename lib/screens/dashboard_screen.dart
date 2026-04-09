@@ -68,6 +68,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return symbols[code.toUpperCase()] ?? code;
   }
 
+  String _normalizeCurrency(dynamic value) {
+    final currency = value?.toString().trim().toUpperCase();
+    return currency == null || currency.isEmpty ? 'USD' : currency;
+  }
+
+  String _formatCurrencyAmount(double amount, String currency, {int decimals = 2}) {
+    return '${_currencySymbol(currency)}${amount.toStringAsFixed(decimals)}';
+  }
+
+  String _accountCurrency(Map<String, dynamic> account) {
+    return _normalizeCurrency(account['currency'] ?? account['account_currency']);
+  }
+
+  String _botCurrency(Map<String, dynamic> bot) {
+    return _normalizeCurrency(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+  }
+
+  Map<String, double> _aggregateAccountBalances(Iterable<Map<String, dynamic>> accounts) {
+    final totals = <String, double>{};
+    for (final account in accounts) {
+      final currency = _accountCurrency(account);
+      final amount = (account['balance'] as num?)?.toDouble() ?? 0.0;
+      totals[currency] = (totals[currency] ?? 0.0) + amount;
+    }
+    return totals;
+  }
+
+  Map<String, double> _aggregateBotValues(String field) {
+    final totals = <String, double>{};
+    for (final bot in _realBotsList.cast<Map<String, dynamic>>()) {
+      final currency = _botCurrency(bot);
+      final amount = double.tryParse(bot[field]?.toString() ?? '0') ?? 0.0;
+      totals[currency] = (totals[currency] ?? 0.0) + amount;
+    }
+    return totals;
+  }
+
+  String _formatCurrencyBreakdown(Map<String, double> totals, {int decimals = 2}) {
+    if (totals.isEmpty) {
+      return _formatCurrencyAmount(0, 'USD', decimals: decimals);
+    }
+    final entries = totals.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return entries
+        .map((entry) => _formatCurrencyAmount(entry.value, entry.key, decimals: decimals))
+        .join(' • ');
+  }
+
   // Broker account balances
   List<Map<String, dynamic>> _brokerAccounts = [];
   bool _brokerBalancesLoading = false;
@@ -1146,9 +1194,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
                     return mode == 'demo' || mode == 'trial';
                   }).toList();
-                  final filteredTotal = filtered.fold<double>(
-                    0, (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
-                  );
+                  final filteredTotals = _aggregateAccountBalances(filtered);
                   final connectedCount = filtered.where((a) => a['connected'] == true).length;
 
                   return Container(
@@ -1173,7 +1219,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Text('Loading...', style: GoogleFonts.poppins(color: Colors.white38, fontSize: 14)),
                                 ],
                               ) else Text(
-                                '\$${filteredTotal.toStringAsFixed(2)}',
+                                _formatCurrencyBreakdown(filteredTotals),
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 28,
@@ -1296,9 +1342,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final totalTrades = _realBotsList.fold<int>(
       0, (sum, bot) => sum + (int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0),
     );
-    final totalProfit = _realBotsList.fold<double>(
-      0, (sum, bot) => sum + (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0),
-    );
+    final totalProfitByCurrency = _aggregateBotValues('profit');
+    final totalProfit = totalProfitByCurrency.values.fold<double>(0, (sum, value) => sum + value);
 
     return Row(
       children: [
@@ -1309,7 +1354,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Expanded(
           child: _buildStatPill(
             totalProfit >= 0 ? Icons.trending_up : Icons.trending_down,
-            '\$${totalProfit.toStringAsFixed(0)}',
+            _formatCurrencyBreakdown(totalProfitByCurrency, decimals: 0),
             'Profit',
             totalProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
           ),
@@ -1332,6 +1377,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 10),
           Text(
             value,
+            textAlign: TextAlign.center,
+            maxLines: 2,
             style: GoogleFonts.poppins(
               color: Colors.white,
               fontSize: 20,
@@ -1349,9 +1396,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── PROFIT OVERVIEW ──
   Widget _buildProfitOverviewCard() {
-    final totalProfit = _realBotsList.fold<double>(
-      0, (sum, bot) => sum + (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0),
-    );
+    final totalProfitByCurrency = _aggregateBotValues('profit');
+    final totalProfit = totalProfitByCurrency.values.fold<double>(0, (sum, value) => sum + value);
     final winningBots = _realBotsList.where((bot) => (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0) > 0).length;
     final totalBots = _realBotsList.length;
     final winRate = totalBots > 0 ? (winningBots / totalBots * 100) : 0.0;
@@ -1387,7 +1433,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 20),
           Center(
             child: Text(
-              '\$${totalProfit.toStringAsFixed(2)}',
+              _formatCurrencyBreakdown(totalProfitByCurrency),
               style: GoogleFonts.poppins(
                 color: totalProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                 fontSize: 36,

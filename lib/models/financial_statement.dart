@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 class FinancialStatement {
   final String id;
   final String accountId;
+  final String currency;
   final DateTime startDate;
   final DateTime endDate;
   
@@ -51,6 +52,7 @@ class FinancialStatement {
   FinancialStatement({
     required this.id,
     required this.accountId,
+    required this.currency,
     required this.startDate,
     required this.endDate,
     required this.capitalInvested,
@@ -87,6 +89,7 @@ class FinancialStatement {
     return FinancialStatement(
       id: json['id'] ?? '',
       accountId: json['accountId'] ?? '',
+      currency: json['currency'] ?? 'USD',
       startDate: DateTime.parse(json['startDate'] ?? DateTime.now().toString()),
       endDate: DateTime.parse(json['endDate'] ?? DateTime.now().toString()),
       capitalInvested: (json['capitalInvested'] ?? 0).toDouble(),
@@ -128,6 +131,7 @@ class FinancialStatement {
     return {
       'id': id,
       'accountId': accountId,
+      'currency': currency,
       'startDate': startDate.toIso8601String(),
       'endDate': endDate.toIso8601String(),
       'capitalInvested': capitalInvested,
@@ -205,8 +209,18 @@ class CashFlowEntry {
 
 /// Helper class for financial calculations
 class FinancialMetrics {
-  static String formatCurrency(double amount) {
-    final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
+  static String formatCurrency(double amount, [String currency = 'USD']) {
+    const symbols = {
+      'USD': r'$',
+      'ZAR': 'R',
+      'GBP': '£',
+      'EUR': '€',
+    };
+    final normalizedCurrency = currency.trim().toUpperCase();
+    final formatter = NumberFormat.currency(
+      symbol: symbols[normalizedCurrency] ?? '$normalizedCurrency ',
+      decimalDigits: 2,
+    );
     return formatter.format(amount);
   }
 

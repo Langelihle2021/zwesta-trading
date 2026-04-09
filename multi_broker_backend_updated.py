@@ -6508,7 +6508,7 @@ def get_account_balances():
         # Fetch balance from each broker with timeout protection
         for cred in credentials:
             broker_name = canonicalize_broker_name(cred['broker_name'])
-            account_num = cred['account_number']
+            account_num = str(cred['account_number'] or '').strip()
             is_live = int(normalize_mt5_is_live_flag(broker_name, cred['is_live'], cred.get('server')))
             mode = 'Live' if is_live else 'Demo'
 
@@ -6904,12 +6904,14 @@ def get_account_details(credential_id):
         net_profit = gross_profit + total_commission + total_swap  # commission and swap are usually negative
         win_rate = (winning_trades / max(winning_trades + losing_trades, 1)) * 100
         
+        resolved_is_live = bool(normalize_mt5_is_live_flag(broker_name, cred.get('is_live'), cred.get('server')))
+
         detailed_account = {
             'credentialId': credential_id,
             'broker': broker_name,
             'accountNumber': account_number,
-            'isLive': bool(cred['is_live']),
-            'mode': 'live' if cred['is_live'] else 'demo',
+            'isLive': resolved_is_live,
+            'mode': 'live' if resolved_is_live else 'demo',
             'server': cred.get('server'),
             'balance': balance,
             'equity': equity,
@@ -7124,6 +7126,7 @@ def get_report_summary():
             reports[account_id] = {
                 'broker': connection.broker_type.value,
                 'accountNumber': connection.account_info.get('accountNumber') if connection.account_info else 'N/A',
+                'currency': (connection.account_info.get('currency') if connection.account_info else None) or 'USD',
                 'totalTrades': len(closed_trades),
                 'winningTrades': len(winning),
                 'losingTrades': len(losing),
@@ -10088,6 +10091,40 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     bot_state['brokerName'] = broker_name
     bot_state['broker_type'] = bot_state.get('broker_type') or broker_name
     bot_state['mode'] = bot_state.get('mode') or ('live' if row['is_live'] else 'demo')
+    if row['credential_id']:
+        credential_conn = None
+        try:
+            credential_conn = get_db_connection()
+            credential_cursor = credential_conn.cursor()
+            credential_cursor.execute(
+                '''
+                SELECT broker_name, server, is_live, account_currency
+                FROM broker_credentials
+                WHERE credential_id = ?
+                LIMIT 1
+                ''',
+                (row['credential_id'],)
+            )
+            credential_row = credential_cursor.fetchone()
+            if credential_row:
+                normalized_mode_is_live = bool(
+                    normalize_mt5_is_live_flag(
+                        canonicalize_broker_name(credential_row['broker_name']) if credential_row['broker_name'] else broker_name,
+                        credential_row['is_live'],
+                        credential_row['server'],
+                    )
+                )
+                bot_state['mode'] = 'live' if normalized_mode_is_live else 'demo'
+                if credential_row['account_currency']:
+                    bot_state['displayCurrency'] = str(credential_row['account_currency']).upper()
+        except Exception as e:
+            logger.warning(f"Could not restore credential metadata for bot {row['bot_id']}: {e}")
+        finally:
+            if credential_conn:
+                try:
+                    credential_conn.close()
+                except Exception:
+                    pass
     bot_state['strategy'] = row['strategy']
     bot_state['enabled'] = bool(row['enabled'])
     bot_state['createdAt'] = row['created_at'] or bot_state.get('createdAt') or datetime.now().isoformat()
@@ -11461,14 +11498,17 @@ def get_broker_credentials():
         seen = {}  # key: (broker_name, account_number), value: credential_dict
         
         for row in rows:
-            key = (row[1], row[2])  # (broker_name, account_number)
+            broker_name = canonicalize_broker_name(row[1])
+            account_number = str(row[2] or '').strip()
+            normalized_is_live = bool(normalize_mt5_is_live_flag(broker_name, row[4], row[3]))
+            key = (broker_name, account_number)  # (broker_name, account_number)
             if key not in seen:  # Keep first (most recent due to ORDER BY DESC)
                 seen[key] = {
                     'credential_id': row[0],
-                    'broker': row[1],
-                    'account_number': row[2],
+                    'broker': broker_name,
+                    'account_number': account_number,
                     'server': row[3],
-                    'is_live': bool(row[4]),
+                    'is_live': normalized_is_live,
                     'is_active': bool(row[5]),
                     'created_at': row[6],
                     'account_currency': (row[7] or 'USD').upper(),
@@ -16203,6 +16243,8 @@ def get_dashboard_summary():
         conn.close()
         
         summary = []
+        total_balance_by_currency: Dict[str, float] = {}
+        total_profit_by_currency: Dict[str, float] = {}
         
         for bot_row in user_bots:
             bot_id = bot_row['bot_id']
@@ -16228,6 +16270,10 @@ def get_dashboard_summary():
             
             total_profit = bot.get('totalProfit', 0)
             total_trades = bot.get('totalTrades', 0)
+            display_currency = (bot.get('displayCurrency') or bot.get('accountCurrency') or 'USD').upper()
+
+            total_balance_by_currency[display_currency] = total_balance_by_currency.get(display_currency, 0.0) + float(current_balance or 0)
+            total_profit_by_currency[display_currency] = total_profit_by_currency.get(display_currency, 0.0) + float(total_profit or 0)
             
             summary.append({
                 'botId': bot_id,
@@ -16236,6 +16282,7 @@ def get_dashboard_summary():
                     'type': broker_type,
                     'accountNumber': bot_row.get('broker_account_id', 'N/A')
                 },
+                'displayCurrency': display_currency,
                 'balance': round(current_balance, 2),
                 'profit': round(total_profit, 2),
                 'trades': total_trades,
@@ -16251,6 +16298,8 @@ def get_dashboard_summary():
             'botsRunning': sum(1 for b in summary if b['status'] == 'Running'),
             'totalBalance': round(sum(b['balance'] for b in summary), 2),
             'totalProfit': round(sum(b['profit'] for b in summary), 2),
+            'totalBalanceByCurrency': {currency: round(value, 2) for currency, value in total_balance_by_currency.items()},
+            'totalProfitByCurrency': {currency: round(value, 2) for currency, value in total_profit_by_currency.items()},
             'bots': summary,
             'timestamp': datetime.now().isoformat()
         }), 200
