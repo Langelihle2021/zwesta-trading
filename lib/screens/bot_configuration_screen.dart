@@ -768,6 +768,25 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
   }
 
+  String _formatCompactCurrency(double amount, String currencyCode) {
+    return '${_currencyPrefixForCode(currencyCode)}${amount.toStringAsFixed(2)}';
+  }
+
+  String _credentialStatusText(BrokerCredential credential) {
+    if (credential.isHealthy) {
+      return 'Cache ${_formatCompactCurrency(credential.cachedBalance, credential.accountCurrency)}';
+    }
+    return 'No cached balance';
+  }
+
+  Color _credentialModeColor(BrokerCredential credential) {
+    return credential.isLive ? Colors.red : Colors.green;
+  }
+
+  String _credentialModeLabel(BrokerCredential credential) {
+    return credential.isLive ? 'LIVE' : 'DEMO';
+  }
+
   Widget _binanceQuickActionButton({
     required IconData icon,
     required String label,
@@ -1847,6 +1866,17 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
+                                    if (_brokerService.activeCredential != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${_credentialModeLabel(_brokerService.activeCredential!)} • ${_brokerService.activeCredential!.accountCurrency} • ${_credentialStatusText(_brokerService.activeCredential!)}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: _brokerService.activeCredential!.isHealthy ? Colors.grey[300] : Colors.orange[300],
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -1896,16 +1926,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                     final isActive = cred.credentialId ==
                                         _brokerService
                                             .activeCredential?.credentialId;
-                                    final modeLabel =
-                                        cred.isLive ? 'LIVE' : 'DEMO';
-                                    final modeColor =
-                                        cred.isLive ? Colors.red : Colors.green;
+                                    final modeLabel = _credentialModeLabel(cred);
+                                    final modeColor = _credentialModeColor(cred);
                                     return FilterChip(
                                       label: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text(
-                                              '${cred.broker} #${cred.accountNumber} '),
+                                          Text('${cred.broker} #${cred.accountNumber} '),
                                           Container(
                                             padding: const EdgeInsets.symmetric(
                                                 horizontal: 6, vertical: 1),
@@ -1920,6 +1947,25 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                                   fontSize: 10,
                                                   fontWeight: FontWeight.bold,
                                                   color: modeColor),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            cred.accountCurrency,
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            cred.isHealthy
+                                                ? _formatCompactCurrency(cred.cachedBalance, cred.accountCurrency)
+                                                : 'STALE',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w600,
+                                              color: cred.isHealthy ? Colors.white70 : Colors.orangeAccent,
                                             ),
                                           ),
                                         ],
@@ -1997,9 +2043,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     if (_brokerService.activeCredential != null) ...[
                       const SizedBox(height: 4),
                       Text(
-                        'Broker account: ${_brokerService.activeCredential!.broker} • ${_brokerService.activeCredential!.accountNumber}',
+                        'Broker account: ${_brokerService.activeCredential!.broker} • ${_brokerService.activeCredential!.accountNumber} • ${_credentialModeLabel(_brokerService.activeCredential!)} • ${_brokerService.activeCredential!.accountCurrency}',
                         style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                       ),
+                      if (!_brokerService.activeCredential!.isHealthy)
+                        Text(
+                          'This credential has no warmed cache yet. It may show as disconnected until you test the connection or start a bot on it.',
+                          style: TextStyle(fontSize: 11, color: Colors.orange[300]),
+                        ),
                     ],
                     if (_isBinanceBroker) ...[
                       const SizedBox(height: 10),
@@ -2477,7 +2528,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                             decimal: true),
                                     decoration: InputDecoration(
                                       hintText:
-                                        'Fixed amount per trade in this account currency (optional)',
+                                        'Optional fixed amount per trade in $currLabel',
                                       prefixText: prefix,
                                       border: OutlineInputBorder(
                                           borderRadius:
@@ -2487,7 +2538,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Fixed $currLabel amount per trade. Leave empty to use Risk % instead.',
+                                    'This follows the selected broker account currency. Demo USD accounts use dollars, live ZAR accounts use rands. Leave it empty to size trades from Risk % instead.',
                                     style: TextStyle(
                                         fontSize: 11, color: Colors.grey[400]),
                                   ),

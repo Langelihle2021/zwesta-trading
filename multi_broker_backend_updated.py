@@ -11485,7 +11485,8 @@ def get_broker_credentials():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT credential_id, broker_name, account_number, server, is_live, is_active, created_at, account_currency
+            SELECT credential_id, broker_name, account_number, server, is_live, is_active,
+                   created_at, account_currency, COALESCE(cached_balance, 0)
             FROM broker_credentials
             WHERE user_id = ? AND is_active = 1
             ORDER BY broker_name, account_number, created_at DESC
@@ -11512,6 +11513,8 @@ def get_broker_credentials():
                     'is_active': bool(row[5]),
                     'created_at': row[6],
                     'account_currency': (row[7] or 'USD').upper(),
+                    'cached_balance': float(row[8] or 0),
+                    'has_cached_balance': float(row[8] or 0) > 0,
                 }
         
         credentials = list(seen.values())
@@ -12831,6 +12834,19 @@ BOT_MANAGEMENT_PROFILES = {
         'autoSwitch': True,
         'dynamicSizing': True,
     },
+    'fast_growth': {
+        'riskPerTrade': 30.0,
+        'maxDailyLoss': 160.0,
+        'profitLock': 90.0,
+        'drawdownPausePercent': 12.0,
+        'drawdownPauseHours': 3.0,
+        'maxOpenPositions': 6,
+        'maxPositionsPerSymbol': 2,
+        'signalThreshold': 50,
+        'allowedVolatility': ['Low', 'Medium', 'High'],
+        'autoSwitch': True,
+        'dynamicSizing': True,
+    },
 }
 
 SUPPORTED_DISPLAY_CURRENCIES = {'USD', 'ZAR', 'GBP'}
@@ -12883,6 +12899,8 @@ def _normalize_management_profile(raw_profile) -> str:
     profile = str(raw_profile or 'beginner').strip().lower()
     if profile in {'small_account', 'small', 'micro', 'tiny', 'dca', 'swing', 'swing_dca', 'small-account'}:
         return 'small_account'
+    if profile in {'fast_growth', 'fast-growth', 'fast', 'growth', 'quick_growth'}:
+        return 'fast_growth'
     if profile in {'safe', 'conservative', 'starter', 'new', 'novice'}:
         return 'beginner'
     if profile in {'moderate', 'medium', 'assisted'}:

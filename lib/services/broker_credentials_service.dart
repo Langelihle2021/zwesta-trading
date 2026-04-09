@@ -17,6 +17,8 @@ class BrokerCredential {
     required this.isLive,
     required this.isActive,
     required this.createdAt,
+    required this.cachedBalance,
+    required this.hasCachedBalance,
     this.apiKey,
   });
 
@@ -29,6 +31,8 @@ class BrokerCredential {
       isLive: json['is_live'] ?? false,
       isActive: json['is_active'] ?? true,
       createdAt: DateTime.parse(json['created_at'] ?? DateTime.now().toString()),
+      cachedBalance: (json['cached_balance'] ?? 0).toDouble(),
+      hasCachedBalance: json['has_cached_balance'] ?? ((json['cached_balance'] ?? 0).toDouble() > 0),
       apiKey: json['api_key'],
     );
   final String credentialId;
@@ -39,7 +43,11 @@ class BrokerCredential {
   final bool isLive;
   final bool isActive;
   final DateTime createdAt;
+  final double cachedBalance;
+  final bool hasCachedBalance;
   final String? apiKey;
+
+  bool get isHealthy => hasCachedBalance || cachedBalance > 0;
 
   Map<String, dynamic> toJson() => {
     'credential_id': credentialId,
@@ -50,6 +58,8 @@ class BrokerCredential {
     'is_live': isLive,
     'is_active': isActive,
     'created_at': createdAt.toIso8601String(),
+    'cached_balance': cachedBalance,
+    'has_cached_balance': hasCachedBalance,
   };
 }
 
@@ -72,21 +82,66 @@ class BrokerCredentialsService extends ChangeNotifier {
 
   static const List<String> _brokerPriority = ['exness', 'binance'];
 
-  BrokerCredential? _preferredCredential(Iterable<BrokerCredential> credentials) {
-    final list = credentials.toList();
+  List<BrokerCredential> _rankCredentials(Iterable<BrokerCredential> credentials) {
+    final ranked = credentials.toList();
+    ranked.sort((a, b) {
+      final healthCompare = (b.isHealthy ? 1 : 0).compareTo(a.isHealthy ? 1 : 0);
+      if (healthCompare != 0) {
+        return healthCompare;
+      }
+
+      final activeCompare = (b.isActive ? 1 : 0).compareTo(a.isActive ? 1 : 0);
+      if (activeCompare != 0) {
+        return activeCompare;
+      }
+
+      final brokerIndexA = _brokerPriority.indexOf(a.broker.toLowerCase().trim());
+      final brokerIndexB = _brokerPriority.indexOf(b.broker.toLowerCase().trim());
+      final normalizedBrokerIndexA = brokerIndexA == -1 ? _brokerPriority.length : brokerIndexA;
+      final normalizedBrokerIndexB = brokerIndexB == -1 ? _brokerPriority.length : brokerIndexB;
+      final brokerCompare = normalizedBrokerIndexA.compareTo(normalizedBrokerIndexB);
+      if (brokerCompare != 0) {
+        return brokerCompare;
+      }
+
+      return b.createdAt.compareTo(a.createdAt);
+    });
+    return ranked;
+  }
+
+  BrokerCredential? _preferredCredential(
+    Iterable<BrokerCredential> credentials, {
+    String? preferredTradingMode,
+    String? preferredCredentialId,
+  }) {
+    final list = _rankCredentials(credentials);
     if (list.isEmpty) {
       return null;
     }
 
-    for (final brokerName in _brokerPriority) {
+    if (preferredCredentialId != null && preferredCredentialId.isNotEmpty) {
       for (final credential in list) {
+        if (credential.credentialId == preferredCredentialId) {
+          return credential;
+        }
+      }
+    }
+
+    final normalizedMode = preferredTradingMode?.trim().toUpperCase();
+    final modeMatched = normalizedMode == null
+        ? list
+        : list.where((credential) => normalizedMode == 'LIVE' ? credential.isLive : !credential.isLive).toList();
+    final rankedPool = _rankCredentials(modeMatched.isNotEmpty ? modeMatched : list);
+
+    for (final brokerName in _brokerPriority) {
+      for (final credential in rankedPool) {
         if (credential.broker.toLowerCase().trim() == brokerName) {
           return credential;
         }
       }
     }
 
-    return list.first;
+    return rankedPool.first;
   }
 
   /// Load credentials from backend
@@ -99,6 +154,9 @@ class BrokerCredentialsService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final sessionToken = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
+      final preferredTradingMode = prefs.getString('trading_mode');
+      final persistedActiveCredentialId = prefs.getString('active_credential_id');
+      final currentActiveCredentialId = _activeCredential?.credentialId;
 
       if (sessionToken == null || userId == null) {
         _errorMessage = 'Not authenticated. Please login again.';
@@ -134,13 +192,15 @@ class BrokerCredentialsService extends ChangeNotifier {
           }
         }
         
-        _credentials = deduped.values.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        _credentials = _rankCredentials(deduped.values);
         
         // Set active credential if available
         if (_credentials.isNotEmpty) {
           final activeCredentials = _credentials.where((c) => c.isActive);
           _activeCredential = _preferredCredential(
             activeCredentials.isNotEmpty ? activeCredentials : _credentials,
+            preferredTradingMode: preferredTradingMode,
+            preferredCredentialId: currentActiveCredentialId ?? persistedActiveCredentialId,
           );
         }
 
@@ -353,7 +413,7 @@ class BrokerCredentialsService extends ChangeNotifier {
         final credentialsList = (jsonDecode(credentialsJson) as List)
             .map((c) => BrokerCredential.fromJson(c))
             .toList();
-        _credentials = credentialsList;
+        _credentials = _rankCredentials(credentialsList);
 
         final activeId = prefs.getString('active_credential_id');
         if (activeId != null) {
@@ -362,7 +422,7 @@ class BrokerCredentialsService extends ChangeNotifier {
           );
           _activeCredential = matchedCredential.isNotEmpty
               ? matchedCredential.first
-              : _preferredCredential(_credentials);
+              : _preferredCredential(_credentials, preferredCredentialId: activeId);
         } else {
           _activeCredential = _preferredCredential(_credentials);
         }
