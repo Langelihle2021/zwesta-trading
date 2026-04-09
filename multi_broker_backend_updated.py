@@ -413,6 +413,36 @@ def normalize_mt5_server_name(broker_name: str, is_live: bool, server: str = Non
     return 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
 
 
+def coerce_bool(value, default: bool = False) -> bool:
+    """Convert common request truthy values into a real boolean."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    normalized = str(value).strip().lower()
+    if normalized in {'1', 'true', 'yes', 'y', 'on', 'live'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'n', 'off', 'demo', ''}:
+        return False
+    return default
+
+
+def normalize_mt5_is_live_flag(broker_name: str, is_live, server: str = None) -> bool:
+    """Resolve MT5 live/demo mode using both the posted flag and server naming."""
+    resolved = coerce_bool(is_live, default=False)
+    server_lower = str(server or '').strip().lower()
+
+    if any(token in server_lower for token in ['trial', 'demo']):
+        return False
+    if any(token in server_lower for token in ['real', 'live']):
+        return True
+
+    return resolved
+
+
 def is_mt5_process_running(terminal_path: str) -> bool:
     if not terminal_path or sys.platform != 'win32':
         return False
@@ -5837,9 +5867,9 @@ def get_preferred_mode_credential(cursor, user_id: str, mode: str, preferred_bro
     query = '''
         SELECT credential_id, broker_name, account_number, server, is_live, updated_at, created_at
         FROM broker_credentials
-        WHERE user_id = ? AND is_active = 1 AND is_live = ?
+        WHERE user_id = ? AND is_active = 1
     '''
-    params = [user_id, desired_live]
+    params = [user_id]
 
     if preferred_broker:
         query += ' AND broker_name = ?'
@@ -5862,8 +5892,16 @@ def get_preferred_mode_credential(cursor, user_id: str, mode: str, preferred_bro
     '''
 
     cursor.execute(query, tuple(params))
-    row = cursor.fetchone()
-    return dict(row) if row else None
+    rows = [dict(row) for row in cursor.fetchall()]
+
+    filtered_rows = [
+        row for row in rows
+        if int(normalize_mt5_is_live_flag(row.get('broker_name'), row.get('is_live'), row.get('server'))) == desired_live
+    ]
+
+    if filtered_rows:
+        return filtered_rows[0]
+    return dict(rows[0]) if rows else None
 
 
 def warm_trading_mode_credential(user_id: str, credential_id: str, mode: str):
@@ -6314,7 +6352,7 @@ def get_account_balances():
         for cred in credentials:
             broker_name = canonicalize_broker_name(cred['broker_name'])
             account_num = cred['account_number']
-            is_live = cred['is_live']
+            is_live = int(normalize_mt5_is_live_flag(broker_name, cred['is_live'], cred.get('server')))
             mode = 'Live' if is_live else 'Demo'
 
             try:
@@ -6382,31 +6420,10 @@ def get_account_balances():
                                 user_id=user_id,
                             )
                         elif active_bot_count == 0:
-                            try:
-                                mt5_conn = MT5Connection({
-                                    'account': int(account_num),
-                                    'account_number': account_num,
-                                    'password': cred['password'],
-                                    'server': cred['server'],
-                                    'broker': broker_name,
-                                    'is_live': bool(is_live),
-                                    'lock_timeout': 5,
-                                })
-                                if mt5_conn.connect():
-                                    fetched_live_info = mt5_conn.get_account_info()
-                                    if isinstance(fetched_live_info, dict) and fetched_live_info.get('balance') is not None:
-                                        account_info = fetched_live_info
-                                        error_msg = None
-                                        persist_account_snapshot(
-                                            broker_name,
-                                            account_num,
-                                            account_info,
-                                            credential_id=cred['credential_id'],
-                                            user_id=user_id,
-                                        )
-                                mt5_conn.disconnect()
-                            except Exception as fetch_exc:
-                                logger.warning(f"Could not refresh uncached live balance for {broker_name} {account_num}: {fetch_exc}")
+                            logger.info(
+                                f"ℹ️ Balance: Skipping on-demand MT5 reconnect for {broker_name} {account_num}; "
+                                "waiting for a mode switch or bot session to warm the cache"
+                            )
                 
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
@@ -7640,11 +7657,10 @@ def get_account_detailed():
                    cached_margin_level, cached_profit, account_currency, last_update, updated_at
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
-            ORDER BY CASE WHEN is_live = ? THEN 0 ELSE 1 END,
-                     COALESCE(updated_at, last_update, '') DESC,
+            ORDER BY COALESCE(updated_at, last_update, '') DESC,
                      credential_id DESC
             LIMIT 5
-        ''', (user_id, desired_live))
+        ''', (user_id,))
         
         creds = [dict(row) for row in cursor.fetchall()]
         conn.close()
@@ -7655,19 +7671,28 @@ def get_account_detailed():
                 'error': f'No Exness credentials found for current {preferred_mode} mode'
             }), 404
 
-        matching_mode_creds = [cred for cred in creds if int(cred.get('is_live') or 0) == desired_live]
+        for cred in creds:
+            cred['effective_is_live'] = int(
+                normalize_mt5_is_live_flag('Exness', cred.get('is_live'), cred.get('server'))
+            )
+
+        matching_mode_creds = [cred for cred in creds if int(cred.get('effective_is_live') or 0) == desired_live]
         mode_fallback_used = not matching_mode_creds
         ordered_creds = matching_mode_creds or creds
         
-        # CRITICAL FIX: Read from existing MT5 session instead of re-initializing
+        # Read only from the active MT5 session or cached snapshot.
+        # Do not switch accounts from request threads; that causes lock storms
+        # when the dashboard refreshes multiple endpoints concurrently.
         import MetaTrader5 as mt5
         account_info = None
         selected_credential = ordered_creds[0]
+        active_mt5_login = None
         
         # First, try to use the currently logged-in MT5 session (where bots are actually trading)
         try:
             existing = mt5.account_info()
             if existing:
+                active_mt5_login = str(existing.login)
                 # Check if ANY of the user's accounts matches the currently logged-in account
                 for cred in ordered_creds:
                     if existing.login == int(cred['account_number']):
@@ -7686,7 +7711,7 @@ def get_account_detailed():
                             'name': existing.name,
                             'server': existing.server,
                             'trade_mode': existing.trade_mode,
-                            'mode': 'Live' if cred['is_live'] else 'Demo',
+                            'mode': 'Live' if cred.get('effective_is_live') else 'Demo',
                             'dataSource': 'live',
                         }
                         persist_account_snapshot('Exness', cred['account_number'], account_info, credential_id=cred['credential_id'], user_id=user_id)
@@ -7694,34 +7719,12 @@ def get_account_detailed():
                         break
         except Exception as e:
             logger.warning(f"Could not read existing MT5 session: {e}")
-        
-        # If existing session doesn't match any credential, try connecting to each (demo first)
-        if not account_info:
-            for cred in ordered_creds:
-                try:
-                    logger.info(f"Attempting to connect to Exness account {cred['account_number']} (is_live={cred['is_live']})")
-                    mt5_conn = MT5Connection({
-                        'account': int(cred['account_number']),
-                        'password': cred['password'],
-                        'server': cred['server'],
-                        'broker': 'Exness',
-                        'is_live': bool(cred['is_live']),
-                        'lock_timeout': 8,
-                    })
-                    if mt5_conn.connect():
-                        selected_credential = cred
-                        account_info = mt5_conn.get_account_info()
-                        if isinstance(account_info, dict):
-                            account_info['mode'] = 'Live' if cred['is_live'] else 'Demo'
-                            account_info['dataSource'] = 'live'
-                            persist_account_snapshot('Exness', cred['account_number'], account_info, credential_id=cred['credential_id'], user_id=user_id)
-                        mt5_conn.disconnect()
-                        logger.info(f"✅ Successfully connected to account {cred['account_number']}")
-                        break
-                    else:
-                        logger.warning(f"Failed to connect to account {cred['account_number']}")
-                except Exception as e:
-                    logger.warning(f"Exception connecting to account {cred['account_number']}: {e}")
+
+        if not account_info and active_mt5_login:
+            logger.info(
+                f"ℹ️ Account detailed: MT5 is currently attached to account {active_mt5_login}; "
+                f"serving cached data for requested {ordered_creds[0]['account_number']} instead of forcing an account switch"
+            )
 
         if not account_info:
             for cred in ordered_creds:
@@ -7756,10 +7759,12 @@ def get_account_detailed():
                         'name': None,
                         'server': cred.get('server'),
                         'trade_mode': None,
-                        'mode': 'Live' if cred['is_live'] else 'Demo',
+                        'mode': 'Live' if cred.get('effective_is_live') else 'Demo',
                         'dataSource': 'cache',
                         'warning': 'Showing last cached account snapshot while MT5 is attached to a different account or still reconnecting.',
                     }
+                    if active_mt5_login:
+                        account_info['sessionAttachedAccount'] = active_mt5_login
                     logger.info(f"ℹ️ Account detailed: Using cached snapshot for {cred['account_number']} ({account_currency})")
                     break
         
@@ -7776,7 +7781,9 @@ def get_account_detailed():
         else:
             return jsonify({
                 'success': False,
-                'error': 'Could not connect to Exness and no cached account snapshot is available yet'
+                'error': 'No cached Exness account snapshot is available yet. Switch to the requested trading mode first so MT5 can warm that account session.',
+                'modeRequested': preferred_mode,
+                'sessionAttachedAccount': active_mt5_login,
             }), 503
             
     except Exception as e:
@@ -7804,44 +7811,64 @@ def get_positions_detailed():
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
-            ORDER BY CASE WHEN is_live = ? THEN 0 ELSE 1 END, credential_id DESC
-            LIMIT 1
-        ''', (user_id, desired_live))
+            ORDER BY credential_id DESC
+        ''', (user_id,))
         
-        cred = cursor.fetchone()
+        rows = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        
+
+        cred = next(
+            (
+                row for row in rows
+                if int(normalize_mt5_is_live_flag('Exness', row.get('is_live'), row.get('server'))) == desired_live
+            ),
+            rows[0] if rows else None,
+        )
+
         if not cred:
             return jsonify({
                 'success': False,
                 'positions': [],
                 'totalCount': 0
             })
-        
-        mt5_conn = MT5Connection({
-            'account': int(cred[2]),
-            'password': cred[3],
-            'server': cred[4],
-            'broker': 'Exness',
-            'is_live': bool(cred[5]),
-        })
-        
-        if mt5_conn.connect():
-            positions = mt5_conn.get_positions()
-            mt5_conn.disconnect()
-            
+
+        import MetaTrader5 as mt5
+        try:
+            active_info = mt5.account_info()
+        except Exception as exc:
+            logger.warning(f"Could not read MT5 session for positions endpoint: {exc}")
+            active_info = None
+
+        if not active_info or str(active_info.login) != str(cred['account_number']):
             return jsonify({
                 'success': True,
-                'positions': positions,
-                'totalCount': len(positions),
-                'totalPL': sum(p['pnl'] for p in positions),
-            })
-        else:
-            return jsonify({
-                'success': False,
                 'positions': [],
-                'error': 'Connection failed'
+                'totalCount': 0,
+                'totalPL': 0,
+                'dataSource': 'inactive-session',
+                'warning': (
+                    f"MT5 is currently attached to {getattr(active_info, 'login', 'no account')}. "
+                    f"Open positions for {cred['account_number']} are unavailable until that mode is warmed."
+                ),
             })
+
+        mt5_conn = MT5Connection({
+            'account': int(cred['account_number']),
+            'password': cred['password'],
+            'server': cred['server'],
+            'broker': 'Exness',
+            'is_live': bool(cred['is_live']),
+        })
+        mt5_conn.connected = True
+        positions = mt5_conn.get_positions()
+
+        return jsonify({
+            'success': True,
+            'positions': positions,
+            'totalCount': len(positions),
+            'totalPL': sum(p['pnl'] for p in positions),
+            'dataSource': 'live-session',
+        })
             
     except Exception as e:
         logger.error(f"Error getting detailed positions: {e}")
@@ -7868,44 +7895,64 @@ def get_trades_history():
         cursor.execute('''
             SELECT credential_id, broker_name, account_number, password, server, is_live
             FROM broker_credentials 
-            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness' AND is_live = ?
-            ORDER BY credential_id
-            LIMIT 1
-        ''', (user_id, desired_live))
+            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
+            ORDER BY credential_id DESC
+        ''', (user_id,))
         
-        cred = cursor.fetchone()
+        rows = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        
+
+        cred = next(
+            (
+                row for row in rows
+                if int(normalize_mt5_is_live_flag('Exness', row.get('is_live'), row.get('server'))) == desired_live
+            ),
+            rows[0] if rows else None,
+        )
+
         if not cred:
             return jsonify({
                 'success': False,
                 'trades': []
             })
-        
-        mt5_conn = MT5Connection({
-            'account': int(cred[2]),
-            'password': cred[3],
-            'server': cred[4],
-            'broker': 'Exness',
-            'is_live': bool(cred[5]),
-        })
-        
-        if mt5_conn.connect():
-            trades = mt5_conn.get_trade_history(days=days)
-            mt5_conn.disconnect()
-            
+
+        import MetaTrader5 as mt5
+        try:
+            active_info = mt5.account_info()
+        except Exception as exc:
+            logger.warning(f"Could not read MT5 session for trade history endpoint: {exc}")
+            active_info = None
+
+        if not active_info or str(active_info.login) != str(cred['account_number']):
             return jsonify({
                 'success': True,
-                'trades': trades,
-                'totalCount': len(trades),
-                'period': f'Last {days} days',
-            })
-        else:
-            return jsonify({
-                'success': False,
                 'trades': [],
-                'error': 'Connection failed'
+                'totalCount': 0,
+                'period': f'Last {days} days',
+                'dataSource': 'inactive-session',
+                'warning': (
+                    f"MT5 is currently attached to {getattr(active_info, 'login', 'no account')}. "
+                    f"Trade history for {cred['account_number']} is unavailable until that mode is warmed."
+                ),
             })
+
+        mt5_conn = MT5Connection({
+            'account': int(cred['account_number']),
+            'password': cred['password'],
+            'server': cred['server'],
+            'broker': 'Exness',
+            'is_live': bool(cred['is_live']),
+        })
+        mt5_conn.connected = True
+        trades = mt5_conn.get_trade_history(days=days)
+
+        return jsonify({
+            'success': True,
+            'trades': trades,
+            'totalCount': len(trades),
+            'period': f'Last {days} days',
+            'dataSource': 'live-session',
+        })
             
     except Exception as e:
         logger.error(f"Error getting trade history: {e}")
@@ -11318,7 +11365,7 @@ def save_broker_credentials():
         username = data.get('username')  # For IG Markets
         api_secret = data.get('api_secret')
         token = data.get('token')
-        is_live = data.get('is_live', False)
+        is_live = normalize_mt5_is_live_flag(broker_name, data.get('is_live', False), server)
         
         if not broker_name:
             return jsonify({'success': False, 'error': 'broker_name required'}), 400
@@ -11533,7 +11580,7 @@ def test_broker_connection():
         user_id = request.user_id
         data = request.json
         broker = canonicalize_broker_name(data.get('broker', ''))
-        is_live = data.get('is_live', False)
+        is_live = normalize_mt5_is_live_flag(broker, data.get('is_live', False), data.get('server'))
 
         logger.info(f"🔌 Testing broker connection: {broker} | User: {user_id}")
 
@@ -11685,6 +11732,7 @@ def test_broker_connection():
             account = data.get('account_number', '')
             password = data.get('password', '')
             server = data.get('server', '')
+            is_live = normalize_mt5_is_live_flag(broker, is_live, server)
             
             # Validate required fields
             if not all([broker, account, password, server]):
@@ -11745,6 +11793,25 @@ def test_broker_connection():
                         logger.info(f"💰 Got balance from global cache: {cache_key} = {actual_balance:.2f} {actual_currency}")
             except Exception as e:
                 logger.warning(f"Could not fetch from global cache: {e}")
+
+            if not got_real_balance and defer_exness_verification:
+                try:
+                    import MetaTrader5 as mt5_mod
+                    active_info = mt5_mod.account_info()
+                    if active_info is not None and str(active_info.login) == str(account):
+                        actual_balance = active_info.balance
+                        actual_equity = getattr(active_info, 'equity', actual_balance)
+                        actual_margin_free = getattr(active_info, 'margin_free', 0)
+                        actual_margin_used = getattr(active_info, 'margin', 0)
+                        actual_margin_level = getattr(active_info, 'margin_level', 0)
+                        actual_profit = getattr(active_info, 'profit', 0)
+                        actual_currency = str(getattr(active_info, 'currency', actual_currency) or actual_currency).upper()
+                        got_real_balance = True
+                        logger.info(
+                            f"💰 Captured Exness balance from active MT5 session during credential save: {actual_balance:.2f} {actual_currency}"
+                        )
+                except Exception as active_exc:
+                    logger.warning(f"Could not read active Exness MT5 session during credential save: {active_exc}")
             
             # SECOND: Try cached connection
             if not got_real_balance and not defer_exness_verification:
