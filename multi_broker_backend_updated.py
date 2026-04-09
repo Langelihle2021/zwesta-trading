@@ -80,6 +80,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+MT5_AUTO_LAUNCH = os.getenv('MT5_AUTO_LAUNCH', '0' if os.getenv('DEPLOYMENT_MODE', 'LOCAL').upper() == 'VPS' else '1').strip().lower() in ['1', 'true', 'yes', 'on']
+MT5_AUTO_RESTART = os.getenv('MT5_AUTO_RESTART', '0').strip().lower() in ['1', 'true', 'yes', 'on']
+MT5_STARTUP_WARMUP = os.getenv('MT5_STARTUP_WARMUP', '0' if os.getenv('DEPLOYMENT_MODE', 'LOCAL').upper() == 'VPS' else '1').strip().lower() in ['1', 'true', 'yes', 'on']
+
 
 def load_optional_module(module_name: str):
     try:
@@ -155,6 +159,40 @@ _failed_auth_accounts = {}
 _failed_auth_lock = threading.Lock()
 _FAILED_AUTH_COOLDOWN = 300  # 5 minutes before retrying a failed account
 logger.info("✅ Failed auth cooldown initialized - prevents repeated bad credential retries")
+
+# ==================== BALANCE FALLBACK COOLDOWN ====================
+# Prevent the dashboard from stampeding MT5 with repeated live-balance probes.
+_balance_fallback_attempts = {}
+_balance_fallback_lock = threading.Lock()
+_BALANCE_FALLBACK_COOLDOWN = 45
+logger.info("✅ Balance fallback cooldown initialized - prevents repeated MT5 balance probes")
+
+
+def should_skip_balance_fallback(broker_name: str, account_id) -> bool:
+    cache_key = get_balance_cache_key(broker_name, account_id)
+    now_ts = time.time()
+    with _balance_fallback_lock:
+        last_attempt = _balance_fallback_attempts.get(cache_key)
+        if not last_attempt:
+            return False
+        if last_attempt.get('status') == 'failed' and now_ts - last_attempt.get('timestamp', 0) < _BALANCE_FALLBACK_COOLDOWN:
+            return True
+        if now_ts - last_attempt.get('timestamp', 0) >= _BALANCE_FALLBACK_COOLDOWN:
+            _balance_fallback_attempts.pop(cache_key, None)
+    return False
+
+
+def record_balance_fallback_attempt(broker_name: str, account_id, status: str, reason: str = '') -> None:
+    cache_key = get_balance_cache_key(broker_name, account_id)
+    with _balance_fallback_lock:
+        if status == 'success':
+            _balance_fallback_attempts.pop(cache_key, None)
+        else:
+            _balance_fallback_attempts[cache_key] = {
+                'status': status,
+                'reason': reason,
+                'timestamp': time.time(),
+            }
 
 # ==================== MT5 TERMINAL STARTUP TRACKER ====================
 # Prevents duplicate MT5 terminal launches for the same configured path
@@ -447,13 +485,28 @@ def is_mt5_process_running(terminal_path: str) -> bool:
     if not terminal_path or sys.platform != 'win32':
         return False
 
-    exe_name = os.path.basename(str(terminal_path)).lower()
+    normalized_target = os.path.normcase(os.path.normpath(str(terminal_path).strip().strip('"').strip("'")))
+    exe_name = os.path.basename(normalized_target).lower()
     if exe_name not in ['terminal64.exe', 'terminal.exe']:
         exe_name = 'terminal64.exe'
 
     try:
-        output = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {exe_name}'], universal_newlines=True, stderr=subprocess.DEVNULL)
-        return exe_name in output.lower()
+        command = (
+            "Get-CimInstance Win32_Process "
+            f"-Filter \"Name = '{exe_name}'\" | "
+            "Select-Object -ExpandProperty ExecutablePath"
+        )
+        output = subprocess.check_output(
+            ['powershell', '-NoProfile', '-Command', command],
+            universal_newlines=True,
+            stderr=subprocess.DEVNULL,
+        )
+        running_paths = [
+            os.path.normcase(os.path.normpath(line.strip()))
+            for line in output.splitlines()
+            if line.strip()
+        ]
+        return normalized_target in running_paths
     except Exception as exc:
         logger.debug(f"[MT5 Terminal] Process check failed: {exc}")
         return False
@@ -464,6 +517,10 @@ def ensure_mt5_terminal_running(terminal_path: str, broker_name: str) -> bool:
     if not normalized_path or not os.path.isfile(normalized_path):
         logger.warning(f"[MT5 Terminal] Cannot launch {broker_name} terminal - path missing: {normalized_path or 'unset'}")
         return False
+
+    if not MT5_AUTO_LAUNCH:
+        logger.info(f"[MT5 Terminal] Auto-launch disabled for {broker_name}; will not open terminal automatically")
+        return is_mt5_process_running(normalized_path)
 
     if is_mt5_process_running(normalized_path):
         logger.info(f"[MT5 Terminal] MT5 process already running for {broker_name}; no launch needed")
@@ -486,6 +543,99 @@ def ensure_mt5_terminal_running(terminal_path: str, broker_name: str) -> bool:
     except Exception as exc:
         logger.error(f"[MT5 Terminal] Failed to launch {broker_name} terminal at {normalized_path}: {exc}")
         return False
+
+
+def stop_mt5_terminal_process(terminal_path: str, broker_name: str) -> bool:
+    normalized_path = os.path.normcase(os.path.normpath(str(terminal_path or '').strip().strip('"').strip("'")))
+    if not normalized_path or sys.platform != 'win32':
+        return False
+
+    if not MT5_AUTO_RESTART:
+        logger.info(f"[MT5 Terminal] Auto-restart disabled for {broker_name}; leaving running terminal untouched")
+        return False
+
+    exe_name = os.path.basename(normalized_path)
+    command = (
+        "Get-CimInstance Win32_Process "
+        f"-Filter \"Name = '{exe_name}'\" | "
+        "Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq '" + normalized_path.replace("'", "''") + "' } | "
+        "Select-Object -ExpandProperty ProcessId"
+    )
+
+    try:
+        output = subprocess.check_output(
+            ['powershell', '-NoProfile', '-Command', command],
+            universal_newlines=True,
+            stderr=subprocess.DEVNULL,
+        )
+        process_ids = [line.strip() for line in output.splitlines() if line.strip()]
+        if not process_ids:
+            return False
+
+        for process_id in process_ids:
+            subprocess.run(
+                ['taskkill', '/PID', str(process_id), '/F', '/T'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        logger.warning(f"[MT5 Terminal] Restarting stale {broker_name} terminal: {normalized_path}")
+        return True
+    except Exception as exc:
+        logger.warning(f"[MT5 Terminal] Could not stop stale {broker_name} terminal {normalized_path}: {exc}")
+        return False
+
+
+def warm_up_mt5_terminal(mt5_path: str, account: int, password: str, server: str, broker_name: str = 'Exness', timeout_seconds: int = 30) -> bool:
+    """Launch and warm up the target MT5 terminal until its IPC channel is ready."""
+    if not mt5_path or not account or not password:
+        return False
+
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        logger.warning("[STARTUP] MetaTrader5 package not installed; skipping MT5 warm-up")
+        return False
+
+    if DEPLOYMENT_MODE == 'VPS':
+        logger.info(f"[STARTUP] VPS mode - skipping local launch/restart for {broker_name} terminal; probing existing MT5 session only")
+    elif not MT5_AUTO_LAUNCH:
+        logger.info(f"[STARTUP] Auto-launch disabled for {broker_name}; probing existing MT5 session only")
+    else:
+        ensure_mt5_terminal_running(mt5_path, broker_name)
+
+    deadline = time.time() + max(5, timeout_seconds)
+    attempt = 0
+    last_error = None
+    restarted_terminal = False
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            logger.info(f"[STARTUP] MT5 warm-up attempt {attempt}: path={mt5_path} account={account} server={server}")
+            if mt5.initialize(path=mt5_path, login=int(account), password=str(password), server=str(server)):
+                acct = mt5.account_info()
+                if acct:
+                    logger.info(f"[STARTUP] ✅ MT5 warm-up successful: Account {acct.login}, Balance {float(getattr(acct, 'balance', 0)):.2f}")
+                    return True
+                last_error = ('account_info', 'MT5 initialized but account_info returned None')
+            else:
+                last_error = mt5.last_error()
+        except Exception as exc:
+            last_error = str(exc)
+
+        if DEPLOYMENT_MODE != 'VPS' and MT5_AUTO_RESTART and not restarted_terminal and isinstance(last_error, tuple) and last_error and last_error[0] in (-10004, -10005):
+            restarted_terminal = True
+            stop_mt5_terminal_process(mt5_path, broker_name)
+            ensure_mt5_terminal_running(mt5_path, broker_name)
+            logger.info(f"[STARTUP] Waiting 8s after restarting {broker_name} terminal for IPC to come up...")
+            time.sleep(8)
+            continue
+
+        logger.info(f"[STARTUP] MT5 IPC not ready yet (attempt {attempt}): {last_error}")
+        time.sleep(3)
+
+    logger.warning(f"[STARTUP] ⚠️ MT5 warm-up failed after {attempt} attempts: {last_error}")
+    return False
 
 # Binance Configuration - Support DEMO and LIVE modes
 BINANCE_CONFIG = {
@@ -2321,6 +2471,10 @@ class MT5Connection(BrokerConnection):
             logger.info(f"[MT5 Terminal] VPS deployment mode — skipping local MT5 launch for {self.mt5_broker}")
             return
 
+        if not MT5_AUTO_LAUNCH:
+            logger.info(f"[MT5 Terminal] Auto-launch disabled for {self.mt5_broker}; connect() will only use an already running terminal")
+            return
+
         if not self.mt5_path:
             logger.warning(f"[MT5 Terminal] No terminal path configured for {self.mt5_broker}; cannot auto-launch MT5")
             return
@@ -2495,7 +2649,8 @@ class MT5Connection(BrokerConnection):
             force_initialize_on_selected_path = False
             try:
                 _ver = self.mt5.version()  # Returns non-None when MT5 is already initialized
-                if _ver is not None:
+                version_ready = _ver not in [None, (0, 0, ''), (0, 0, '0')]
+                if version_ready:
                     _term_info = None
                     try:
                         _term_info = self.mt5.terminal_info()
@@ -2549,6 +2704,8 @@ class MT5Connection(BrokerConnection):
                         else:
                             err = self.mt5.last_error()
                             logger.warning(f"  ⚠️ Fast mt5.login() failed: {err} — falling back to initialize()")
+                else:
+                    logger.info(f"  ⏳ MT5 version probe returned {_ver}; IPC not ready for fast login, using initialize() path")
             except Exception as fe:
                 logger.debug(f"  (Fast-path mt5.login() not attempted: {fe})")
             
@@ -6384,8 +6541,6 @@ def get_account_balances():
                     # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint unless cache is empty and no bots are running.
                     logger.info(f"ℹ️ Balance: {broker_name} {account_num} ({account_currency}) — using cache only (MT5 disconnected in balance endpoint)")
                     error_msg = f"Using cached balance ({account_currency}) — MT5 reads handled by trading loop"
-
-                    live_session_info = None
                     cache_key = get_balance_cache_key(broker_name, account_num)
                     cache_empty = True
                     with balance_cache_lock:
@@ -6394,55 +6549,10 @@ def get_account_balances():
 
                     # Diagnostics: Log cache status
                     if cache_empty:
-                        logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Checking DB fallback and considering live MT5 fallback.")
+                        logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Returning disconnected account state without probing MT5 from balances endpoint.")
                     else:
                         logger.info(f"[DIAGNOSTIC] Cached balance present for {broker_name} {account_num}.")
-
-                    # If cache is empty and no bots are running, try a live MT5 connection (with lock and timeout)
-                    if broker_name == 'Exness' and cache_empty and active_bot_count == 0:
-                        logger.warning(f"[FALLBACK] Attempting live MT5 connection for {broker_name} {account_num} as cache is empty and no bots are running.")
-                        try:
-                            import MetaTrader5 as mt5_mod
-                            acquired = mt5_connection_lock.acquire(timeout=8)
-                            if not acquired:
-                                logger.error(f"[FALLBACK] Could not acquire MT5 lock for live balance fetch (timeout)")
-                            else:
-                                try:
-                                    if mt5_mod.initialize():
-                                        current_info = mt5_mod.account_info()
-                                        if current_info is not None and str(current_info.login) == str(account_num):
-                                            live_session_info = {
-                                                'accountNumber': str(current_info.login),
-                                                'balance': float(current_info.balance),
-                                                'equity': float(getattr(current_info, 'equity', current_info.balance)),
-                                                'marginFree': float(getattr(current_info, 'margin_free', current_info.balance)),
-                                                'margin': float(getattr(current_info, 'margin', 0)),
-                                                'margin_level': float(getattr(current_info, 'margin_level', 0) or 0),
-                                                'profit': float(getattr(current_info, 'profit', 0) or 0),
-                                                'currency': str(getattr(current_info, 'currency', account_currency) or account_currency).upper(),
-                                                'broker': broker_name,
-                                            }
-                                            logger.info(f"[FALLBACK] Live MT5 balance fetch succeeded for {broker_name} {account_num}: {live_session_info['balance']}")
-                                        else:
-                                            logger.warning(f"[FALLBACK] Live MT5 session did not match account or returned None.")
-                                    else:
-                                        logger.error(f"[FALLBACK] MT5 initialize() failed for live balance fetch.")
-                                finally:
-                                    mt5_connection_lock.release()
-                        except Exception as live_exc:
-                            logger.error(f"[FALLBACK] Exception during live MT5 balance fetch: {live_exc}")
-
-                    if live_session_info:
-                        account_info = live_session_info
-                        error_msg = None
-                        persist_account_snapshot(
-                            broker_name,
-                            account_num,
-                            account_info,
-                            credential_id=cred['credential_id'],
-                            user_id=user_id,
-                        )
-                    elif cache_empty:
+                    if cache_empty:
                         logger.warning(f"[WARNING] No cached or live balance for {broker_name} {account_num}. Returning $0 and warning in API response.")
                         error_msg = "No cached or live balance available. Start a bot to update balance."
                 
@@ -7800,12 +7910,35 @@ def get_account_detailed():
                 'lastUpdate': datetime.utcnow().isoformat(),
             })
         else:
+            disconnected_credential = selected_credential if isinstance(selected_credential, dict) else ordered_creds[0]
             return jsonify({
-                'success': False,
-                'error': 'No cached Exness account snapshot is available yet. Switch to the requested trading mode first so MT5 can warm that account session.',
+                'success': True,
+                'account': {
+                    'accountNumber': disconnected_credential.get('account_number'),
+                    'balance': 0.0,
+                    'equity': 0.0,
+                    'marginFree': 0.0,
+                    'margin': 0.0,
+                    'margin_level': 0.0,
+                    'profit': 0.0,
+                    'currency': str(disconnected_credential.get('account_currency') or 'USD').upper(),
+                    'leverage': None,
+                    'broker': 'Exness',
+                    'name': None,
+                    'server': disconnected_credential.get('server'),
+                    'trade_mode': None,
+                    'mode': 'Live' if disconnected_credential.get('effective_is_live') else 'Demo',
+                    'dataSource': 'not_connected',
+                    'connected': False,
+                    'warning': 'No cached Exness account snapshot is available yet. Start a bot or warm the requested mode to populate account details.',
+                    'sessionAttachedAccount': active_mt5_login,
+                },
                 'modeRequested': preferred_mode,
-                'sessionAttachedAccount': active_mt5_login,
-            }), 503
+                'modeReturned': 'Live' if disconnected_credential.get('effective_is_live') else 'Demo',
+                'modeFallbackUsed': mode_fallback_used,
+                'credential_id': disconnected_credential.get('credential_id'),
+                'lastUpdate': datetime.utcnow().isoformat(),
+            })
             
     except Exception as e:
         logger.error(f"Error getting detailed account info: {e}")
@@ -11998,83 +12131,73 @@ def test_broker_connection():
                     'while the terminal is attached to another account.'
                 )
 
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    trading_mode TEXT DEFAULT 'DEMO',
+                    live_account TEXT,
+                    live_server TEXT,
+                    updated_at TEXT
+                )
+            ''')
             cursor.execute('SELECT trading_mode FROM user_preferences WHERE user_id = ?', (user_id,))
             preference_row = cursor.fetchone()
-            current_mode = (preference_row['trading_mode'] if preference_row else 'DEMO').upper()
+            current_mode = ((preference_row['trading_mode'] if preference_row else 'DEMO') or 'DEMO').upper()
 
-            if current_mode == ('LIVE' if is_live else 'DEMO'):
-                cursor.execute('''
-                    INSERT OR REPLACE INTO user_preferences
-                    (user_id, trading_mode, live_account, live_server, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (
-                    user_id,
-                    current_mode,
-                    account if is_live else None,
-                    server if is_live else None,
-                    datetime.now().isoformat(),
-                ))
-                conn.commit()
+            cursor.execute('''
+                INSERT OR REPLACE INTO user_preferences
+                (user_id, trading_mode, live_account, live_server, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                user_id,
+                current_mode,
+                account if is_live else None,
+                server if is_live else None,
+                datetime.now().isoformat(),
+            ))
+            conn.commit()
 
-                skip_sync_warm = defer_exness_verification
-                if broker == 'Exness' and not skip_sync_warm:
-                    try:
-                        import MetaTrader5 as mt5_mod
-                        current_info = mt5_mod.account_info()
-                    except Exception:
-                        current_info = None
-
-                    if current_info is not None and str(current_info.login) != str(account):
-                        skip_sync_warm = True
-                        connection_status = 'saved'
-                        warning = (
-                            f'Credential saved for account {account}, but MT5 is currently attached to '
-                            f'{current_info.login}. Skipping synchronous warmup to avoid timeout; '
-                            'the account will connect when you switch mode or load live account details.'
+            if broker == 'Exness':
+                target_mode = 'LIVE' if is_live else 'DEMO'
+                warm_result = warm_trading_mode_credential(user_id, credential_id, target_mode)
+                if warm_result['connected']:
+                    auto_connected = True
+                    connection_status = 'connected'
+                    account_info = warm_result.get('account_info', {}) or {}
+                    if account_info:
+                        actual_balance = account_info.get('balance', actual_balance)
+                        actual_equity = account_info.get('equity', actual_equity)
+                        actual_margin_free = account_info.get('margin_free', account_info.get('marginFree', actual_margin_free))
+                        actual_margin_used = account_info.get('margin', actual_margin_used)
+                        actual_margin_level = account_info.get('margin_level', account_info.get('marginLevel', actual_margin_level))
+                        actual_profit = account_info.get('profit', actual_profit)
+                        actual_currency = str(account_info.get('currency', actual_currency)).upper()
+                        got_real_balance = True
+                        cursor.execute('''
+                            UPDATE broker_credentials
+                            SET cached_balance = ?, cached_equity = ?, cached_margin_free = ?,
+                                cached_margin = ?, cached_margin_level = ?, cached_profit = ?,
+                                account_currency = ?, updated_at = ?
+                            WHERE credential_id = ?
+                        ''', (
+                            actual_balance,
+                            actual_equity,
+                            actual_margin_free,
+                            actual_margin_used,
+                            actual_margin_level,
+                            actual_profit,
+                            actual_currency,
+                            datetime.now().isoformat(),
+                            credential_id,
+                        ))
+                        conn.commit()
+                        warning = None
+                        logger.info(
+                            f"✅ Warmed Exness credential {account}: {actual_balance:.2f} {actual_currency}"
                         )
-
-                if skip_sync_warm and not warning:
-                    warning = (
-                        f'Credential saved for account {account}. MT5 warmup was skipped in test mode '
-                        'to keep the request from timing out.'
-                    )
-
-                if not skip_sync_warm:
-                    warm_result = warm_trading_mode_credential(user_id, credential_id, current_mode)
-                    if warm_result['connected']:
-                        auto_connected = True
-                        connection_status = 'connected'
-                        account_info = warm_result.get('account_info', {}) or {}
-                        if account_info:
-                            actual_balance = account_info.get('balance', actual_balance)
-                            actual_equity = account_info.get('equity', actual_equity)
-                            actual_margin_free = account_info.get('margin_free', account_info.get('marginFree', actual_margin_free))
-                            actual_margin_used = account_info.get('margin', actual_margin_used)
-                            actual_margin_level = account_info.get('margin_level', account_info.get('marginLevel', actual_margin_level))
-                            actual_profit = account_info.get('profit', actual_profit)
-                            actual_currency = str(account_info.get('currency', actual_currency)).upper()
-                            got_real_balance = True
-                            cursor.execute('''
-                                UPDATE broker_credentials
-                                SET cached_balance = ?, cached_equity = ?, cached_margin_free = ?,
-                                    cached_margin = ?, cached_margin_level = ?, cached_profit = ?,
-                                    account_currency = ?, updated_at = ?
-                                WHERE credential_id = ?
-                            ''', (
-                                actual_balance,
-                                actual_equity,
-                                actual_margin_free,
-                                actual_margin_used,
-                                actual_margin_level,
-                                actual_profit,
-                                actual_currency,
-                                datetime.now().isoformat(),
-                                credential_id,
-                            ))
-                            conn.commit()
-                    else:
-                        connection_status = 'connection-failed'
-                        warning = warm_result.get('error')
+                else:
+                    connection_status = 'connection-failed'
+                    warning = warm_result.get('error')
 
             conn.close()
             
@@ -12082,7 +12205,11 @@ def test_broker_connection():
             
             return jsonify({
                 'success': True,
-                'message': f'Successfully connected to {broker} account {account}',
+                'message': (
+                    f'Successfully connected to {broker} account {account}'
+                    if connection_status == 'connected'
+                    else f'Credentials saved for {broker} account {account}'
+                ),
                 'credential_id': credential_id,
                 'broker': broker,
                 'account_number': account,
@@ -12094,7 +12221,7 @@ def test_broker_connection():
                 'total_pl': round(actual_profit, 2) if got_real_balance else 0,
                 'currency': actual_currency,
                 'is_live': is_live,
-                'status': 'CONNECTED',
+                'status': 'CONNECTED' if connection_status == 'connected' else 'SAVED',
                 'connection_status': connection_status,
                 'auto_connected': auto_connected,
                 'warning': warning,
@@ -13726,7 +13853,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         account_number=_account_for_route,
                                         password=bot_credentials.get('password', ''),
                                         server=bot_credentials.get('server', ''),
-                                        is_live=True,
+                                        is_live=bool(normalize_mt5_is_live_flag(_broker_for_route, bot_credentials.get('is_live'), bot_credentials.get('server', ''))),
                                         user_id=user_id,
                                     )
                                     if _acct_exec.connection and _acct_exec.mode in (ExecutionMode.SOCKET, ExecutionMode.METAAPI):
@@ -15469,7 +15596,7 @@ def bot_status():
         
         bots_list = []
         for bot in active_bots.values():
-         hi   # Only return bots for authenticated user
+            # Only return bots for authenticated user
             if bot.get('user_id') != user_id:
                 continue
             if bot_id_filter and bot.get('botId') != bot_id_filter:
@@ -21451,27 +21578,21 @@ if __name__ == '__main__':
     
     # CRITICAL: Warm up MT5 connection on main thread BEFORE any bot threads start
     # This establishes the IPC pipe to the terminal; bot threads can then reuse it
-    if MT5_CONFIG.get('path') and MT5_CONFIG.get('account') and MT5_CONFIG.get('password'):
+    if MT5_STARTUP_WARMUP and MT5_CONFIG.get('path') and MT5_CONFIG.get('account') and MT5_CONFIG.get('password'):
         try:
-            import MetaTrader5 as _mt5_warmup
             logger.info("[STARTUP] Warming up MT5 connection on main thread...")
-            warmup_ok = _mt5_warmup.initialize(
-                path=MT5_CONFIG['path'],
-                login=int(MT5_CONFIG['account']),
+            warm_up_mt5_terminal(
+                mt5_path=str(MT5_CONFIG['path']),
+                account=int(MT5_CONFIG['account']),
                 password=str(MT5_CONFIG['password']),
-                server=str(normalize_mt5_server_name('Exness', bool(MT5_CONFIG.get('is_live')), MT5_CONFIG['server']))
+                server=str(normalize_mt5_server_name('Exness', bool(MT5_CONFIG.get('is_live')), MT5_CONFIG['server'])),
+                broker_name='Exness',
+                timeout_seconds=30,
             )
-            if warmup_ok:
-                _acct = _mt5_warmup.account_info()
-                if _acct:
-                    logger.info(f"[STARTUP] ✅ MT5 warm-up successful: Account {_acct.login}, Balance ${_acct.balance:.2f}")
-                else:
-                    logger.warning("[STARTUP] MT5 initialized but no account info")
-                # Keep connection open for bot threads to reuse
-            else:
-                logger.warning(f"[STARTUP] ⚠️ MT5 warm-up failed: {_mt5_warmup.last_error()}")
         except Exception as e:
             logger.warning(f"[STARTUP] MT5 warm-up exception: {e}")
+    else:
+        logger.info("[STARTUP] MT5 startup warm-up disabled; backend will not open MT5 automatically on boot")
     
     # Initialize demo bots on startup (DISABLED for production cleanup)
     # logger.info("Initializing demo trading bots...")

@@ -25,6 +25,24 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
   String? _errorMessage;
   DateTime? _lastSyncTime;
 
+  String _accountCurrency(Map<String, dynamic> account) =>
+      (account['currency'] ?? account['account_currency'] ?? 'USD')
+          .toString()
+          .toUpperCase();
+
+  String _currencySymbol(String currencyCode) {
+    switch (currencyCode) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return '£';
+      case 'EUR':
+        return '€';
+      default:
+        return r'$';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,7 +119,11 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
     }
   }
 
-  String _formatAmount(double amount) => '\$${amount.toStringAsFixed(2).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}';
+  String _formatAmount(double amount, String currencyCode) {
+    final formatted = amount.toStringAsFixed(2).replaceAllMapped(
+        RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',');
+    return '${_currencySymbol(currencyCode)}$formatted $currencyCode';
+  }
 
   @override
   Widget build(BuildContext context) => Column(
@@ -229,6 +251,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
     final balance = (account['balance'] is num) ? account['balance'].toDouble() : 0.0;
     final equity = (account['equity'] is num) ? account['equity'].toDouble() : 0.0;
     final marginFree = (account['marginFree'] is num) ? account['marginFree'].toDouble() : 0.0;
+    final currencyCode = _accountCurrency(account);
     final activeBots = account['active_bots'] ?? 0;
     final connected = account['connected'] ?? false;
     final dataSource = account['dataSource'] ?? 'unknown';
@@ -331,11 +354,11 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
               // Balance / Equity / Margin row
               Row(
                 children: [
-                  _statBox('Balance', _formatAmount(balance), Colors.blue),
+                  _statBox('Balance', _formatAmount(balance, currencyCode), Colors.blue),
                   const SizedBox(width: 8),
-                  _statBox('Equity', _formatAmount(equity), Colors.purple),
+                  _statBox('Equity', _formatAmount(equity, currencyCode), Colors.purple),
                   const SizedBox(width: 8),
-                  _statBox('Free Margin', _formatAmount(marginFree), Colors.teal),
+                  _statBox('Free Margin', _formatAmount(marginFree, currencyCode), Colors.teal),
                 ],
               ),
               const SizedBox(height: 8),

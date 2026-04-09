@@ -128,19 +128,32 @@ class BrokerConnectionService {
           // Backend returns: credential_id, broker, account_number, balance, status, etc.
           final credentialId = data['credential_id'] as String?;
           final balance = data['balance'] ?? 10000.0;
+          final currency =
+              (data['currency'] ?? data['account_currency'] ?? 'USD').toString().toUpperCase();
+          final status = (data['status'] as String? ?? 'SAVED').toUpperCase();
+          final isConnected = status == 'CONNECTED' ||
+              (data['connection_status'] as String? ?? '').toLowerCase() ==
+                  'connected';
 
           debugPrint(
-              '✅ Connection successful! Credential ID: $credentialId | Balance: \$${balance.toStringAsFixed(2)}');
+              '✅ Connection test completed! Credential ID: $credentialId | Status: $status | Balance: ${balance.toStringAsFixed(2)} $currency');
 
           return {
             'success': true,
-            'connected': true,
+            'connected': isConnected,
             'credential_id': credentialId,
             'broker': data['broker'],
             'account_number': data['account_number'],
             'balance': balance,
+            'equity': (data['equity'] ?? balance),
+            'free_margin': (data['free_margin'] ?? data['margin_free'] ?? 0.0),
+            'margin': (data['margin'] ?? 0.0),
+            'margin_level': (data['margin_level'] ?? 0.0),
+            'total_pl': (data['total_pl'] ?? data['profit'] ?? 0.0),
+            'currency': currency,
+            'account_currency': currency,
             'is_live': data['is_live'] ?? false,
-            'status': data['status'] ?? 'CONNECTED',
+            'status': status,
             'message': data['message'] ?? 'Connection established',
             'connection_status': data['connection_status'],
             'auto_connected': data['auto_connected'] ?? false,

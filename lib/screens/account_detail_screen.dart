@@ -22,6 +22,32 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
   bool _isLoading = true;
   String? _error;
 
+  String get _currencyCode {
+    final account = _details?['account'];
+    final liveAccountInfo = account is Map<String, dynamic>
+        ? account['liveAccountInfo'] as Map<String, dynamic>?
+        : null;
+    return (liveAccountInfo?['currency'] ??
+            widget.account['currency'] ??
+            widget.account['account_currency'] ??
+            'USD')
+        .toString()
+        .toUpperCase();
+  }
+
+  String get _currencySymbol {
+    switch (_currencyCode) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return '£';
+      case 'EUR':
+        return '€';
+      default:
+        return r'$';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -96,7 +122,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
     final abs = val.abs();
     final formatted = abs.toStringAsFixed(2).replaceAllMapped(
         RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',');
-    return neg ? '-\$$formatted' : '\$$formatted';
+    return neg
+        ? '-$_currencySymbol$formatted $_currencyCode'
+        : '$_currencySymbol$formatted $_currencyCode';
   }
 
   Color _profitColor(dynamic amount) {
@@ -109,7 +137,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
   @override
   Widget build(BuildContext context) {
     final broker = widget.account['broker'] ?? 'Unknown';
-    final accountNum = widget.account['accountNumber'] ?? 'N/A';
+    final accountNum =
+        widget.account['accountNumber'] ?? widget.account['account_number'] ?? 'N/A';
     final isLive = widget.account['is_live'] ?? false;
 
     return Scaffold(

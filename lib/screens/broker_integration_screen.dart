@@ -46,6 +46,11 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   bool _isLiveMode = false;  // DEMO by default
   DateTime? _lastConnectionTime;
   double _accountBalance = 0;
+  double _accountEquity = 0;
+  double _accountFreeMargin = 0;
+  double _accountMargin = 0;
+  double _accountMarginLevel = 0;
+  double _accountProfit = 0;
   String _accountCurrency = 'USD';  // Actual currency of the connected account (USD, ZAR, etc.)
   List<BrokerAccount> _savedAccounts = [];
   BrokerAccount? _activeAccount;
@@ -99,6 +104,27 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _selectedBroker.toLowerCase() == 'pxbt' ||
       _selectedBroker.toLowerCase() == 'prime xbt';
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker;
+
+  double _doubleValue(dynamic value) =>
+      value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '0') ?? 0.0;
+
+  String _currencySymbol(String currency) {
+    switch (currency.toUpperCase()) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return '£';
+      case 'EUR':
+        return '€';
+      default:
+        return r'$';
+    }
+  }
+
+  String _formatCurrency(double amount) =>
+      '${_currencySymbol(_accountCurrency)}${amount.toStringAsFixed(2)} $_accountCurrency';
+
+  String _formatMarginLevel(double value) => value > 0 ? '${value.toStringAsFixed(2)}%' : '-';
 
   String _modePrefKey(String baseKey, bool isLive) => '${baseKey}_${isLive ? 'live' : 'demo'}';
 
@@ -163,6 +189,11 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _usernameController.text = prefs.getString('broker_username') ?? '';
       _isConnected = prefs.getBool('broker_connected') ?? false;
       _accountBalance = prefs.getDouble('account_balance') ?? 0;
+      _accountEquity = prefs.getDouble('account_equity') ?? 0;
+      _accountFreeMargin = prefs.getDouble('account_free_margin') ?? 0;
+      _accountMargin = prefs.getDouble('account_margin') ?? 0;
+      _accountMarginLevel = prefs.getDouble('account_margin_level') ?? 0;
+      _accountProfit = prefs.getDouble('account_profit') ?? 0;
       _accountCurrency = prefs.getString('account_currency') ?? 'USD';
       _autoReconnectEnabled = prefs.getBool('auto_reconnect_enabled') ?? false;
       final savedServer = modeServer ?? prefs.getString('mt5_server') ?? '';
@@ -227,6 +258,11 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       await prefs.setBool('broker_connected', true);
       await prefs.setString('connection_time', DateTime.now().toIso8601String());
       await prefs.setDouble('account_balance', _accountBalance);
+      await prefs.setDouble('account_equity', _accountEquity);
+      await prefs.setDouble('account_free_margin', _accountFreeMargin);
+      await prefs.setDouble('account_margin', _accountMargin);
+      await prefs.setDouble('account_margin_level', _accountMarginLevel);
+      await prefs.setDouble('account_profit', _accountProfit);
     }
 
     await _persistModeScopedCredentials();
@@ -432,8 +468,16 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         // Backend returns: credential_id, broker, account_number, balance, currency, status, timestamp
         final credentialId = result['credential_id'] as String?;
         final balance = (result['balance'] ?? 10000.0).toDouble();
+        final equity = _doubleValue(result['equity'] ?? balance);
+        final freeMargin = _doubleValue(result['free_margin'] ?? 0.0);
+        final margin = _doubleValue(result['margin'] ?? 0.0);
+        final marginLevel = _doubleValue(result['margin_level'] ?? 0.0);
+        final profit = _doubleValue(result['total_pl'] ?? 0.0);
         final isDemo = !(result['is_live'] == true);
         final currency = (result['currency'] as String? ?? 'USD').toUpperCase();
+        final status = (result['status'] as String? ?? 'SAVED').toUpperCase();
+        final isConnected = result['connected'] == true;
+        final warning = result['warning'] as String?;
         final currencySymbol = currency == 'ZAR' ? 'R' : (currency == 'GBP' ? '£' : (currency == 'EUR' ? '€' : r'$'));
         
         // Create BrokerAccount from backend response
@@ -449,23 +493,37 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
           createdAt: DateTime.now(),
           lastConnected: DateTime.now(),
           isActive: true,
-          connectionStatus: 'CONNECTED',
+          connectionStatus: status,
         );
 
         setState(() {
           _isTestingConnection = false;
-          _isConnected = true;
+          _isConnected = isConnected;
           _activeAccount = account;
-          _lastConnectionTime = DateTime.now();
+          _lastConnectionTime = isConnected ? DateTime.now() : null;
           _accountBalance = balance;
+          _accountEquity = equity;
+          _accountFreeMargin = freeMargin;
+          _accountMargin = margin;
+          _accountMarginLevel = marginLevel;
+          _accountProfit = profit;
           _accountCurrency = currency;
           _accountController.text = account.accountNumber;
         });
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('broker_connected', true);
-        await prefs.setString('connection_time', _lastConnectionTime!.toIso8601String());
+        await prefs.setBool('broker_connected', isConnected);
+        if (_lastConnectionTime != null) {
+          await prefs.setString('connection_time', _lastConnectionTime!.toIso8601String());
+        } else {
+          await prefs.remove('connection_time');
+        }
         await prefs.setDouble('account_balance', _accountBalance);
+        await prefs.setDouble('account_equity', _accountEquity);
+        await prefs.setDouble('account_free_margin', _accountFreeMargin);
+        await prefs.setDouble('account_margin', _accountMargin);
+        await prefs.setDouble('account_margin_level', _accountMarginLevel);
+        await prefs.setDouble('account_profit', _accountProfit);
         await prefs.setBool('is_live_mode', _isLiveMode);
         await prefs.setString('account_currency', currency);
         if (credentialId != null) {
@@ -479,17 +537,23 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
         if (mounted) {
           final tradingService = Provider.of<TradingService>(context, listen: false);
-          await tradingService.syncBrokerAccount(
-            brokerName: _selectedBroker,
-            accountNumber: _accountController.text,
-            server: _serverController.text,
-          );
+          if (isConnected) {
+            await tradingService.syncBrokerAccount(
+              brokerName: _selectedBroker,
+              accountNumber: _accountController.text,
+              server: _serverController.text,
+            );
+          }
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ Connected! Balance: $currencySymbol${balance.toStringAsFixed(2)} $currency'),
-            backgroundColor: AppColors.successColor,
+            content: Text(
+              isConnected
+                  ? '✓ Connected! Balance: $currencySymbol${balance.toStringAsFixed(2)} $currency'
+                  : (warning ?? 'Credential saved, but MT5 warmup is still pending.'),
+            ),
+            backgroundColor: isConnected ? AppColors.successColor : Colors.orange,
             duration: const Duration(seconds: 3),
           ),
         );
@@ -1126,7 +1190,17 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                         const SizedBox(height: 8),
                         _buildStatusInfoRow('Connection', _lastConnectionTime?.toString().split('.')[0] ?? 'N/A'),
                         const SizedBox(height: 8),
-                        _buildStatusInfoRow('Balance', '${_accountCurrency == 'ZAR' ? 'R' : (_accountCurrency == 'GBP' ? '£' : r'$')}${_accountBalance.toStringAsFixed(2)} $_accountCurrency'),
+                        _buildStatusInfoRow('Balance', _formatCurrency(_accountBalance)),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('Equity', _formatCurrency(_accountEquity)),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('Free Margin', _formatCurrency(_accountFreeMargin)),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('Margin', _formatCurrency(_accountMargin)),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('Margin Level', _formatMarginLevel(_accountMarginLevel)),
+                        const SizedBox(height: 8),
+                        _buildStatusInfoRow('P/L', _formatCurrency(_accountProfit)),
                       ],
                     ),
                   ),
