@@ -1302,9 +1302,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
       final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
       final signalThreshold = _recommendedSignalThreshold();
-        final tradingMode = _recommendedTradingMode();
-        final tradingInterval = _recommendedTradingInterval();
-        final pollInterval = _recommendedPollInterval();
+      final tradingMode = _recommendedTradingMode();
+      final tradingInterval = _recommendedTradingInterval();
+      final pollInterval = _recommendedPollInterval();
       final accountCurrency = credential.accountCurrency.toUpperCase();
       final fixedAmountWarning = _fixedTradeAmountWarningData(context);
       if (fixedAmountWarning != null) {
