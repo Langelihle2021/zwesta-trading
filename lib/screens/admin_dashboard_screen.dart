@@ -55,16 +55,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           children: const [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
-          ]
-        )
-        ..add(
-          const Flexible(
-            child: Text(
-              'Admin Dashboard',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 20),
+            Flexible(
+              child: Text(
+                'Admin Dashboard',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 20),
+              ),
             ),
-          ),
+          ],
         ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
