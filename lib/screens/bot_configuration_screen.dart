@@ -28,7 +28,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   // Volatility filter toggle
   bool _volatilityFilterEnabled = true;
   // Intelligent scanner: auto-scan all markets & reallocate to best opportunities
-  bool _intelligentScanner = false;
+  bool _intelligentScanner = true;
   static const List<double> _tradeAmountPresets = [
     20,
     50,
@@ -424,12 +424,25 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   String? _errorMessage;
 
   // Auto-Withdrawal Settings
-  String _withdrawalMode = 'fixed'; // 'fixed' or 'intelligent'
+  String _withdrawalMode = 'fixed'; // 'fixed' or 'intelligent' or 'milestone'
   double _targetProfit = 300; // For fixed mode
   double _minProfit = 50; // For intelligent mode
   double _maxProfit = 500; // For intelligent mode
   double _winRateMin = 60; // For intelligent mode
   bool _enableAutoWithdrawal = false;
+
+  // Profit Protection Settings
+  bool _enableProfitProtection = true;
+  double _profitProtectionActivationPercent = 5;
+  double _profitProtectionActivationMinProfit = 5;
+  double _profitProtectionRetracePercent = 70;
+  bool _profitProtectionSwitchOnReversal = true;
+
+  // Milestone Auto-Withdrawal Settings
+  double _milestoneOneProfitPercent = 20;
+  double _milestoneOneWithdrawPercent = 20;
+  double _milestoneTwoProfitPercent = 50;
+  double _milestoneTwoWithdrawPercent = 50;
 
   // Currency & Settings
   String _currencyChoice = 'USD'; // 'USD' or 'ZAR' (Rand)
@@ -1059,6 +1072,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     return _recommendedTradingCadence()['pollInterval'] as int;
   }
 
+  bool _autoScannerEnabled() {
+    return _intelligentScanner || _enableProfitProtection || _selectedPreset != null;
+  }
+
   final List<String> strategies = [
     'Trend Following',
     'Scalping',
@@ -1339,6 +1356,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       final tradingMode = _recommendedTradingMode();
       final tradingInterval = _recommendedTradingInterval();
       final pollInterval = _recommendedPollInterval();
+      final autoScanner = _autoScannerEnabled();
       final accountCurrency = credential.accountCurrency.toUpperCase();
       final fixedAmountWarning = _fixedTradeAmountWarningData(context);
       if (fixedAmountWarning != null) {
@@ -1385,7 +1403,14 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         },
         'enabled': true,
         'volatilityFilterEnabled': _volatilityFilterEnabled,
-        'intelligentScanner': _intelligentScanner,
+        'intelligentScanner': autoScanner,
+        'profitProtection': {
+          'enabled': _enableProfitProtection,
+          'activationPercent': _profitProtectionActivationPercent,
+          'activationMinProfit': _profitProtectionActivationMinProfit,
+          'retraceClosePercent': _profitProtectionRetracePercent,
+          'switchOnReversal': _profitProtectionSwitchOnReversal,
+        },
         'autoWithdrawal': _enableAutoWithdrawal
             ? {
                 'enabled': true,
@@ -1394,6 +1419,19 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                 if (_withdrawalMode == 'intelligent') 'minProfit': _minProfit,
                 if (_withdrawalMode == 'intelligent') 'maxProfit': _maxProfit,
                 if (_withdrawalMode == 'intelligent') 'winRateMin': _winRateMin,
+                if (_withdrawalMode == 'milestone')
+                  'milestones': [
+                    {
+                      'profitPercent': _milestoneOneProfitPercent,
+                      'withdrawRatio': (_milestoneOneWithdrawPercent / 100).clamp(0.0, 1.0),
+                      'reinvestRatio': (1 - (_milestoneOneWithdrawPercent / 100)).clamp(0.0, 1.0),
+                    },
+                    {
+                      'profitPercent': _milestoneTwoProfitPercent,
+                      'withdrawRatio': (_milestoneTwoWithdrawPercent / 100).clamp(0.0, 1.0),
+                      'reinvestRatio': (1 - (_milestoneTwoWithdrawPercent / 100)).clamp(0.0, 1.0),
+                    },
+                  ],
               }
             : {
                 'enabled': false,
@@ -2412,13 +2450,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                               size: 20,
                             ),
                             const SizedBox(width: 8),
-                            const Text('Intelligent Scanner'),
+                            const Text('Auto Intelligent Scanner'),
                           ],
                         ),
                         subtitle: Text(
                           _intelligentScanner
-                              ? 'ON — Bot scans ALL markets every cycle, closes weak trades, and reallocates to the best opportunities automatically.'
-                              : 'OFF — Bot only trades its assigned symbols.',
+                              ? 'ON — Bot scans the wider market every cycle, closes weak trades, reallocates to stronger opportunities, and stays enabled automatically for presets and advanced automation.'
+                              : 'OFF — Bot only trades its assigned symbols unless advanced automation requires scanner support.',
                           style: TextStyle(
                             color: _intelligentScanner
                                 ? Colors.purpleAccent.withOpacity(0.8)
@@ -2891,6 +2929,125 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                     ),
                     const SizedBox(height: 24),
 
+                    // Profit Protection Settings
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.teal.withOpacity(0.5)),
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.teal.withOpacity(0.05),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.shield_outlined,
+                                  color: Colors.teal, size: 24),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Profit Protection',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(color: Colors.teal),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          SwitchListTile(
+                            value: _enableProfitProtection,
+                            onChanged: (value) {
+                              setState(() => _enableProfitProtection = value);
+                            },
+                            title: const Text('Lock Winner Profits'),
+                            subtitle: const Text(
+                              'Arm a floor once a trade reaches profit, then close it on retrace or signal reversal.',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          if (_enableProfitProtection) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Arm At Profit %',
+                                      hintText: '5',
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                    ),
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _profitProtectionActivationPercent =
+                                            double.tryParse(value) ?? 5;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextField(
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Min Profit Lock',
+                                      hintText: '5',
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                    ),
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _profitProtectionActivationMinProfit =
+                                            double.tryParse(value) ?? 5;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: 'Retrace Close %',
+                                hintText: '70',
+                                helperText:
+                                    'Higher values allow more pullback before the trade is closed.',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setState(() {
+                                  _profitProtectionRetracePercent =
+                                      double.tryParse(value) ?? 70;
+                                });
+                              },
+                            ),
+                            SwitchListTile(
+                              value: _profitProtectionSwitchOnReversal,
+                              onChanged: (value) {
+                                setState(() =>
+                                    _profitProtectionSwitchOnReversal = value);
+                              },
+                              title: const Text('Close On Signal Reversal'),
+                              subtitle: const Text(
+                                'If the winner flips direction, close it and let the auto scanner look for a stronger pair.',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
                     // Auto-Withdrawal Settings
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -3144,6 +3301,154 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                               double.tryParse(value) ?? 60;
                                         });
                                       },
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Milestone Mode Option
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: _withdrawalMode == 'milestone'
+                                      ? Colors.amber
+                                      : Colors.grey.withOpacity(0.3),
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: _withdrawalMode == 'milestone'
+                                    ? Colors.amber.withOpacity(0.1)
+                                    : Colors.transparent,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Radio<String>(
+                                        value: 'milestone',
+                                        groupValue: _withdrawalMode,
+                                        onChanged: (value) {
+                                          setState(() => _withdrawalMode =
+                                              value ?? 'fixed');
+                                        },
+                                      ),
+                                      const Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '🏁 Milestone Mode',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            SizedBox(height: 4),
+                                            Text(
+                                              'Withdraw part of profits at growth milestones and reinvest the rest automatically.',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_withdrawalMode == 'milestone') ...[
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            keyboardType: TextInputType.number,
+                                            decoration: InputDecoration(
+                                              labelText: 'Milestone 1 %',
+                                              hintText: '20',
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                            ),
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _milestoneOneProfitPercent =
+                                                    double.tryParse(value) ?? 20;
+                                              });
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: TextField(
+                                            keyboardType: TextInputType.number,
+                                            decoration: InputDecoration(
+                                              labelText: 'Withdraw %',
+                                              hintText: '20',
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                            ),
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _milestoneOneWithdrawPercent =
+                                                    double.tryParse(value) ?? 20;
+                                              });
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            keyboardType: TextInputType.number,
+                                            decoration: InputDecoration(
+                                              labelText: 'Milestone 2 %',
+                                              hintText: '50',
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                            ),
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _milestoneTwoProfitPercent =
+                                                    double.tryParse(value) ?? 50;
+                                              });
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: TextField(
+                                            keyboardType: TextInputType.number,
+                                            decoration: InputDecoration(
+                                              labelText: 'Withdraw %',
+                                              hintText: '50',
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                            ),
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _milestoneTwoWithdrawPercent =
+                                                    double.tryParse(value) ?? 50;
+                                              });
+                                            },
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ],

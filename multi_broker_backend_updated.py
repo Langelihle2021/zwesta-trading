@@ -1487,6 +1487,9 @@ def init_database():
             trend_strength_min REAL DEFAULT 0.5,
             time_between_withdrawals_hours INTEGER DEFAULT 24,
             last_withdrawal_at TEXT,
+            milestone_config TEXT,
+            baseline_equity REAL DEFAULT 0,
+            last_milestone_pct REAL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -1503,12 +1506,36 @@ def init_database():
             withdrawal_amount REAL NOT NULL,
             fee REAL DEFAULT 0,
             net_amount REAL,
+            reinvested_amount REAL DEFAULT 0,
+            withdrawal_mode TEXT,
+            withdrawal_reason TEXT,
+            milestone_pct REAL DEFAULT 0,
             status TEXT DEFAULT 'pending',
             created_at TEXT,
             completed_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+
+    cursor.execute('PRAGMA table_info(auto_withdrawal_settings)')
+    auto_withdrawal_columns = {row[1] for row in cursor.fetchall()}
+    if 'milestone_config' not in auto_withdrawal_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_settings ADD COLUMN milestone_config TEXT')
+    if 'baseline_equity' not in auto_withdrawal_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_settings ADD COLUMN baseline_equity REAL DEFAULT 0')
+    if 'last_milestone_pct' not in auto_withdrawal_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_settings ADD COLUMN last_milestone_pct REAL DEFAULT 0')
+
+    cursor.execute('PRAGMA table_info(auto_withdrawal_history)')
+    auto_withdrawal_history_columns = {row[1] for row in cursor.fetchall()}
+    if 'reinvested_amount' not in auto_withdrawal_history_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_history ADD COLUMN reinvested_amount REAL DEFAULT 0')
+    if 'withdrawal_mode' not in auto_withdrawal_history_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_history ADD COLUMN withdrawal_mode TEXT')
+    if 'withdrawal_reason' not in auto_withdrawal_history_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_history ADD COLUMN withdrawal_reason TEXT')
+    if 'milestone_pct' not in auto_withdrawal_history_columns:
+        cursor.execute('ALTER TABLE auto_withdrawal_history ADD COLUMN milestone_pct REAL DEFAULT 0')
     
     # User bots table - stores user-specific bots
     cursor.execute('''
@@ -10321,7 +10348,8 @@ PERSISTED_BOT_STATE_FIELDS = {
     'totalInvestment', 'profitHistory', 'tradeHistory', 'dailyProfits', 'dailyProfit',
     'maxDrawdown', 'peakProfit', 'strategyHistory', 'lastStrategySwitch', 'volatilityLevel',
     'profit', 'drawdownPauseUntil', 'accountBalance', 'accountEquity', 'tradeAmount',
-    'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode'
+    'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode',
+    'profitProtection'
 }
 
 
@@ -10373,6 +10401,7 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'tradeAmount': None,
         'intelligentScanner': False,
         'lastScanResults': None,
+        'profitProtection': dict(DEFAULT_PROFIT_PROTECTION_CONFIG),
     }
 
 
@@ -13326,6 +13355,20 @@ SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
 }
 SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'EURUSDm', 'USDCHFm', 'USDCADm']
 
+DEFAULT_PROFIT_PROTECTION_CONFIG = {
+    'enabled': True,
+    'activationPercent': 5.0,
+    'activationMinProfit': 5.0,
+    'minLockedProfit': 0.0,
+    'retraceClosePercent': 70.0,
+    'switchOnReversal': True,
+}
+
+DEFAULT_MILESTONE_WITHDRAWAL_PLAN = [
+    {'profitPercent': 20.0, 'withdrawRatio': 0.20, 'reinvestRatio': 0.80},
+    {'profitPercent': 50.0, 'withdrawRatio': 0.50, 'reinvestRatio': 0.50},
+]
+
 
 def _default_strategy_trading_cadence(strategy_name: str, management_profile: str, intelligent_scanner: bool = False) -> Dict[str, int]:
     normalized_strategy = str(strategy_name or 'Trend Following').strip().lower()
@@ -13346,6 +13389,255 @@ def _default_strategy_trading_cadence(strategy_name: str, management_profile: st
     base_interval = 150 if normalized_profile == 'beginner' else 120 if normalized_profile == 'balanced' else 90
     base_poll = 15 if normalized_profile == 'beginner' else 12 if normalized_profile == 'balanced' else 10
     return {'tradingMode': 'signal-driven', 'tradingInterval': base_interval, 'pollInterval': base_poll}
+
+
+def _normalize_profit_protection_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    raw = dict(config) if isinstance(config, dict) else {}
+    normalized = dict(DEFAULT_PROFIT_PROTECTION_CONFIG)
+    normalized['enabled'] = _coerce_bool(raw.get('enabled', normalized['enabled']), normalized['enabled'])
+    normalized['activationPercent'] = max(0.5, min(50.0, _safe_float(raw.get('activationPercent', raw.get('activation_percent', normalized['activationPercent'])), normalized['activationPercent'])))
+    normalized['activationMinProfit'] = max(0.0, _safe_float(raw.get('activationMinProfit', raw.get('activation_min_profit', normalized['activationMinProfit'])), normalized['activationMinProfit']))
+    normalized['minLockedProfit'] = max(0.0, _safe_float(raw.get('minLockedProfit', raw.get('min_locked_profit', normalized['minLockedProfit'])), normalized['minLockedProfit']))
+    normalized['retraceClosePercent'] = max(5.0, min(95.0, _safe_float(raw.get('retraceClosePercent', raw.get('retrace_close_percent', normalized['retraceClosePercent'])), normalized['retraceClosePercent'])))
+    normalized['switchOnReversal'] = _coerce_bool(raw.get('switchOnReversal', raw.get('switch_on_reversal', normalized['switchOnReversal'])), normalized['switchOnReversal'])
+    return normalized
+
+
+def _normalize_milestone_withdrawal_plan(raw_plan: Any) -> List[Dict[str, float]]:
+    if isinstance(raw_plan, str):
+        try:
+            raw_plan = json.loads(raw_plan)
+        except Exception:
+            raw_plan = None
+
+    plan = raw_plan if isinstance(raw_plan, list) else DEFAULT_MILESTONE_WITHDRAWAL_PLAN
+    normalized = []
+    for item in plan:
+        if not isinstance(item, dict):
+            continue
+        profit_percent = max(1.0, min(500.0, _safe_float(item.get('profitPercent', item.get('profit_percent', 0)), 0.0)))
+        withdraw_ratio = max(0.0, min(1.0, _safe_float(item.get('withdrawRatio', item.get('withdraw_ratio', 0)), 0.0)))
+        reinvest_ratio = item.get('reinvestRatio', item.get('reinvest_ratio'))
+        if reinvest_ratio is None:
+            reinvest_ratio = max(0.0, 1.0 - withdraw_ratio)
+        reinvest_ratio = max(0.0, min(1.0, _safe_float(reinvest_ratio, max(0.0, 1.0 - withdraw_ratio))))
+        if withdraw_ratio <= 0:
+            continue
+        normalized.append({
+            'profitPercent': round(profit_percent, 2),
+            'withdrawRatio': round(withdraw_ratio, 4),
+            'reinvestRatio': round(reinvest_ratio, 4),
+        })
+
+    if not normalized:
+        normalized = [dict(item) for item in DEFAULT_MILESTONE_WITHDRAWAL_PLAN]
+
+    normalized.sort(key=lambda item: item['profitPercent'])
+    return normalized
+
+
+def _signal_reversed_for_position(position_type: str, current_signal: str) -> bool:
+    normalized_type = str(position_type or '').upper()
+    normalized_signal = str(current_signal or '').upper()
+    return (
+        (normalized_type == 'BUY' and 'SELL' in normalized_signal) or
+        (normalized_type == 'SELL' and 'BUY' in normalized_signal)
+    )
+
+
+def _recent_close_request(position_state: Dict[str, Any], window_seconds: int = 45) -> bool:
+    close_requested_at = position_state.get('closeRequestedAt')
+    if not close_requested_at:
+        return False
+    try:
+        return (datetime.now() - datetime.fromisoformat(close_requested_at)).total_seconds() < window_seconds
+    except Exception:
+        return False
+
+
+def _profit_protection_activation_amount(bot_config: Dict[str, Any], protection_config: Dict[str, Any]) -> float:
+    activation_min_profit = float(protection_config.get('activationMinProfit') or 0.0)
+    activation_percent = float(protection_config.get('activationPercent') or 0.0)
+    fixed_trade_amount = _safe_float(bot_config.get('tradeAmount'), 0.0)
+    balance_basis = max(
+        _safe_float(bot_config.get('accountEquity'), 0.0),
+        _safe_float(bot_config.get('accountBalance'), 0.0),
+    )
+    basis = fixed_trade_amount if fixed_trade_amount > 0 else max(balance_basis * 0.02, activation_min_profit)
+    return max(activation_min_profit, basis * (activation_percent / 100.0))
+
+
+def manage_protected_open_positions(bot_id, bot_config, current_positions, active_conn, is_mt5, mt5_conn):
+    protection_config = _normalize_profit_protection_config(bot_config.get('profitProtection'))
+    if not protection_config.get('enabled'):
+        return []
+
+    tracked_positions = bot_config.get('open_positions', {})
+    if not tracked_positions or not current_positions:
+        return []
+
+    activation_amount = _profit_protection_activation_amount(bot_config, protection_config)
+    protection_events = []
+
+    for current_position in current_positions:
+        ticket = str(current_position.get('ticket') or current_position.get('deal_id') or '')
+        if not ticket or ticket not in tracked_positions:
+            continue
+
+        tracked = tracked_positions[ticket]
+        current_profit = round(_safe_float(current_position.get('profit', current_position.get('pnl', tracked.get('profit', 0.0))), 0.0), 2)
+        tracked['profit'] = current_profit
+        tracked['currentPrice'] = current_position.get('currentPrice') or current_position.get('marketPrice') or current_position.get('price_current') or tracked.get('currentPrice', 0)
+        tracked['peakProfit'] = round(max(_safe_float(tracked.get('peakProfit'), 0.0), current_profit), 2)
+
+        if tracked['peakProfit'] >= activation_amount:
+            tracked['profitProtectionArmed'] = True
+            protected_floor = max(
+                _safe_float(protection_config.get('minLockedProfit'), 0.0),
+                tracked['peakProfit'] * (1.0 - (_safe_float(protection_config.get('retraceClosePercent'), 70.0) / 100.0)),
+            )
+            tracked['lockedProfitFloor'] = round(max(0.0, min(protected_floor, tracked['peakProfit'])), 2)
+
+        if not tracked.get('profitProtectionArmed') or _recent_close_request(tracked):
+            continue
+
+        signal_eval = evaluate_real_trade_signal(tracked.get('symbol', ''), _get_market_data_for_symbol(tracked.get('symbol', '')))
+        current_signal = signal_eval.get('signal', 'NEUTRAL')
+        close_reason = None
+        locked_floor = _safe_float(tracked.get('lockedProfitFloor'), 0.0)
+
+        if current_profit <= locked_floor:
+            close_reason = 'PROFIT_RETRACE'
+        elif protection_config.get('switchOnReversal') and current_profit > 0 and _signal_reversed_for_position(tracked.get('type', ''), current_signal):
+            close_reason = 'LOCKED_PROFIT_SIGNAL_REVERSAL'
+        elif tracked['peakProfit'] >= activation_amount and current_profit <= 0:
+            close_reason = 'BREAK_EVEN_FAILURE'
+
+        if not close_reason:
+            continue
+
+        try:
+            if is_mt5 and mt5_conn:
+                result = mt5_conn.close_position(ticket)
+            elif active_conn:
+                result = active_conn.close_position(ticket)
+            else:
+                result = {'success': False, 'error': 'No connection available'}
+
+            if result.get('success'):
+                tracked['closeRequestedAt'] = datetime.now().isoformat()
+                tracked['closeReason'] = close_reason
+                tracked['status'] = 'closing'
+                protection_events.append({
+                    'ticket': ticket,
+                    'symbol': tracked.get('symbol', ''),
+                    'reason': close_reason,
+                    'profit': current_profit,
+                    'lockedProfitFloor': locked_floor,
+                })
+                logger.info(
+                    f"🛡️ Bot {bot_id}: Closed protected winner {tracked.get('symbol')} (ticket {ticket}) "
+                    f"at {current_profit:.2f} due to {close_reason} with floor {locked_floor:.2f}"
+                )
+            else:
+                logger.warning(f"🛡️ Bot {bot_id}: Failed to close protected position {tracked.get('symbol')}: {result.get('error')}")
+        except Exception as close_error:
+            logger.error(f"🛡️ Bot {bot_id}: Exception closing protected position {tracked.get('symbol')}: {close_error}")
+
+    return protection_events
+
+def upsert_auto_withdrawal_settings(cursor, bot_id: str, user_id: str, config: Dict[str, Any], bot_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not isinstance(config, dict):
+        raise ValueError('auto-withdrawal config must be an object')
+
+    if not _coerce_bool(config.get('enabled', True), True):
+        raise ValueError('auto-withdrawal is disabled')
+
+    withdrawal_mode = str(config.get('withdrawalMode') or config.get('withdrawal_mode') or 'fixed').strip().lower()
+    if withdrawal_mode not in {'fixed', 'intelligent', 'milestone'}:
+        raise ValueError("withdrawal_mode must be 'fixed', 'intelligent', or 'milestone'")
+
+    target_profit = 0.0
+    min_profit = 0.0
+    max_profit = 0.0
+    volatility_threshold = 0.02
+    win_rate_min = 60.0
+    trend_strength_min = 0.5
+    time_between_withdrawals_hours = int(round(_safe_float(config.get('timeBetweenWithdrawalsHours', config.get('time_between_withdrawals_hours', 24)), 24)))
+    milestone_config = None
+    last_milestone_pct = 0.0
+
+    if withdrawal_mode == 'fixed':
+        target_profit = _safe_float(config.get('targetProfit', config.get('target_profit')), 0.0)
+        if target_profit < 10:
+            raise ValueError('Minimum profit target is 10')
+    elif withdrawal_mode == 'intelligent':
+        min_profit = _safe_float(config.get('minProfit', config.get('min_profit', 50)), 50.0)
+        max_profit = _safe_float(config.get('maxProfit', config.get('max_profit', 1000)), 1000.0)
+        volatility_threshold = _safe_float(config.get('volatilityThreshold', config.get('volatility_threshold', 0.02)), 0.02)
+        win_rate_min = _safe_float(config.get('winRateMin', config.get('win_rate_min', 60)), 60.0)
+        trend_strength_min = _safe_float(config.get('trendStrengthMin', config.get('trend_strength_min', 0.5)), 0.5)
+        if min_profit < 10:
+            raise ValueError('Minimum profit must be at least 10')
+    else:
+        milestones = _normalize_milestone_withdrawal_plan(config.get('milestones'))
+        milestone_config = json.dumps(milestones)
+        min_profit = _safe_float(config.get('minProfit', config.get('min_profit', 20)), milestones[0]['profitPercent'])
+
+    baseline_equity = _safe_float(config.get('baselineEquity', config.get('baseline_equity', 0.0)), 0.0)
+    if baseline_equity <= 0 and isinstance(bot_config, dict):
+        baseline_equity = max(
+            _safe_float(bot_config.get('accountBalance'), 0.0),
+            _safe_float(bot_config.get('accountEquity'), 0.0),
+        )
+    if baseline_equity <= 0:
+        baseline_equity = max(_safe_float(config.get('tradeAmount', 0.0), 0.0) * 5.0, 100.0)
+
+    setting_id = str(uuid.uuid4())
+    now_iso = datetime.now().isoformat()
+    cursor.execute('''
+        INSERT OR REPLACE INTO auto_withdrawal_settings
+        (setting_id, bot_id, user_id, target_profit, is_active, withdrawal_method,
+         withdrawal_mode, min_profit, max_profit, volatility_threshold, win_rate_min,
+         trend_strength_min, time_between_withdrawals_hours, last_withdrawal_at,
+         milestone_config, baseline_equity, last_milestone_pct, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        setting_id,
+        bot_id,
+        user_id,
+        target_profit,
+        1,
+        withdrawal_mode,
+        withdrawal_mode,
+        min_profit,
+        max_profit,
+        volatility_threshold,
+        win_rate_min,
+        trend_strength_min,
+        time_between_withdrawals_hours,
+        None,
+        milestone_config,
+        baseline_equity,
+        last_milestone_pct,
+        now_iso,
+        now_iso,
+    ))
+
+    message = f'Auto-withdrawal configured for {bot_id} in {withdrawal_mode} mode'
+    if withdrawal_mode == 'fixed':
+        message = f'Fixed withdrawal set at profit target {target_profit:.2f}'
+    elif withdrawal_mode == 'intelligent':
+        message = f'Intelligent withdrawal set with min profit {min_profit:.2f} and max profit {max_profit:.2f}'
+    elif withdrawal_mode == 'milestone':
+        message = 'Milestone withdrawal plan configured'
+
+    return {
+        'setting_id': setting_id,
+        'withdrawal_mode': withdrawal_mode,
+        'baseline_equity': baseline_equity,
+        'message': message,
+    }
 
 
 def _clamp_bot_config_value(field_name: str, raw_value, minimum: float, maximum: float, default_value: float, warnings: List[str]) -> float:
@@ -14077,6 +14369,7 @@ def create_bot():
                 'enabled': trading_enabled,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
                 'intelligentScanner': bool(effective_data.get('intelligentScanner', False)),  # Auto-scan all symbols & reallocate
+                'profitProtection': _normalize_profit_protection_config(data.get('profitProtection')),
                 'maxOpenPositions': max_open_positions,
                 'maxPositionsPerSymbol': max_positions_per_symbol,
                 'basePositionSize': data.get('basePositionSize', 1.0),
@@ -14196,6 +14489,7 @@ def create_bot():
                 logger.info(f"⏸️ Bot {bot_id} created without starting - call /api/bot/start to begin trading")
 
             account_balance = cached_balance if cached_balance > 0 else 10000.0
+            auto_withdrawal_status = None
             try:
                 if canonicalize_broker_name(broker_name) == 'Binance':
                     binance_conn_balance = BinanceConnection(credentials={
@@ -14231,6 +14525,25 @@ def create_bot():
                             logger.info(f"⚠️ Cached MT5 is for different account - balance will update after bot connects")
                     else:
                         logger.info(f"⚠️ No cached MT5 connection - balance will update after bot connects")
+
+                active_bots[bot_id]['accountBalance'] = account_balance
+                active_bots[bot_id]['accountEquity'] = account_balance
+
+                auto_withdrawal_config = data.get('autoWithdrawal')
+                if isinstance(auto_withdrawal_config, dict) and _coerce_bool(auto_withdrawal_config.get('enabled', False), False):
+                    try:
+                        auto_withdrawal_status = upsert_auto_withdrawal_settings(
+                            cursor,
+                            bot_id,
+                            user_id,
+                            auto_withdrawal_config,
+                            bot_config=active_bots[bot_id],
+                        )
+                        conn.commit()
+                    except Exception as auto_withdrawal_error:
+                        logger.error(f"Auto-withdrawal setup failed for bot {bot_id}: {auto_withdrawal_error}")
+
+                persist_bot_runtime_state(bot_id)
             except Exception as e:
                 logger.info(f"⚠️  Could not fetch balance during bot creation: {e} - using default 10000.0")
 
@@ -14247,6 +14560,7 @@ def create_bot():
                 'displayCurrency': display_currency or 'USD',
                 'smallAccountGuard': small_account_guard,
                 'tradeAmount': trade_amount,
+                'autoWithdrawalConfigured': bool(auto_withdrawal_status),
                 'appliedRiskConfig': {
                     'riskPerTrade': risk_per_trade or 20.0,
                     'maxDailyLoss': max_daily_loss or 60.0,
@@ -15268,6 +15582,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         'cycle': trade_cycle,
                                         'strategy': strategy_name,
                                         'broker': broker_type,
+                                        'peakProfit': round(current_profit, 2),
+                                        'profitProtectionArmed': False,
+                                        'lockedProfitFloor': 0.0,
                                     }
                                     
                                     # Store open trade in database
@@ -15367,6 +15684,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         trade['status'] = 'open'
                                         trade['isWinning'] = tracked_positions[current_ticket]['profit'] > 0
                                         break
+
+                        manage_protected_open_positions(
+                            bot_id,
+                            bot_config,
+                            current_positions,
+                            active_conn,
+                            is_mt5,
+                            mt5_conn,
+                        )
                         
                         closed_tickets = []
                         for ticket_str, tracked in list(tracked_positions.items()):
@@ -15408,6 +15734,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     'botId': bot_id,
                                     'cycle': tracked.get('cycle', 0),
                                     'strategy': tracked.get('strategy', ''),
+                                    'closeReason': tracked.get('closeReason', 'TP_SL_OR_MANUAL'),
                                     'isWinning': real_profit > 0,
                                     'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}",
                                     'broker': tracked.get('broker', broker_type),
@@ -15548,6 +15875,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     'strategy': bot_config.get('strategy', 'trend_following'),
                                     'broker': broker_type,
                                     'discovered': True,
+                                    'peakProfit': dp_profit,
+                                    'profitProtectionArmed': False,
+                                    'lockedProfitFloor': 0.0,
                                 }
                                 
                                 # Add to tradeHistory if not already there
@@ -17597,110 +17927,33 @@ def set_auto_withdrawal(bot_id):
     Modes:
     - 'fixed': Withdraw at user-predetermined profit level
     - 'intelligent': Robot decides intelligently based on market conditions
+    - 'milestone': Withdraw a percentage of profits at configured growth milestones
     """
     try:
         data = request.get_json()
         user_id = data.get('user_id')
         withdrawal_mode = data.get('withdrawal_mode', 'fixed')  # 'fixed' or 'intelligent'
-        target_profit = data.get('target_profit')               # For fixed mode
 
         if not user_id:
             return jsonify({'success': False, 'error': 'user_id required'}), 400
 
-        if withdrawal_mode not in ['fixed', 'intelligent']:
-            return jsonify({'success': False, 'error': "withdrawal_mode must be 'fixed' or 'intelligent'"}), 400
-
-        # Validate based on mode
-        min_profit = None
-        max_profit = None
-        volatility_threshold = None
-        win_rate_min = None
-        trend_strength_min = None
-        time_between_withdrawals_hours = None
-
-        if withdrawal_mode == 'fixed':
-            if not target_profit:
-                return jsonify({'success': False, 'error': 'target_profit required for fixed mode'}), 400
-
-            if target_profit < 10:
-                return jsonify({'success': False, 'error': 'Minimum profit target is $10'}), 400
-
-            if target_profit > 50000:
-                return jsonify({'success': False, 'error': 'Maximum profit target is $50,000'}), 400
-
-        elif withdrawal_mode == 'intelligent':
-            # Intelligent mode parameters
-            min_profit                     = data.get('min_profit', 50)
-            max_profit                     = data.get('max_profit', 1000)
-            volatility_threshold           = data.get('volatility_threshold', 0.02)
-            win_rate_min                   = data.get('win_rate_min', 60)
-            trend_strength_min             = data.get('trend_strength_min', 0.5)
-            time_between_withdrawals_hours = data.get('time_between_withdrawals_hours', 24)
-
-            # Validate parameters
-            if min_profit < 10:
-                return jsonify({'success': False, 'error': 'Minimum profit must be >= $10'}), 400
-            if volatility_threshold < 0 or volatility_threshold > 0.1:
-                return jsonify({'success': False, 'error': 'Volatility threshold must be 0-0.1'}), 400
-            if win_rate_min < 40 or win_rate_min > 100:
-                return jsonify({'success': False, 'error': 'Win rate must be 40-100%'}), 400
-
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        setting_id = str(uuid.uuid4())
-        created_at = datetime.now().isoformat()
-        updated_at = created_at
-
-        if withdrawal_mode == 'fixed':
-            cursor.execute('''
-                INSERT OR REPLACE INTO auto_withdrawal_settings
-                (setting_id, bot_id, user_id, target_profit, is_active,
-                 withdrawal_mode, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                setting_id,
-                bot_id,
-                user_id,
-                target_profit,
-                1,
-                'fixed',
-                created_at,
-                updated_at
-            ))
-
-            message = f'Fixed withdrawal set: Will withdraw when profit reaches ${target_profit}'
-
-        else:  # intelligent
-            cursor.execute('''
-                INSERT OR REPLACE INTO auto_withdrawal_settings
-                (setting_id, bot_id, user_id, withdrawal_mode,
-                 min_profit, max_profit, volatility_threshold,
-                 win_rate_min, trend_strength_min,
-                 time_between_withdrawals_hours,
-                 last_withdrawal_at,
-                 created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                setting_id,
-                bot_id,
-                user_id,
-                'intelligent',
-                min_profit,
-                max_profit,
-                volatility_threshold,
-                win_rate_min,
-                trend_strength_min,
-                time_between_withdrawals_hours,
-                None,
-                created_at,
-                updated_at
-            ))
-
-            message = (
-                f'Intelligent withdrawal activated with min profit ${min_profit}, '
-                f'max ${max_profit}, volatility < {volatility_threshold:.2%}'
-            )
+        bot_config = active_bots.get(bot_id)
+        setting = upsert_auto_withdrawal_settings(cursor, bot_id, user_id, {
+            'enabled': True,
+            'withdrawalMode': withdrawal_mode,
+            'targetProfit': data.get('target_profit'),
+            'minProfit': data.get('min_profit'),
+            'maxProfit': data.get('max_profit'),
+            'volatilityThreshold': data.get('volatility_threshold'),
+            'winRateMin': data.get('win_rate_min'),
+            'trendStrengthMin': data.get('trend_strength_min'),
+            'timeBetweenWithdrawalsHours': data.get('time_between_withdrawals_hours'),
+            'milestones': data.get('milestones'),
+            'baselineEquity': data.get('baseline_equity'),
+        }, bot_config=bot_config)
 
         conn.commit()
         conn.close()
@@ -17709,10 +17962,10 @@ def set_auto_withdrawal(bot_id):
 
         return jsonify({
             'success': True,
-            'setting_id': setting_id,
+            'setting_id': setting['setting_id'],
             'bot_id': bot_id,
-            'withdrawal_mode': withdrawal_mode,
-            'message': message
+            'withdrawal_mode': setting['withdrawal_mode'],
+            'message': setting['message']
         }), 200
 
     except Exception as e:
@@ -17730,7 +17983,9 @@ def get_auto_withdrawal_status(bot_id):
         
         # Get current settings
         cursor.execute('''
-            SELECT setting_id, target_profit, is_active, created_at
+            SELECT setting_id, target_profit, is_active, created_at, withdrawal_mode,
+                   min_profit, max_profit, time_between_withdrawals_hours,
+                   milestone_config, baseline_equity, last_milestone_pct
             FROM auto_withdrawal_settings WHERE bot_id = ? AND is_active = 1
         ''', (bot_id,))
         
@@ -17738,8 +17993,9 @@ def get_auto_withdrawal_status(bot_id):
         
         # Get withdrawal history
         cursor.execute('''
-            SELECT withdrawal_id, triggered_profit, withdrawal_amount, net_amount, 
-                   status, created_at, completed_at
+             SELECT withdrawal_id, triggered_profit, withdrawal_amount, net_amount,
+                 reinvested_amount, withdrawal_mode, withdrawal_reason,
+                 milestone_pct, status, created_at, completed_at
             FROM auto_withdrawal_history
             WHERE bot_id = ?
             ORDER BY created_at DESC
@@ -19462,6 +19718,46 @@ def auto_withdrawal_monitor():
         except Exception as e:
             logger.error(f"Error in intelligent withdrawal decision: {e}")
             return False, None
+
+    def should_withdraw_milestone(bot_id, bot_config, settings):
+        try:
+            current_profit = _safe_float(bot_config.get('totalProfit'), 0.0)
+            milestone_config = settings[12] if len(settings) > 12 else None
+            baseline_equity = _safe_float(settings[13] if len(settings) > 13 else 0.0, 0.0)
+            last_milestone_pct = _safe_float(settings[14] if len(settings) > 14 else 0.0, 0.0)
+
+            if current_profit <= 0:
+                return False, 0.0, None, 0.0
+
+            if baseline_equity <= 0:
+                baseline_equity = max(
+                    _safe_float(bot_config.get('accountBalance'), 0.0),
+                    _safe_float(bot_config.get('accountEquity'), 0.0),
+                )
+
+            if baseline_equity <= 0:
+                return False, 0.0, None, 0.0
+
+            growth_pct = (current_profit / baseline_equity) * 100.0
+            milestones = _normalize_milestone_withdrawal_plan(milestone_config)
+            eligible = [m for m in milestones if growth_pct >= m['profitPercent'] and m['profitPercent'] > last_milestone_pct]
+            if not eligible:
+                return False, 0.0, None, 0.0
+
+            selected = max(eligible, key=lambda item: item['profitPercent'])
+            withdrawal_amount = round(current_profit * selected['withdrawRatio'], 2)
+            reinvested_amount = round(max(current_profit - withdrawal_amount, 0.0), 2)
+            if withdrawal_amount <= 0:
+                return False, 0.0, None, 0.0
+
+            logger.info(
+                f"[MILESTONE] Bot {bot_id}: growth {growth_pct:.2f}% hit milestone {selected['profitPercent']:.2f}% -> "
+                f"withdraw {withdrawal_amount:.2f}, reinvest {reinvested_amount:.2f}"
+            )
+            return True, withdrawal_amount, selected, reinvested_amount
+        except Exception as milestone_error:
+            logger.error(f"Error in milestone withdrawal decision for {bot_id}: {milestone_error}")
+            return False, 0.0, None, 0.0
     
     while monitoring_running:
         try:
@@ -19474,7 +19770,8 @@ def auto_withdrawal_monitor():
             cursor.execute('''
                 SELECT setting_id, bot_id, user_id, withdrawal_mode, target_profit, 
                        min_profit, win_rate_min, trend_strength_min, volatility_threshold,
-                       time_between_withdrawals_hours, last_withdrawal_at, max_profit
+                       time_between_withdrawals_hours, last_withdrawal_at, max_profit,
+                       milestone_config, baseline_equity, last_milestone_pct
                 FROM auto_withdrawal_settings
                 WHERE is_active = 1
             ''')
@@ -19485,6 +19782,9 @@ def auto_withdrawal_monitor():
                 setting_id, bot_id, user_id, withdrawal_mode = setting[:4]
                 target_profit, min_profit, win_rate_min, trend_strength_min = setting[4:8]
                 volatility_threshold, hours_interval, last_withdrawal_at, max_profit = setting[8:12]
+                milestone_config = setting[12] if len(setting) > 12 else None
+                baseline_equity = setting[13] if len(setting) > 13 else 0.0
+                last_milestone_pct = setting[14] if len(setting) > 14 else 0.0
                 
                 if bot_id not in active_bots:
                     continue
@@ -19502,6 +19802,8 @@ def auto_withdrawal_monitor():
                 should_withdraw = False
                 withdrawal_amount = 0
                 reason = ""
+                reinvested_amount = 0.0
+                triggered_milestone = 0.0
                 
                 # FIXED MODE: Withdraw when target profit reached
                 if withdrawal_mode == 'fixed' and target_profit:
@@ -19519,6 +19821,16 @@ def auto_withdrawal_monitor():
                     reason = f"Intelligent decision (withdrawing ${withdrawal_amount:.2f})" if should_withdraw else ""
                     if should_withdraw:
                         logger.info(f"[INTELLIGENT] Bot {bot_id}: Withdrawal triggered - Profit ${current_profit}")
+                elif withdrawal_mode == 'milestone':
+                    should_withdraw, withdrawal_amount, milestone, reinvested_amount = should_withdraw_milestone(
+                        bot_id, bot_config, setting
+                    )
+                    if should_withdraw and milestone:
+                        triggered_milestone = milestone['profitPercent']
+                        reason = (
+                            f"Milestone {triggered_milestone:.2f}% reached: withdrawing ${withdrawal_amount:.2f}, "
+                            f"reinvesting ${reinvested_amount:.2f}"
+                        )
                 
                 # Execute withdrawal if criteria met
                 if should_withdraw and withdrawal_amount > 0:
@@ -19531,23 +19843,40 @@ def auto_withdrawal_monitor():
                         cursor.execute('''
                             INSERT INTO auto_withdrawal_history
                             (withdrawal_id, bot_id, user_id, triggered_profit, 
-                             withdrawal_amount, fee, net_amount, status, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                         withdrawal_amount, fee, net_amount, reinvested_amount,
+                                                         withdrawal_mode, withdrawal_reason, milestone_pct, status, created_at)
+                                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (withdrawal_id, bot_id, user_id, current_profit,
-                              withdrawal_amount, fee, net_amount, 'pending', created_at))
+                                                            withdrawal_amount, fee, net_amount, reinvested_amount,
+                                                            withdrawal_mode, reason, triggered_milestone, 'pending', created_at))
                         
                         # Update last withdrawal time
                         cursor.execute('''
                             UPDATE auto_withdrawal_settings
-                            SET last_withdrawal_at = ?
+                            SET last_withdrawal_at = ?, last_milestone_pct = CASE
+                                WHEN ? > COALESCE(last_milestone_pct, 0) THEN ?
+                                ELSE COALESCE(last_milestone_pct, 0)
+                            END
                             WHERE bot_id = ?
-                        ''', (created_at, bot_id))
+                        ''', (created_at, triggered_milestone, triggered_milestone, bot_id))
                         
                         # Distribute profit split and commissions
                         distribute_profit_split_and_commissions(user_id, withdrawal_amount, bot_id)
-                        # Reset bot profit
-                        active_bots[bot_id]['totalProfit'] = 0
-                        active_bots[bot_id]['dailyProfit'] = 0
+                        if withdrawal_mode == 'milestone':
+                            remaining_profit = max(current_profit - withdrawal_amount, 0.0)
+                            active_bots[bot_id]['totalProfit'] = remaining_profit
+                            active_bots[bot_id]['profit'] = remaining_profit
+                            active_bots[bot_id]['dailyProfit'] = max(
+                                _safe_float(active_bots[bot_id].get('dailyProfit'), 0.0) - withdrawal_amount,
+                                0.0,
+                            )
+                            today = datetime.now().strftime('%Y-%m-%d')
+                            if today in active_bots[bot_id].get('dailyProfits', {}):
+                                active_bots[bot_id]['dailyProfits'][today] = active_bots[bot_id]['dailyProfit']
+                        else:
+                            active_bots[bot_id]['totalProfit'] = 0
+                            active_bots[bot_id]['dailyProfit'] = 0
+                            active_bots[bot_id]['profit'] = 0
                         # Mark as completed
                         cursor.execute('''
                             UPDATE auto_withdrawal_history
