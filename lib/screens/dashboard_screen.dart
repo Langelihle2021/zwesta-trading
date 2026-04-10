@@ -747,15 +747,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         try {
                                           // Call backend API to delete bot
                                           final prefs = await SharedPreferences.getInstance();
-                                          final token = prefs.getString('authToken') ?? '';
+                                          final token = prefs.getString('auth_token') ?? '';
+                                          final userId = prefs.getString('user_id');
                                           
-                                          final response = await http.post(
-                                            Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/delete'),
+                                          final response = await http.delete(
+                                            Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/delete/$botId'),
                                             headers: {
                                               'Content-Type': 'application/json',
-                                              'Authorization': 'Bearer $token',
+                                              'X-Session-Token': token,
                                             },
-                                            body: jsonEncode({'botId': botId}),
+                                            body: jsonEncode({
+                                              if (userId != null && userId.isNotEmpty) 'user_id': userId,
+                                            }),
                                           );
                                           
                                           if (response.statusCode == 200) {

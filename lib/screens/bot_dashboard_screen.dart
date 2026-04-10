@@ -1043,16 +1043,26 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     );
                     if (confirmed != true) return;
                     final botService = context.read<BotService>();
-                    botService.removeBotLocally(botId);
+                    final deleted = await botService.deleteBot(botId);
                     if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('$botId deleted'),
-                        backgroundColor: Colors.red,
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                    setState(() {});
+                    if (deleted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('$botId deleted'),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                      setState(() {});
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(botService.errorMessage ?? 'Failed to delete $botId'),
+                          backgroundColor: Colors.orange,
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    }
                   }
                 },
                 itemBuilder: (context) => [

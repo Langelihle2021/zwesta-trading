@@ -513,6 +513,45 @@ class BotService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> deleteBot(String botId) async {
+    try {
+      final prefs = await _getPrefs();
+      final sessionToken = prefs.getString('auth_token');
+      final userId = prefs.getString('user_id');
+
+      if (sessionToken == null || sessionToken.isEmpty) {
+        _errorMessage = 'Session expired. Please login again.';
+        notifyListeners();
+        return false;
+      }
+
+      final response = await http.delete(
+        Uri.parse('$_apiUrl/api/bot/delete/$botId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+        body: jsonEncode({
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
+        }),
+      ).timeout(const Duration(seconds: 15));
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode == 200 && data['success'] == true) {
+        removeBotLocally(botId);
+        return true;
+      }
+
+      _errorMessage = data['error']?.toString() ?? 'Failed to delete bot';
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _errorMessage = 'Error deleting bot: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
   @override
   void dispose() {
     _pollTimer?.cancel();

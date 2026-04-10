@@ -147,7 +147,7 @@ def init_mt5(credentials: Dict) -> bool:
         
         acct_info = mt5.account_info()
         if acct_info:
-            logger.info(f"MT5 connected: Account {acct_info.login}, Balance ${acct_info.balance:.2f}, Server {acct_info.server}")
+            logger.info(f"MT5 connected: Account {acct_info.login}, Balance R{acct_info.balance:.2f}, Server {acct_info.server}")
             mt5_connection = True
             return True
         else:
@@ -498,14 +498,14 @@ def bot_trading_loop(bot_id: str, user_id: str, bot_config: Dict):
                 daily_profit = daily_profits.get(today, 0.0)
                 
                 if profit_lock > 0 and daily_profit >= profit_lock:
-                    logger.info(f"Bot {bot_id}: Daily profit lock ${daily_profit:.2f} >= ${profit_lock:.2f} - PAUSED")
-                    _update_bot_status(bot_id, 'PAUSED', f'Profit lock: ${daily_profit:.2f}')
+                    logger.info(f"Bot {bot_id}: Daily profit lock R{daily_profit:.2f} >= R{profit_lock:.2f} - PAUSED")
+                    _update_bot_status(bot_id, 'PAUSED', f'Profit lock: R{daily_profit:.2f}')
                     time.sleep(trading_interval)
                     continue
                 
                 if max_daily_loss > 0 and daily_profit < -max_daily_loss:
-                    logger.info(f"Bot {bot_id}: Daily loss ${abs(daily_profit):.2f} >= ${max_daily_loss:.2f} - PAUSED")
-                    _update_bot_status(bot_id, 'PAUSED', f'Loss limit: ${abs(daily_profit):.2f}')
+                    logger.info(f"Bot {bot_id}: Daily loss R{abs(daily_profit):.2f} >= R{max_daily_loss:.2f} - PAUSED")
+                    _update_bot_status(bot_id, 'PAUSED', f'Loss limit: R{abs(daily_profit):.2f}')
                     time.sleep(trading_interval)
                     continue
                 
@@ -544,6 +544,9 @@ def bot_trading_loop(bot_id: str, user_id: str, bot_config: Dict):
                             # Risk-based sizing
                             acct_info = mt5_get_account_info()
                             balance = acct_info['balance'] if acct_info else 10000.0
+                            if balance < 5:
+                                logger.warning(f"Bot {bot_id}: Balance too low (R{balance:.2f}) to trade safely. Skipping.")
+                                continue
                             risk_amount = balance * (risk_per_trade / 100.0)
                             volume = max(0.01, round(risk_amount / 100000, 2))
                         
@@ -604,7 +607,7 @@ def bot_trading_loop(bot_id: str, user_id: str, bot_config: Dict):
                                          result.get('deal_id'))
                             
                             logger.info(f"Bot {bot_id}: Trade executed {signal['direction']} {volume} {symbol} "
-                                        f"| P&L: ${trade_profit:.2f} | Total: ${total_profit:.2f}")
+                                        f"| P&L: R{trade_profit:.2f} | Total: R{total_profit:.2f}")
                         else:
                             if result.get('is_paused'):
                                 logger.warning(f"Bot {bot_id}: Market paused for {symbol}")

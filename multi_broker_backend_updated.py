@@ -37,7 +37,7 @@ except ImportError:
     print("[WARNING] flask-sock not installed. WebSocket prices disabled. Install with: pip install flask-sock")
 import logging
 from logging.handlers import RotatingFileHandler
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 import sys
 import atexit
@@ -417,6 +417,34 @@ def get_known_mt5_paths(broker_name: str) -> List[str]:
     ]
 
 
+def resolve_mt5_terminal_executable_path(path: str) -> Optional[str]:
+    """Resolve an MT5 terminal input into an executable path.
+
+    Accepts either a direct executable path or a terminal installation directory.
+    """
+    normalized_path = str(path or '').strip().strip('"').strip("'")
+    if not normalized_path:
+        return None
+
+    normalized_path = os.path.normpath(normalized_path)
+    path_parts = normalized_path.split(os.sep)
+    if len(path_parts) >= 2 and path_parts[-1].lower() in {'terminal64.exe', 'terminal.exe'} and path_parts[-2].lower() == path_parts[-1].lower():
+        normalized_path = os.path.dirname(normalized_path)
+
+    if os.path.isfile(normalized_path):
+        return normalized_path
+
+    if os.path.isdir(normalized_path):
+        candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
+        candidate_32 = os.path.join(normalized_path, 'terminal.exe')
+        if os.path.isfile(candidate_64):
+            return candidate_64
+        if os.path.isfile(candidate_32):
+            return candidate_32
+
+    return None
+
+
 def find_mt5_terminal_path(broker_name: str, configured_path: str = None, is_live: bool = None) -> Optional[str]:
     """Resolve a broker-specific terminal path even on VPS/local mixed setups.
     For Exness: uses separate DEMO/LIVE terminals when is_live is specified."""
@@ -440,8 +468,9 @@ def find_mt5_terminal_path(broker_name: str, configured_path: str = None, is_liv
     candidate_paths.extend(get_known_mt5_paths(broker_name))
 
     for path in candidate_paths:
-        if path and os.path.exists(path):
-            return path
+        resolved_path = resolve_mt5_terminal_executable_path(path)
+        if resolved_path:
+            return resolved_path
 
     return None
 
@@ -485,7 +514,11 @@ def is_mt5_process_running(terminal_path: str) -> bool:
     if not terminal_path or sys.platform != 'win32':
         return False
 
-    normalized_target = os.path.normcase(os.path.normpath(str(terminal_path).strip().strip('"').strip("'")))
+    resolved_path = resolve_mt5_terminal_executable_path(terminal_path)
+    if not resolved_path:
+        return False
+
+    normalized_target = os.path.normcase(os.path.normpath(resolved_path))
     exe_name = os.path.basename(normalized_target).lower()
     if exe_name not in ['terminal64.exe', 'terminal.exe']:
         exe_name = 'terminal64.exe'
@@ -513,9 +546,10 @@ def is_mt5_process_running(terminal_path: str) -> bool:
 
 
 def ensure_mt5_terminal_running(terminal_path: str, broker_name: str) -> bool:
-    normalized_path = str(terminal_path or '').strip().strip('"').strip("'")
-    if not normalized_path or not os.path.isfile(normalized_path):
-        logger.warning(f"[MT5 Terminal] Cannot launch {broker_name} terminal - path missing: {normalized_path or 'unset'}")
+    normalized_path = resolve_mt5_terminal_executable_path(terminal_path)
+    if not normalized_path:
+        raw_path = str(terminal_path or '').strip().strip('"').strip("'")
+        logger.warning(f"[MT5 Terminal] Cannot launch {broker_name} terminal - path missing: {raw_path or 'unset'}")
         return False
 
     if not MT5_AUTO_LAUNCH:
@@ -546,7 +580,8 @@ def ensure_mt5_terminal_running(terminal_path: str, broker_name: str) -> bool:
 
 
 def stop_mt5_terminal_process(terminal_path: str, broker_name: str) -> bool:
-    normalized_path = os.path.normcase(os.path.normpath(str(terminal_path or '').strip().strip('"').strip("'")))
+    resolved_path = resolve_mt5_terminal_executable_path(terminal_path)
+    normalized_path = os.path.normcase(os.path.normpath(resolved_path)) if resolved_path else None
     if not normalized_path or sys.platform != 'win32':
         return False
 
@@ -2439,7 +2474,7 @@ class MT5Connection(BrokerConnection):
     
     # MT5 PAUSE/HALT RETCODES - Market status codes indicating trading halts
     RETCODE_PAUSED = 10009        # Trading paused/halted for symbol
-    RETCODE_REQUOTE = 10019       # Requote - market paused or no liquidity
+    RETCODE_NO_MONEY = 10019      # Insufficient funds / margin
     RETCODE_MARKET_CLOSED = 10026 # Market closed (weekend/outside hours)
     RETCODE_NO_LIQUIDITY = 10018  # No liquidity - market paused
     RETCODE_INVALID_REQUEST = 10016  # Invalid request - often during news events
@@ -2448,7 +2483,6 @@ class MT5Connection(BrokerConnection):
     # Map of retcodes to pause reasons
     PAUSE_RETCODES = {
         10009: ('SYMBOL_HALTED', 'Trading halted/suspended for this symbol'),
-        10019: ('REQUOTE', 'Market paused, no liquidity, or price changed significantly'),
         10026: ('MARKET_CLOSED', 'Market is closed (weekend or outside trading hours)'),
         10018: ('NO_LIQUIDITY', 'No liquidity available - market may be paused'),
         10016: ('INVALID_REQUEST', 'Invalid request - often during news events or market halt'),
@@ -2493,6 +2527,7 @@ class MT5Connection(BrokerConnection):
                 credentials.get('path') or broker_cfg.get('path'),
                 is_live=is_live
             )
+            self.mt5_path = resolve_mt5_terminal_executable_path(self.mt5_path) or self.mt5_path
             self._ensure_mt5_terminal_started()
         except ImportError:
             logger.error("MetaTrader5 not installed")
@@ -2514,7 +2549,11 @@ class MT5Connection(BrokerConnection):
             logger.warning(f"[MT5 Terminal] No terminal path configured for {self.mt5_broker}; cannot auto-launch MT5")
             return
 
-        normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
+        normalized_path = resolve_mt5_terminal_executable_path(self.mt5_path)
+        if not normalized_path:
+            logger.warning(f"[MT5 Terminal] No valid executable path configured for {self.mt5_broker}: {self.mt5_path}")
+            return
+
         with mt5_terminal_startup_lock:
             if normalized_path in mt5_terminal_paths_started:
                 return
@@ -2631,16 +2670,7 @@ class MT5Connection(BrokerConnection):
             if route_diagnostic.get('selected_path'):
                 self.mt5_path = route_diagnostic['selected_path']
 
-            normalized_path = None
-            if self.mt5_path:
-                normalized_path = str(self.mt5_path).strip().strip('"').strip("'")
-                if os.path.isdir(normalized_path):
-                    candidate_64 = os.path.join(normalized_path, 'terminal64.exe')
-                    candidate_32 = os.path.join(normalized_path, 'terminal.exe')
-                    if os.path.isfile(candidate_64):
-                        normalized_path = candidate_64
-                    elif os.path.isfile(candidate_32):
-                        normalized_path = candidate_32
+            normalized_path = resolve_mt5_terminal_executable_path(self.mt5_path)
             
             # Ensure account is integer for proper comparison with MT5 login field
             account = int(account)
@@ -3541,10 +3571,141 @@ class MT5Connection(BrokerConnection):
                 "type_filling": filling_type,
             }
 
-            if 'stopLoss' in kwargs:
-                request_dict['sl'] = kwargs['stopLoss']
-            if 'takeProfit' in kwargs:
-                request_dict['tp'] = kwargs['takeProfit']
+            def _coerce_order_level(raw_value, field_name):
+                import math
+
+                if raw_value in (None, '', 0, 0.0):
+                    return None
+
+                try:
+                    level = float(raw_value)
+                except (TypeError, ValueError):
+                    logger.warning(f"Ignoring invalid {field_name} for {symbol}: {raw_value}")
+                    return None
+
+                if not math.isfinite(level) or level <= 0:
+                    logger.warning(f"Ignoring non-finite {field_name} for {symbol}: {raw_value}")
+                    return None
+
+                if order_type == 'BUY':
+                    if field_name == 'sl' and level >= price:
+                        logger.warning(f"Ignoring BUY stop loss above market for {symbol}: sl={level}, price={price}")
+                        return None
+                    if field_name == 'tp' and level <= price:
+                        logger.warning(f"Ignoring BUY take profit below market for {symbol}: tp={level}, price={price}")
+                        return None
+                else:
+                    if field_name == 'sl' and level <= price:
+                        logger.warning(f"Ignoring SELL stop loss below market for {symbol}: sl={level}, price={price}")
+                        return None
+                    if field_name == 'tp' and level >= price:
+                        logger.warning(f"Ignoring SELL take profit above market for {symbol}: tp={level}, price={price}")
+                        return None
+
+                return level
+
+            stop_loss = _coerce_order_level(kwargs.get('stopLoss'), 'sl')
+            take_profit = _coerce_order_level(kwargs.get('takeProfit'), 'tp')
+
+            if stop_loss is not None:
+                request_dict['sl'] = stop_loss
+            if take_profit is not None:
+                request_dict['tp'] = take_profit
+
+            def _extract_retcode_and_comment(check_result):
+                if check_result is None:
+                    return None, ''
+                return getattr(check_result, 'retcode', None), str(getattr(check_result, 'comment', '') or '')
+
+            def _is_no_money_result(check_result):
+                retcode, comment = _extract_retcode_and_comment(check_result)
+                comment_lower = comment.lower()
+                return retcode == self.RETCODE_NO_MONEY or 'no money' in comment_lower or 'insufficient' in comment_lower
+
+            def _estimate_required_margin(volume_to_test):
+                try:
+                    margin = self.mt5.order_calc_margin(
+                        request_dict['type'],
+                        symbol,
+                        float(volume_to_test),
+                        price,
+                    )
+                    if margin is None:
+                        return None
+                    return float(margin)
+                except Exception:
+                    return None
+
+            def _request_for_volume(volume_to_test):
+                cloned = dict(request_dict)
+                cloned['volume'] = round(float(volume_to_test), step_precision)
+                return cloned
+
+            def _find_affordable_volume(initial_volume):
+                account_info = self.mt5.account_info()
+                free_margin = 0.0
+                if account_info is not None:
+                    free_margin = float(
+                        getattr(account_info, 'margin_free', 0.0)
+                        or getattr(account_info, 'balance', 0.0)
+                        or 0.0
+                    )
+
+                candidate = round(float(initial_volume), step_precision)
+                minimum = round(float(min_volume), step_precision)
+                epsilon = 10 ** (-(step_precision + 2)) if step_precision >= 0 else 1e-6
+                last_margin = _estimate_required_margin(candidate)
+
+                while candidate + epsilon >= minimum:
+                    probe = self.mt5.order_check(_request_for_volume(candidate))
+                    if probe is not None and not _is_no_money_result(probe):
+                        return candidate, probe, free_margin, last_margin
+
+                    last_margin = _estimate_required_margin(candidate) or last_margin
+
+                    if candidate <= minimum + epsilon:
+                        break
+
+                    if volume_step > 0:
+                        next_candidate = round(candidate - volume_step, step_precision)
+                    else:
+                        next_candidate = round(candidate * 0.5, step_precision)
+
+                    if next_candidate < minimum:
+                        next_candidate = minimum
+                    if next_candidate >= candidate:
+                        break
+
+                    candidate = next_candidate
+
+                return None, None, free_margin, last_margin
+
+            affordable_volume, preflight_result, free_margin, required_margin = _find_affordable_volume(volume)
+            if affordable_volume is None:
+                min_required_margin = _estimate_required_margin(min_volume) or required_margin
+                min_required_margin = round(min_required_margin, 2) if min_required_margin is not None else None
+                return {
+                    'success': False,
+                    'error': f'Insufficient margin or balance to place even the minimum order on {symbol}',
+                    'retcode': self.RETCODE_NO_MONEY,
+                    'original_comment': 'No money',
+                    'is_paused': False,
+                    'requested_volume': requested_volume,
+                    'normalized_volume': volume,
+                    'min_volume': min_volume,
+                    'free_margin': round(free_margin, 2),
+                    'required_margin': min_required_margin,
+                    'action_required': 'Reduce lot size, choose a lower-margin symbol, close other positions, or fund the account before retrying.'
+                }
+
+            if affordable_volume != volume:
+                logger.warning(
+                    f"💸 Auto-scaled {symbol} order volume for low-margin account: "
+                    f"requested={volume}, affordable={affordable_volume}, free_margin={free_margin:.2f}, "
+                    f"required_margin={required_margin if required_margin is not None else 'unknown'}"
+                )
+                volume = affordable_volume
+                request_dict['volume'] = volume
 
             # TIMEOUT WRAPPER: order_send can hang for 10+ seconds if MT5 is busy/disconnected
             # Set a 5-second timeout to fail fast instead of freezing bot
@@ -3590,6 +3751,16 @@ class MT5Connection(BrokerConnection):
             
             if result.retcode != self.mt5.TRADE_RETCODE_DONE:
                 logger.warning(f"MT5 order failed: symbol={symbol}, type={order_type}, retcode={result.retcode}, comment={result.comment}")
+
+                if result.retcode == self.RETCODE_NO_MONEY:
+                    return {
+                        'success': False,
+                        'error': 'Insufficient margin or balance to place this order',
+                        'retcode': result.retcode,
+                        'original_comment': result.comment,
+                        'is_paused': False,
+                        'action_required': 'Reduce lot size, close other positions, or fund the account before retrying.'
+                    }
                 
                 # CHECK FOR MARKET PAUSE/HALT CONDITIONS
                 if result.retcode in self.PAUSE_RETCODES:
@@ -4517,6 +4688,11 @@ broker_manager = BrokerManager()
 
 def canonicalize_broker_name(broker_name: str) -> str:
     normalized = (broker_name or '').strip().lower()
+    if 'exness' in normalized:
+        return 'Exness'
+    if normalized in {'xm', 'xm global'}:
+        return 'XM Global' if normalized == 'xm global' else 'XM'
+
     broker_map = {
         'binance': 'Binance',
         'exness': 'Exness',
@@ -6088,7 +6264,6 @@ def get_preferred_mode_credential(cursor, user_id: str, mode: str, preferred_bro
             END,
             updated_at DESC,
             created_at DESC
-        LIMIT 1
     '''
 
     cursor.execute(query, tuple(params))
@@ -6101,7 +6276,7 @@ def get_preferred_mode_credential(cursor, user_id: str, mode: str, preferred_bro
 
     if filtered_rows:
         return filtered_rows[0]
-    return dict(rows[0]) if rows else None
+    return None
 
 
 def warm_trading_mode_credential(user_id: str, credential_id: str, mode: str):
@@ -8434,18 +8609,28 @@ def validate_and_correct_symbols(symbols, broker_name=None):
     
     corrected = []
     for symbol in symbols:
-        if symbol in VALID_SYMBOLS:
+        raw_symbol = str(symbol or '').strip()
+        normalized_symbol = raw_symbol.upper().replace('/', '').replace('_', '')
+
+        if normalized_symbol in VALID_SYMBOLS:
             # Symbol is valid - keep it
-            corrected.append(symbol)
-        elif symbol in SYMBOL_MAPPING:
+            corrected.append(normalized_symbol)
+        elif normalized_symbol.endswith('M') and normalized_symbol[:-1] in VALID_SYMBOLS:
+            suffixed_symbol = normalized_symbol[:-1] + 'm'
+            logger.info(f"Preserving MT5 suffix for symbol {raw_symbol} -> {suffixed_symbol}")
+            if suffixed_symbol not in corrected:
+                corrected.append(suffixed_symbol)
+        elif raw_symbol in SYMBOL_MAPPING or normalized_symbol in SYMBOL_MAPPING:
             # Symbol is old - map to new one
-            new_symbol = SYMBOL_MAPPING[symbol]
-            logger.warning(f"🔄 Auto-correcting symbol {symbol} -> {new_symbol} based on configured Exness symbol mappings")
+            new_symbol = SYMBOL_MAPPING.get(raw_symbol, SYMBOL_MAPPING.get(normalized_symbol))
+            if raw_symbol.lower().endswith('m') and str(new_symbol).upper() in VALID_SYMBOLS:
+                new_symbol = f"{str(new_symbol).upper()}m"
+            logger.warning(f"🔄 Auto-correcting symbol {raw_symbol} -> {new_symbol} based on configured Exness symbol mappings")
             if new_symbol not in corrected:
                 corrected.append(new_symbol)
         else:
             # Unknown symbol - use fallback to valid Exness symbol
-            logger.warning(f"⚠️  Unknown symbol {symbol} - using EURUSDm fallback based on current Exness defaults")
+            logger.warning(f"⚠️  Unknown symbol {raw_symbol} - using EURUSDm fallback based on current Exness defaults")
             if 'EURUSDm' not in corrected:
                 corrected.append('EURUSDm')
     
@@ -13069,6 +13254,15 @@ BOT_MANAGEMENT_PROFILES = {
 }
 
 SUPPORTED_DISPLAY_CURRENCIES = {'USD', 'ZAR', 'GBP'}
+SMALL_LIVE_ACCOUNT_THRESHOLDS = {
+    'USD': 25.0,
+    'ZAR': 250.0,
+    'GBP': 20.0,
+}
+SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
+    'AUDUSD', 'EURUSD', 'GBPUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'USDJPY', 'EURJPY', 'GBPJPY', 'EURGBP'
+}
+SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'EURUSDm', 'USDCHFm', 'USDCADm']
 
 
 def _clamp_bot_config_value(field_name: str, raw_value, minimum: float, maximum: float, default_value: float, warnings: List[str]) -> float:
@@ -13112,6 +13306,89 @@ def _coerce_bool(raw_value, default_value: bool = False) -> bool:
     if raw_value is None:
         return default_value
     return bool(raw_value)
+
+
+def _safe_float(raw_value, default_value: float = 0.0) -> float:
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return default_value
+
+
+def _normalize_symbol_base(symbol: str) -> str:
+    normalized = str(symbol or '').strip().upper().replace('/', '')
+    if normalized.endswith('M'):
+        normalized = normalized[:-1]
+    return normalized
+
+
+def _get_small_live_account_threshold(currency: str) -> float:
+    normalized_currency = str(currency or 'USD').strip().upper()
+    return SMALL_LIVE_ACCOUNT_THRESHOLDS.get(normalized_currency, SMALL_LIVE_ACCOUNT_THRESHOLDS['USD'])
+
+
+def enforce_small_live_account_guard(
+    data: Dict[str, Any],
+    symbols: List[str],
+    broker_name: str,
+    is_live: bool,
+    cached_balance,
+    cached_margin_free,
+    account_currency: str,
+) -> Tuple[Dict[str, Any], List[str], List[str], bool]:
+    if canonicalize_broker_name(broker_name) != 'Exness' or not is_live:
+        return data, symbols, [], False
+
+    balance = max(_safe_float(cached_balance), _safe_float(cached_margin_free))
+    currency = str(account_currency or data.get('displayCurrency') or 'USD').strip().upper()
+    threshold = _get_small_live_account_threshold(currency)
+    if balance <= 0 or balance > threshold:
+        return data, symbols, [], False
+
+    defaults = BOT_MANAGEMENT_PROFILES['small_account']
+    guarded_data = dict(data)
+    filtered_symbols = [symbol for symbol in symbols if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS]
+    warnings = [f"Small live account guard applied for {currency} balance {balance:.2f}"]
+
+    if filtered_symbols:
+        if len(filtered_symbols) != len(symbols):
+            warnings.append('Removed high-margin symbols that do not fit the small live account profile')
+    else:
+        filtered_symbols = validate_and_correct_symbols(SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS, broker_name)
+        warnings.append('Replaced requested symbols with low-margin forex symbols for the small live account profile')
+
+    intelligent_management = guarded_data.get('intelligentManagement')
+    if not isinstance(intelligent_management, dict):
+        intelligent_management = {}
+    intelligent_management.update({
+        'enabled': True,
+        'profile': 'small_account',
+        'experienceLevel': 'small_account',
+        'autoSwitch': False,
+        'dynamicSizing': True,
+    })
+
+    guarded_data.update({
+        'intelligentManagement': intelligent_management,
+        'intelligentScanner': False,
+        'managementProfile': 'small_account',
+        'riskProfile': 'small_account',
+        'riskPerTrade': defaults['riskPerTrade'],
+        'maxDailyLoss': defaults['maxDailyLoss'],
+        'profitLock': defaults['profitLock'],
+        'drawdownPausePercent': defaults['drawdownPausePercent'],
+        'drawdownPauseHours': defaults['drawdownPauseHours'],
+        'maxOpenPositions': 1,
+        'maxOpenTrades': 1,
+        'maxPositionsPerSymbol': 1,
+        'signalThreshold': max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), defaults['signalThreshold']),
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'autoSwitch': False,
+        'dynamicSizing': True,
+        'displayCurrency': currency,
+    })
+
+    return guarded_data, filtered_symbols, warnings, True
 
 
 def _normalize_management_profile(raw_profile) -> str:
@@ -13446,7 +13723,8 @@ def create_bot():
                 return jsonify({'success': False, 'error': 'User not found'}), 404
 
             cursor.execute('''
-                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, is_active, account_currency
+                SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, is_active,
+                       account_currency, cached_balance, cached_margin_free
                 FROM broker_credentials
                 WHERE credential_id = ? AND user_id = ?
             ''', (credential_id, user_id))
@@ -13462,6 +13740,8 @@ def create_bot():
             account_number = credential_data['account_number']
             is_live = credential_data['is_live']
             mode = 'live' if is_live else 'demo'
+            cached_balance = _safe_float(credential_data.get('cached_balance'))
+            cached_margin_free = _safe_float(credential_data.get('cached_margin_free'))
 
             # The request should explicitly state the intended mode to avoid demo/live credential mixups.
             requested_mode = data.get('mode') or data.get('botMode')
@@ -13527,7 +13807,18 @@ def create_bot():
             
             # ✅ GET ACCOUNT CURRENCY from credentials (demo USD vs live ZAR)
             account_currency = credential_data.get('account_currency', 'USD').upper()
-            sanitized_risk_config = sanitize_bot_risk_config(merged_bot_data, account_currency)
+            effective_data, symbols, guard_warnings, small_account_guard = enforce_small_live_account_guard(
+                merged_bot_data,
+                symbols,
+                broker_name,
+                bool(is_live),
+                cached_balance,
+                cached_margin_free,
+                account_currency,
+            )
+            sanitized_risk_config = sanitize_bot_risk_config(effective_data, account_currency)
+            if guard_warnings:
+                sanitized_risk_config['warnings'] = guard_warnings + sanitized_risk_config.get('warnings', [])
             risk_per_trade = sanitized_risk_config['riskPerTrade']
             max_daily_loss = sanitized_risk_config['maxDailyLoss']
             profit_lock = sanitized_risk_config['profitLock']
@@ -13629,10 +13920,11 @@ def create_bot():
                 'managementMode': management_mode,
                 'managementProfile': management_profile,
                 'managementState': 'normal',
+                'smallAccountGuard': small_account_guard,
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
-                'intelligentScanner': bool(data.get('intelligentScanner', False)),  # Auto-scan all symbols & reallocate
+                'intelligentScanner': bool(effective_data.get('intelligentScanner', False)),  # Auto-scan all symbols & reallocate
                 'maxOpenPositions': max_open_positions,
                 'maxPositionsPerSymbol': max_positions_per_symbol,
                 'basePositionSize': data.get('basePositionSize', 1.0),
@@ -13751,7 +14043,7 @@ def create_bot():
                 bot_stop_flags[bot_id] = False
                 logger.info(f"⏸️ Bot {bot_id} created without starting - call /api/bot/start to begin trading")
 
-            account_balance = 10000.0
+            account_balance = cached_balance if cached_balance > 0 else 10000.0
             try:
                 if canonicalize_broker_name(broker_name) == 'Binance':
                     binance_conn_balance = BinanceConnection(credentials={
@@ -13801,6 +14093,7 @@ def create_bot():
                 'balance': round(account_balance, 2),
                 'mode': mode or 'demo',
                 'displayCurrency': display_currency or 'USD',
+                'smallAccountGuard': small_account_guard,
                 'tradeAmount': trade_amount,
                 'appliedRiskConfig': {
                     'riskPerTrade': risk_per_trade or 20.0,

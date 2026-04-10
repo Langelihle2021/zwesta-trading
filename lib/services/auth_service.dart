@@ -216,8 +216,13 @@ class AuthService extends ChangeNotifier {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
-        
-        _token = data['session_token'] ?? 'session_token_${DateTime.now().millisecondsSinceEpoch}';
+
+        final returnedToken = data['session_token'];
+        if (returnedToken == null || returnedToken.toString().isEmpty) {
+          throw Exception('Registration succeeded but no session token was returned by the backend');
+        }
+
+        _token = returnedToken;
         _currentUser = User(
           id: data['user_id'] ?? '${DateTime.now().millisecondsSinceEpoch}',
           username: username,

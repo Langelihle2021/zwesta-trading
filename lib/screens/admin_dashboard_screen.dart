@@ -51,12 +51,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(
-        title: const Row(
-          children: [
+        title: Row(
+          children: const [
             LogoWidget(size: 40, showText: false),
             SizedBox(width: 12),
-            Text('Admin Dashboard'),
-          ],
+          ]
+        )
+        ..add(
+          const Flexible(
+            child: Text(
+              'Admin Dashboard',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 20),
+            ),
+          ),
         ),
         backgroundColor: Colors.grey[900],
         elevation: 0,
@@ -131,25 +139,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     _StatCard(
                       title: 'Platform Earnings',
-                      value: '\$${platformEarnings.toStringAsFixed(2)}',
+                      value: 'R${platformEarnings.toStringAsFixed(2)}',
                       icon: Icons.trending_up,
                       color: Colors.orange,
                     ),
                     _StatCard(
                       title: 'Total Client Profit',
-                      value: '\$${totalProfit.toStringAsFixed(2)}',
+                      value: 'R${totalProfit.toStringAsFixed(2)}',
                       icon: Icons.attach_money,
                       color: Colors.purple,
                     ),
                     _StatCard(
                       title: 'Platform Wallet',
-                      value: '\$${platformInternalBalance.toStringAsFixed(2)}',
+                      value: 'R${platformInternalBalance.toStringAsFixed(2)}',
                       icon: Icons.account_balance_wallet,
                       color: Colors.teal,
                     ),
                     _StatCard(
                       title: 'Referral Earnings',
-                      value: '\$${referralEarnings.toStringAsFixed(2)}',
+                      value: 'R${referralEarnings.toStringAsFixed(2)}',
                       icon: Icons.groups_2_outlined,
                       color: Colors.lightBlueAccent,
                     ),
@@ -182,7 +190,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '\$${platformPaidEarnings.toStringAsFixed(2)}',
+                                  'R${platformPaidEarnings.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
@@ -200,7 +208,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '\$${platformPendingEarnings.toStringAsFixed(2)}',
+                                  'R${platformPendingEarnings.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
@@ -364,7 +372,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        '\$${(user['total_profit'] ?? 0).toStringAsFixed(2)}',
+                                        'R${(user['total_profit'] ?? 0).toStringAsFixed(2)}',
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 12,
@@ -373,7 +381,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'Platform cut \$${(user['platform_commission'] ?? 0).toStringAsFixed(2)}',
+                                        'Platform cut R${(user['platform_commission'] ?? 0).toStringAsFixed(2)}',
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w600,
                                           fontSize: 11,
