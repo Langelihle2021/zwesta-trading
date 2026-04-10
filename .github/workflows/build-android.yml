@@ -19,7 +19,8 @@ jobs:
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /opt/ghc
         sudo rm -rf /usr/local/.ghcup
-        sudo rm -rf /usr/local/lib/android
+        # Removed the line that deletes the Android SDK
+        # sudo rm -rf /usr/local/lib/android
         sudo docker system prune -af || true
         echo "Disk space after cleanup"
         df -h
@@ -41,6 +42,12 @@ jobs:
         flutter --version
         dart --version
         java -version
+
+    - name: Verify Android SDK
+      run: |
+        echo "ANDROID_HOME=${ANDROID_HOME}"
+        echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+        test -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"
     
     - name: Clear all caches
       run: |
