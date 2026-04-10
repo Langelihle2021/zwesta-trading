@@ -29,6 +29,18 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   bool _volatilityFilterEnabled = true;
   // Intelligent scanner: auto-scan all markets & reallocate to best opportunities
   bool _intelligentScanner = false;
+  static const List<double> _tradeAmountPresets = [
+    20,
+    50,
+    100,
+    300,
+    500,
+    1000,
+    2000,
+    5000,
+    10000,
+    20000,
+  ];
   static const List<Map<String, String>> _binanceSymbols = [
     // --- Tier 1: Large Cap ---
     {
@@ -772,6 +784,22 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     return '${_currencyPrefixForCode(currencyCode)}${amount.toStringAsFixed(2)}';
   }
 
+  String _formatPresetTradeAmount(double amount, String currencyCode) {
+    final prefix = _currencyPrefixForCode(currencyCode);
+    final wholeAmount = amount == amount.roundToDouble();
+    return '$prefix${wholeAmount ? amount.toStringAsFixed(0) : amount.toStringAsFixed(2)}';
+  }
+
+  void _applyTradeAmountPreset(double amount) {
+    _investmentAmountController.text = amount == amount.roundToDouble()
+        ? amount.toStringAsFixed(0)
+        : amount.toStringAsFixed(2);
+    _investmentAmountController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _investmentAmountController.text.length),
+    );
+    setState(() {});
+  }
+
   String _credentialStatusText(BrokerCredential credential) {
     if (credential.isHealthy) {
       return 'Cache ${_formatCompactCurrency(credential.cachedBalance, credential.accountCurrency)}';
@@ -982,7 +1010,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     _botIdController = TextEditingController(
       text: 'bot_${DateTime.now().millisecondsSinceEpoch}',
     );
-    _investmentAmountController = TextEditingController(text: '1000');
+    _investmentAmountController = TextEditingController();
 
     // Initialize services
     _brokerService = BrokerCredentialsService();
@@ -2509,6 +2537,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                             builder: (context) {
                               final currLabel = _activeAccountCurrencyCode(context);
                               final prefix = _currencyPrefixForCode(currLabel);
+                              final selectedTradeAmount = double.tryParse(
+                                _investmentAmountController.text.trim(),
+                              );
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -2541,6 +2572,29 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                     'This follows the selected broker account currency. Demo USD accounts use dollars, live ZAR accounts use rands. Leave it empty to size trades from Risk % instead.',
                                     style: TextStyle(
                                         fontSize: 11, color: Colors.grey[400]),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final amount in _tradeAmountPresets)
+                                        ChoiceChip(
+                                          label: Text(
+                                            _formatPresetTradeAmount(amount, currLabel),
+                                          ),
+                                          selected: selectedTradeAmount != null &&
+                                              (selectedTradeAmount - amount).abs() < 0.0001,
+                                          onSelected: (_) => _applyTradeAmountPreset(amount),
+                                        ),
+                                      ActionChip(
+                                        label: const Text('Clear'),
+                                        onPressed: () {
+                                          _investmentAmountController.clear();
+                                          setState(() {});
+                                        },
+                                      ),
+                                    ],
                                   ),
                                   if (_fixedTradeAmountWarningData(context) case final warning?) ...[
                                     const SizedBox(height: 8),

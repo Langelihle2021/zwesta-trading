@@ -181,6 +181,51 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         .toList();
   }
 
+  String _normalizeCurrencyCode(dynamic value) {
+    final currency = value?.toString().trim().toUpperCase();
+    return currency == null || currency.isEmpty ? 'USD' : currency;
+  }
+
+  String _displayCurrencyCode() {
+    return _normalizeCurrencyCode(
+      _botData['displayCurrency'] ?? _botData['accountCurrency'] ?? _botData['currency'],
+    );
+  }
+
+  String _symbolForCode(String currencyCode) {
+    switch (_normalizeCurrencyCode(currencyCode)) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return '£';
+      case 'EUR':
+        return '€';
+      case 'USD':
+      default:
+        return r'$';
+    }
+  }
+
+  String _formatAmount(
+    double amount, {
+    int decimals = 2,
+    String? currencyCode,
+    bool appendCode = false,
+  }) {
+    final resolvedCurrency = _normalizeCurrencyCode(
+      currencyCode ?? _displayCurrencyCode(),
+    );
+    final symbol = _symbolForCode(resolvedCurrency);
+    final absoluteAmount = amount.abs().toStringAsFixed(decimals);
+    final formatted = amount < 0 ? '-$symbol$absoluteAmount' : '$symbol$absoluteAmount';
+
+    if (!appendCode) {
+      return formatted;
+    }
+
+    return '$formatted $resolvedCurrency';
+  }
+
   @override
   Widget build(BuildContext context) {
     try {
@@ -476,7 +521,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '\$${dailyProfit.toStringAsFixed(2)}',
+                  _formatAmount(dailyProfit),
                   style: TextStyle(
                     color: dailyProfit >= 0 ? Colors.green : Colors.red,
                     fontSize: 20,
@@ -509,7 +554,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         children: [
           _buildMetricCard(
             label: 'Total Profit',
-            value: '\$${totalProfit.toStringAsFixed(2)}',
+            value: _formatAmount(totalProfit),
             color: totalProfit >= 0 ? Colors.green : Colors.red,
             icon: Icons.trending_up,
           ),
@@ -533,19 +578,19 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ),
           _buildMetricCard(
             label: 'Profitability',
-            value: '\$${profitability.toStringAsFixed(2)}',
+            value: _formatAmount(profitability),
             color: Colors.teal,
             icon: Icons.monetization_on,
           ),
           _buildMetricCard(
             label: 'Avg Profit/Trade',
-            value: '\$${avgProfitPerTrade.toStringAsFixed(2)}',
+            value: _formatAmount(avgProfitPerTrade),
             color: Colors.cyan,
             icon: Icons.bar_chart,
           ),
           _buildMetricCard(
             label: 'Max Drawdown',
-            value: '\$${maxDrawdown.toStringAsFixed(2)}',
+            value: _formatAmount(maxDrawdown),
             color: Colors.red[400]!,
             icon: Icons.trending_down,
           ),
@@ -727,7 +772,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Tooltip(
-                        message: '\$${profit.toStringAsFixed(2)}',
+                        message: _formatAmount(profit),
                         child: Container(
                           height: (heightRatio * 200).clamp(20, 200),
                           width: double.infinity,
@@ -779,9 +824,9 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Min: \$${minProfit.toStringAsFixed(2)}',
+              Text('Min: ${_formatAmount(minProfit)}',
                   style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              Text('Max: \$${maxProfit.toStringAsFixed(2)}',
+              Text('Max: ${_formatAmount(maxProfit)}',
                   style: const TextStyle(color: Colors.white54, fontSize: 11)),
             ],
           ),
@@ -883,7 +928,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                 return Expanded(
                   child: Tooltip(
                     message:
-                        '${item['symbol']}\n\$${cumulativeAtIndex.toStringAsFixed(2)}',
+                        '${item['symbol']}\n${_formatAmount(cumulativeAtIndex)}',
                     child: Container(
                       height: (heightRatio * 200).clamp(20, 200),
                       width: double.infinity,
@@ -921,7 +966,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
             children: [
               Text('Trades: $totalTrades | Wins: $winningTrades',
                   style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              Text('Total: \$${cumulativeProfit.toStringAsFixed(2)}',
+              Text('Total: ${_formatAmount(cumulativeProfit)}',
                   style: TextStyle(
                     color: cumulativeProfit >= 0 ? Colors.green : Colors.red,
                     fontSize: 11,
@@ -1001,7 +1046,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         Text(
-                          '\$${profit.toStringAsFixed(0)}',
+                          _formatAmount(profit, decimals: 0),
                           style: TextStyle(
                             color: color,
                             fontSize: 10,
@@ -1095,7 +1140,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       setState(() => _igBalance =
                           data['success'] == true ? data : _igBalance);
                       _showIGSnackBar(data['success'] == true
-                          ? 'Balance: \$${data['balance']?.toStringAsFixed(2) ?? '?'}'
+                          ? 'Balance: ${_formatAmount(((data['balance'] ?? 0) as num).toDouble(), currencyCode: data['currency'])}'
                           : 'Error: ${data['error']}');
                     }
                   },
@@ -1198,8 +1243,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     final balance = (_igBalance!['balance'] ?? 0).toDouble();
     final available = (_igBalance!['available'] ?? 0).toDouble();
     final pnl = (_igBalance!['profitLoss'] ?? 0).toDouble();
-    final currency = _igBalance!['currency'] ?? 'USD';
-    final igSym = currency == 'ZAR' ? 'R' : (currency == 'GBP' ? '£' : (currency == 'EUR' ? '€' : r'$'));
+    final currency = _normalizeCurrencyCode(_igBalance!['currency']);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1217,10 +1261,10 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           Row(
             children: [
               _balanceStat(
-                  'Balance', '$igSym${balance.toStringAsFixed(2)}', Colors.white),
-              _balanceStat('Available', '$igSym${available.toStringAsFixed(2)}',
+                'Balance', _formatAmount(balance, currencyCode: currency), Colors.white),
+              _balanceStat('Available', _formatAmount(available, currencyCode: currency),
                   Colors.blue),
-              _balanceStat('P&L', '$igSym${pnl.toStringAsFixed(2)}',
+              _balanceStat('P&L', _formatAmount(pnl, currencyCode: currency),
                   pnl >= 0 ? Colors.green : Colors.red),
             ],
           ),
@@ -1313,7 +1357,10 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      '\$${pnl.toStringAsFixed(2)}',
+                      _formatAmount(
+                        pnl,
+                        currencyCode: _igBalance?['currency'],
+                      ),
                       style: TextStyle(
                           color: pnl >= 0 ? Colors.green : Colors.red,
                           fontSize: 14,
@@ -1709,16 +1756,20 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   Widget _buildTradeHistorySection() {
     final tradeHistory = _botData['tradeHistory'] as List?;
     if (tradeHistory == null || tradeHistory.isEmpty) {
+      final totalTrades = (_botData['totalTrades'] as num?)?.toInt() ?? 0;
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.grey[900],
           borderRadius: BorderRadius.circular(8),
         ),
-        child: const Center(
+        child: Center(
           child: Text(
-            'No trades yet',
-            style: TextStyle(color: Colors.white70),
+            totalTrades > 0
+                ? '$totalTrades trade${totalTrades == 1 ? '' : 's'} recorded, but detailed history is not available in this snapshot yet.'
+                : 'No trades yet',
+            style: const TextStyle(color: Colors.white70),
+            textAlign: TextAlign.center,
           ),
         ),
       );
@@ -1733,7 +1784,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
         final status = (trade['status']?.toString() ?? 'closed').toLowerCase();
         final isOpen = status == 'open';
         final isWinning = (trade['isWinning'] as bool?) ?? false;
-        final profit = (trade['profit'] as num?) ?? 0;
+        final profit = ((trade['profit'] as num?) ?? 0).toDouble();
         final currentPrice = (trade['currentPrice'] as num?)?.toDouble();
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
@@ -1779,7 +1830,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '\$${profit.toStringAsFixed(2)}',
+                    _formatAmount(profit),
                     style: TextStyle(
                       color: isOpen
                           ? Colors.cyan
@@ -1818,8 +1869,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   Widget _buildBalanceCard() {
     final balance = (_botData['accountBalance'] ?? 0).toDouble();
     final equity = (_botData['accountEquity'] ?? 0).toDouble();
-    final acctCur = ((_botData['accountCurrency'] ?? _botData['currency'] ?? 'USD') as String).toUpperCase();
-    final acctSym = acctCur == 'ZAR' ? 'R' : (acctCur == 'GBP' ? '£' : (acctCur == 'EUR' ? '€' : r'$'));
+    final acctCur = _displayCurrencyCode();
 
     if (balance <= 0 && equity <= 0) {
       return const SizedBox.shrink();
@@ -1871,7 +1921,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       style: TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 4),
                   Text(
-                    '$acctSym${balance.toStringAsFixed(2)} $acctCur',
+                    _formatAmount(balance, currencyCode: acctCur, appendCode: true),
                     style: const TextStyle(
                         color: Colors.cyan,
                         fontSize: 22,
@@ -1886,7 +1936,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       style: TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 4),
                   Text(
-                    '$acctSym${equity.toStringAsFixed(2)}',
+                    _formatAmount(equity, currencyCode: acctCur),
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -1997,7 +2047,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       if (currentPrice > 0 || profit != 0) ...[
                         const SizedBox(height: 3),
                         Text(
-                          'Now: ${currentPrice.toStringAsFixed(currentPrice > 100 ? 2 : 5)} • P/L: \$${profit.toStringAsFixed(2)}',
+                          'Now: ${currentPrice.toStringAsFixed(currentPrice > 100 ? 2 : 5)} • P/L: ${_formatAmount(profit, currencyCode: acctCur)}',
                           style: TextStyle(
                             color: profit >= 0
                                 ? Colors.greenAccent

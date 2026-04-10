@@ -9299,7 +9299,9 @@ def scalping_strategy(symbol, account_id, risk_amount, market_data=None):
         return None  # Don't trade on weak signal
     
     # Determine direction from signal
-    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+    order_type = extract_signal_direction(signal_eval.get('signal'))
+    if order_type is None:
+        return None
     
     # Tight parameters for scalping
     return {
@@ -9308,7 +9310,7 @@ def scalping_strategy(symbol, account_id, risk_amount, market_data=None):
         'volume': 1.0 * (1.0 if signal_eval['strength'] > 70 else 0.7),  # Position size based on signal strength
         'stop_loss': params['stop_loss_pips'] * 0.5,  # Half the normal stop for scalping
         'take_profit': params['take_profit_pips'] * 0.3,  # Tight TP for quick exit
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Scalping'),
         'duration_seconds': 300,  # 5 minute scalp
     }
 
@@ -9335,6 +9337,9 @@ def momentum_strategy(symbol, account_id, risk_amount, market_data=None):
         return None
     
     order_type = 'BUY' if signal_eval['trend'] == 'UP' else 'SELL'
+    signal_direction = extract_signal_direction(signal_eval.get('signal'))
+    if signal_direction != order_type:
+        return None
     
     return {
         'symbol': symbol,
@@ -9342,7 +9347,7 @@ def momentum_strategy(symbol, account_id, risk_amount, market_data=None):
         'volume': 1.5 * (signal_eval['strength'] / 80),  # Scale with signal strength
         'stop_loss': params['stop_loss_pips'],
         'take_profit': params['take_profit_pips'] * 1.5,  # Bigger TP for momentum
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Momentum Trading'),
         'duration_seconds': 900,  # 15 minutes
     }
 
@@ -9365,15 +9370,19 @@ def trend_following_strategy(symbol, account_id, risk_amount, market_data=None):
         return None
     
     # Use the actual signal direction from the evaluator
-    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+    order_type = extract_signal_direction(signal_eval.get('signal'))
+    if order_type is None:
+        return None
+    if (order_type == 'BUY' and signal_eval.get('trend') == 'DOWN') or (order_type == 'SELL' and signal_eval.get('trend') == 'UP'):
+        return None
     
     return {
         'symbol': symbol,
         'type': order_type,
-        'volume': 1.2,
+        'volume': 0.9,
         'stop_loss': params['stop_loss_pips'] * 1.3,  # Wider stop for trend
         'take_profit': params['take_profit_pips'] * 2.0,  # Large TP for big move
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Trend Following'),
         'duration_seconds': 3600,  # 1 hour
     }
 
@@ -9407,7 +9416,7 @@ def mean_reversion_strategy(symbol, account_id, risk_amount, market_data=None):
         'volume': 1.1,
         'stop_loss': params['stop_loss_pips'],
         'take_profit': params['take_profit_pips'],  # Standard TP
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Mean Reversion'),
         'duration_seconds': 600,  # 10 minutes
     }
 
@@ -9432,7 +9441,9 @@ def range_trading_strategy(symbol, account_id, risk_amount, market_data=None):
     if signal_eval['strength'] < params['min_signal_strength'] - 10:
         return None
     
-    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+    order_type = extract_signal_direction(signal_eval.get('signal'))
+    if order_type is None:
+        return None
     
     return {
         'symbol': symbol,
@@ -9440,7 +9451,7 @@ def range_trading_strategy(symbol, account_id, risk_amount, market_data=None):
         'volume': 1.3,
         'stop_loss': params['stop_loss_pips'] * 0.7,  # Tighter stop for range
         'take_profit': params['take_profit_pips'] * 0.7,  # Quick exit when range breaks
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Range Trading'),
         'duration_seconds': 480,  # 8 minutes
     }
 
@@ -9466,6 +9477,9 @@ def breakout_strategy(symbol, account_id, risk_amount, market_data=None):
         return None
     
     order_type = 'BUY' if signal_eval['trend'] == 'UP' else 'SELL'
+    signal_direction = extract_signal_direction(signal_eval.get('signal'))
+    if signal_direction != order_type:
+        return None
     
     return {
         'symbol': symbol,
@@ -9473,7 +9487,7 @@ def breakout_strategy(symbol, account_id, risk_amount, market_data=None):
         'volume': 1.0,
         'stop_loss': params['stop_loss_pips'] * 1.2,  # Protective stop behind level
         'take_profit': params['take_profit_pips'] * 2.5,  # Large profit target for breakout continuation
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Breakout Trading'),
         'duration_seconds': 1200,  # 20 minutes
     }
 
@@ -9510,7 +9524,11 @@ def swing_trend_dca_strategy(symbol, account_id, risk_amount, market_data=None):
     if signal_eval['trend'] == 'DOWN' and rsi > 60:
         return None  # Pullback too deep in downtrend
 
-    order_type = 'BUY' if 'BUY' in signal_eval['signal'] else 'SELL'
+    order_type = extract_signal_direction(signal_eval.get('signal'))
+    if order_type is None:
+        return None
+    if (order_type == 'BUY' and signal_eval.get('trend') != 'UP') or (order_type == 'SELL' and signal_eval.get('trend') != 'DOWN'):
+        return None
 
     return {
         'symbol': symbol,
@@ -9518,9 +9536,50 @@ def swing_trend_dca_strategy(symbol, account_id, risk_amount, market_data=None):
         'volume': 0.01,  # Minimum lot — position sizer will scale from here
         'stop_loss': params['stop_loss_pips'] * 1.5,   # Wide stop for swing
         'take_profit': params['take_profit_pips'] * 2.5,  # 1:2.5+ R:R target
-        'signal': signal_eval,
+        'signal': attach_execution_direction(signal_eval, order_type, 'Swing Trend DCA'),
         'duration_seconds': 14400,  # 4 hours — swing timeframe
     }
+
+
+def extract_signal_direction(signal_value: Any) -> Optional[str]:
+    normalized_signal = str(signal_value or '').upper()
+    if 'BUY' in normalized_signal:
+        return 'BUY'
+    if 'SELL' in normalized_signal:
+        return 'SELL'
+    return None
+
+
+def attach_execution_direction(signal_eval: Dict[str, Any], order_type: str, strategy_name: str) -> Dict[str, Any]:
+    enriched_signal = dict(signal_eval or {})
+    enriched_signal['executionDirection'] = order_type
+    enriched_signal['strategyName'] = strategy_name
+    return enriched_signal
+
+
+def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
+    configured_symbols = bot_config.get('symbols') or []
+    normalized_broker = canonicalize_broker_name(
+        bot_config.get('brokerName') or bot_config.get('broker_type') or 'Exness'
+    )
+    normalized_configured = validate_and_correct_symbols(configured_symbols, normalized_broker) if configured_symbols else []
+    profile = _normalize_management_profile(bot_config.get('managementProfile'))
+
+    if profile == 'small_account':
+        allowed_symbols = [
+            symbol for symbol in sorted(VALID_SYMBOLS)
+            if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
+        ]
+        if normalized_configured:
+            configured_safe = [
+                symbol for symbol in normalized_configured
+                if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
+            ]
+            if configured_safe:
+                return configured_safe + [symbol for symbol in allowed_symbols if symbol not in configured_safe]
+        return allowed_symbols or normalized_configured or sorted(VALID_SYMBOLS)
+
+    return sorted(VALID_SYMBOLS)
 
 
 STRATEGY_MAP = {
@@ -9637,7 +9696,7 @@ class StrategyPerformanceTracker:
 class DynamicPositionSizer:
     """Intelligently adjusts position sizes based on account performance"""
     
-    def __init__(self, base_size=1.0, min_size=0.1, max_size=5.0):
+    def __init__(self, base_size=1.0, min_size=0.01, max_size=5.0):
         self.base_size = base_size
         self.min_size = min_size
         self.max_size = max_size
@@ -9670,16 +9729,20 @@ class DynamicPositionSizer:
         if total_trades > 0:
             recent_trades = bot_config.get('tradeHistory', [])[-5:] if bot_config.get('tradeHistory') else []
             win_streak = 0
+            loss_streak = 0
             for trade in reversed(recent_trades):
                 if trade.get('profit', 0) > 0:
                     win_streak += 1
-                else:
                     break
+                else:
+                    loss_streak += 1
+                    if win_streak > 0:
+                        break
             
             if win_streak > 2:
                 size *= (1.0 + (win_streak * 0.1))  # +10% per win in streak
-            elif win_streak < 0:  # Loss streak
-                size *= 0.8  # Reduce by 20% after losses
+            elif loss_streak >= 2:
+                size *= max(0.45, 1.0 - (loss_streak * 0.15))
         
         # 3. VOLATILITY ADJUSTMENT
         volatility_multiplier = {
@@ -9698,9 +9761,21 @@ class DynamicPositionSizer:
                 size *= 0.5  # Reduce to 50%
             elif drawdown_percent > 10:  # If drawdown > 10%
                 size *= 0.7  # Reduce to 70%
+
+        account_balance = max(
+            float(bot_config.get('accountEquity') or 0.0),
+            float(bot_config.get('accountBalance') or 0.0),
+        )
+        if _normalize_management_profile(bot_config.get('managementProfile')) == 'small_account':
+            if account_balance > 0:
+                balance_scale = max(0.25, min(account_balance / 250.0, 0.75))
+                size *= balance_scale
+            self_max = min(self.max_size, 0.5)
+        else:
+            self_max = self.max_size
         
         # 5. APPLY MIN/MAX CONSTRAINTS
-        final_size = max(self.min_size, min(size, self.max_size))
+        final_size = max(self.min_size, min(size, self_max))
         
         return round(final_size, 2)
 
@@ -9848,7 +9923,8 @@ position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
 
 # ==================== INTELLIGENT OPPORTUNITY SCANNER & REALLOCATION ====================
 
-def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold, strategy_cache=None):
+def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold, strategy_cache=None,
+                          symbol_universe=None, fallback_slack=20):
     """Scan ALL valid symbols across every asset class for the best trade opportunities.
     
     Returns a ranked list of (symbol, signal_strength, signal_eval, trade_params) sorted
@@ -9856,7 +9932,8 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
     """
     opportunities = []
     strategy_cache = strategy_cache if strategy_cache is not None else {}
-    for symbol in sorted(VALID_SYMBOLS):
+    symbols_to_scan = list(symbol_universe or sorted(VALID_SYMBOLS))
+    for symbol in symbols_to_scan:
         try:
             market_data = _get_market_data_for_symbol(symbol)
             trade_params = _get_cached_strategy_params(
@@ -9884,10 +9961,10 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
     
     # Sort by signal strength descending
     opportunities.sort(key=lambda x: x['strength'], reverse=True)
-    if not opportunities and signal_threshold > 45:
-        fallback_threshold = max(45, signal_threshold - 20)
+    if not opportunities and signal_threshold > 45 and fallback_slack > 0:
+        fallback_threshold = max(45, signal_threshold - fallback_slack)
         logger.debug(f"[SCANNER] No opportunities above {signal_threshold}. Falling back to {fallback_threshold}.")
-        for symbol in sorted(VALID_SYMBOLS):
+        for symbol in symbols_to_scan:
             try:
                 market_data = _get_market_data_for_symbol(symbol)
                 trade_params = _get_cached_strategy_params(
@@ -10019,6 +10096,9 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
     account_id = bot_config.get('accountId', '')
     risk_per_trade = bot_config.get('riskPerTrade', 10)
     max_positions = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions', 2)
+    symbol_universe = build_scanner_symbol_universe(bot_config)
+    profile = _normalize_management_profile(bot_config.get('managementProfile'))
+    fallback_slack = 0 if profile == 'small_account' or bot_config.get('managementState') == 'recovery' else 10
     
     # 1. SCAN all symbols for opportunities
     opportunities = scan_all_opportunities(
@@ -10027,13 +10107,15 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         risk_per_trade,
         signal_threshold,
         strategy_cache,
+        symbol_universe=symbol_universe,
+        fallback_slack=fallback_slack,
     )
     
     if opportunities:
         top_3 = ', '.join([f"{o['symbol']}:{o['strength']:.0f}" for o in opportunities[:3]])
         logger.info(f"🧠 Bot {bot_id} SCANNER: Top opportunities: {top_3} (of {len(opportunities)} qualifying)")
     else:
-        logger.info(f"🧠 Bot {bot_id} SCANNER: No qualifying opportunities across {len(VALID_SYMBOLS)} symbols")
+        logger.info(f"🧠 Bot {bot_id} SCANNER: No qualifying opportunities across {len(symbol_universe)} symbols")
         return bot_config.get('symbols', ['EURUSDm'])
     
     # 2. EVALUATE open positions for potential reallocation
@@ -10109,7 +10191,7 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
     # Store scanner state for the API / UI
     bot_config['lastScanResults'] = {
         'timestamp': datetime.now().isoformat(),
-        'totalScanned': len(VALID_SYMBOLS),
+        'totalScanned': len(symbol_universe),
         'qualifyingOpportunities': len(opportunities),
         'topOpportunities': [{'symbol': o['symbol'], 'strength': o['strength'], 'signal': o['signal'], 'trend': o['trend']} for o in opportunities[:5]],
         'closedForReallocation': len(tickets_to_close),
@@ -10180,98 +10262,74 @@ def initialize_demo_bots():
     ]
     
     for bot_config in demo_bots_config:
-        now = datetime.now()
+        now = datetime.now().isoformat()
         active_bots[bot_config['botId']] = {
             'botId': bot_config['botId'],
             'accountId': bot_config['accountId'],
             'symbols': bot_config['symbols'],
             'strategy': bot_config['strategy'],
+            'enabled': bot_config['enabled'],
             'riskPerTrade': bot_config['riskPerTrade'],
             'maxDailyLoss': bot_config['maxDailyLoss'],
+            'maxOpenPositions': 2,
+            'maxPositionsPerSymbol': 1,
+            'profitLock': 0.0,
+            'drawdownPausePercent': 5.0,
+            'drawdownPauseHours': 6.0,
+            'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+            'autoSwitch': bot_config['autoSwitch'],
+            'dynamicSizing': bot_config['dynamicSizing'],
+            'basePositionSize': bot_config['basePositionSize'],
+            'managementMode': 'assisted',
+            'managementProfile': 'beginner',
+            'managementState': 'normal',
+            'signalThreshold': 70,
+            'displayCurrency': 'USD',
+            'mode': 'demo',
+            'totalTrades': 0,
+            'winningTrades': 0,
+            'totalProfit': 0.0,
+            'totalLosses': 0.0,
+            'totalInvestment': 0.0,
+            'createdAt': now,
+            'startTime': now,
+            'profitHistory': [],
+            'tradeHistory': [],
+            'dailyProfits': {},
+            'dailyProfit': 0.0,
+            'maxDrawdown': 0.0,
+            'peakProfit': 0.0,
+            'strategyHistory': [],
+            'lastStrategySwitch': now,
+            'volatilityLevel': 'Medium',
+            'profit': 0.0,
+            'drawdownPauseUntil': None,
+            'accountBalance': 0.0,
+            'accountEquity': 0.0,
+            'open_positions': {},
+        }
+        logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
 
-                # Initialize demo bots on startup using VALID_SYMBOLS
-                valid_symbols_list = sorted(list(VALID_SYMBOLS))
-                symbols_per_bot = len(valid_symbols_list) // 3
-                forex_symbols = [s for s in valid_symbols_list if s in ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDSEK']]
-                metals_symbols = [s for s in valid_symbols_list if s in ['XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD']]
-                crypto_stock_symbols = [s for s in valid_symbols_list if s in ['BTCUSD', 'ETHUSD', 'XNIUSD', 'NVDA', 'AMD', 'INTC']]
-                # Ensure we have symbols for each bot, fallback to evenly distributed if needed
-                if not forex_symbols:
-                    forex_symbols = valid_symbols_list[:symbols_per_bot]
-                if not metals_symbols:
-                    metals_symbols = valid_symbols_list[symbols_per_bot:2*symbols_per_bot]
-                if not crypto_stock_symbols:
-                    crypto_stock_symbols = valid_symbols_list[2*symbols_per_bot:]
-    
-                demo_bots_config = [
-                    {
-                        'botId': 'DemoBot_EURUSD_TrendFollow',
-                        'accountId': 'Demo MT5 - XM Global',
-                        'symbols': forex_symbols if forex_symbols else valid_symbols_list[:max(1, len(valid_symbols_list)//3)],
-                        'strategy': 'Trend Following',
-                        'riskPerTrade': 100,
-                        'maxDailyLoss': 500,
-                        'enabled': True,
-                        'autoSwitch': True,
-                        'dynamicSizing': True,
-                        'basePositionSize': 1.0
-                    },
-                    {
-                        'botId': 'DemoBot_Commodities_MeanReversion',
-                        'accountId': 'Demo MT5 - XM Global',
-                        'symbols': metals_symbols if metals_symbols else valid_symbols_list[max(1, len(valid_symbols_list)//3):max(2, 2*len(valid_symbols_list)//3)],
-                        'strategy': 'Mean Reversion',
-                        'riskPerTrade': 75,
-                        'maxDailyLoss': 400,
-                        'enabled': True,
-                        'autoSwitch': True,
-                        'dynamicSizing': True,
-                        'basePositionSize': 0.8
-                    },
-                    {
-                        'botId': 'DemoBot_Crypto_AlternativeAssets',
-                        'accountId': 'Demo MT5 - XM Global',
-                        'symbols': crypto_stock_symbols if crypto_stock_symbols else valid_symbols_list[max(2, 2*len(valid_symbols_list)//3):],
-                        'strategy': 'Momentum Trading',
-                        'riskPerTrade': 80,
-                        'maxDailyLoss': 450,
-                        'enabled': True,
-                        'autoSwitch': True,
-                        'dynamicSizing': True,
-                        'basePositionSize': 0.9
-                    }
-                ]
-    
-                for bot_config in demo_bots_config:
-                    now = datetime.now()
-                    active_bots[bot_config['botId']] = {
-                        'botId': bot_config['botId'],
-                        'accountId': bot_config['accountId'],
-                        'symbols': bot_config['symbols'],
-                        'strategy': bot_config['strategy'],
-                        'riskPerTrade': bot_config['riskPerTrade'],
-                        'maxDailyLoss': bot_config['maxDailyLoss'],
-                        'enabled': bot_config['enabled'],
-                        'autoSwitch': bot_config['autoSwitch'],
-                        'dynamicSizing': bot_config['dynamicSizing'],
-                        'basePositionSize': bot_config['basePositionSize'],
-                        'totalTrades': 0,
-                        'winningTrades': 0,
-                        'totalProfit': 0,
-                        'totalLosses': 0,
-                        'totalInvestment': 0,
-                        'createdAt': now.isoformat(),
-                        'startTime': now.isoformat(),
-                        'profitHistory': [],
-                        'tradeHistory': [],
-                        'dailyProfits': {},
-                        'maxDrawdown': 0,
-                        'peakProfit': 0,
-                        'strategyHistory': [],
-                        'lastStrategySwitch': now.isoformat(),
-                        'volatilityLevel': 'Medium',
-                    }
-                    logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
+
+PERSISTED_BOT_STATE_FIELDS = {
+    'symbols', 'strategy', 'enabled', 'riskPerTrade', 'maxDailyLoss', 'maxOpenPositions',
+    'maxPositionsPerSymbol', 'profitLock', 'drawdownPausePercent', 'drawdownPauseHours',
+    'allowedVolatility', 'autoSwitch', 'dynamicSizing', 'basePositionSize', 'managementMode',
+    'managementProfile', 'managementState', 'signalThreshold', 'effectiveSignalThreshold',
+    'effectiveMaxOpenPositions', 'effectiveMaxPositionsPerSymbol', 'effectiveAllowedVolatility',
+    'displayCurrency', 'totalTrades', 'winningTrades', 'totalProfit', 'totalLosses',
+    'totalInvestment', 'profitHistory', 'tradeHistory', 'dailyProfits', 'dailyProfit',
+    'maxDrawdown', 'peakProfit', 'strategyHistory', 'lastStrategySwitch', 'volatilityLevel',
+    'profit', 'drawdownPauseUntil', 'accountBalance', 'accountEquity', 'tradeAmount',
+    'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode'
+}
+
+
+def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
+    created_at = row['created_at'] or datetime.now().isoformat()
+    total_profit = float(row['total_profit'] or 0.0)
+    daily_profit = float(row['daily_profit'] or 0.0)
+    return {
         'mode': 'live' if row['is_live'] else 'demo',
         'symbols': row['symbols'].split(',') if row['symbols'] else ['EURUSDm'],
         'strategy': row['strategy'],
@@ -10310,6 +10368,11 @@ def initialize_demo_bots():
         'profit': total_profit,
         'drawdownPauseUntil': None,
         'accountBalance': 0.0,
+        'accountEquity': 0.0,
+        'open_positions': {},
+        'tradeAmount': None,
+        'intelligentScanner': False,
+        'lastScanResults': None,
     }
 
 
@@ -13253,6 +13316,11 @@ SMALL_LIVE_ACCOUNT_THRESHOLDS = {
     'ZAR': 250.0,
     'GBP': 20.0,
 }
+SMALL_ACCOUNT_TRADE_AMOUNT_CAPS = {
+    'USD': 12.0,
+    'ZAR': 120.0,
+    'GBP': 10.0,
+}
 SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
     'AUDUSD', 'EURUSD', 'GBPUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'USDJPY', 'EURJPY', 'GBPJPY', 'EURGBP'
 }
@@ -13321,6 +13389,26 @@ def _get_small_live_account_threshold(currency: str) -> float:
     return SMALL_LIVE_ACCOUNT_THRESHOLDS.get(normalized_currency, SMALL_LIVE_ACCOUNT_THRESHOLDS['USD'])
 
 
+def derive_small_account_trade_amount(balance: float, currency: Optional[str]) -> Optional[float]:
+    normalized_currency = str(currency or 'USD').strip().upper()
+    safe_balance = max(float(balance or 0.0), 0.0)
+    if safe_balance <= 0:
+        return None
+
+    threshold = _get_small_live_account_threshold(normalized_currency)
+    cap = SMALL_ACCOUNT_TRADE_AMOUNT_CAPS.get(normalized_currency, SMALL_ACCOUNT_TRADE_AMOUNT_CAPS['USD'])
+
+    if safe_balance <= threshold:
+        ratio = 0.05
+    elif safe_balance <= threshold * 2:
+        ratio = 0.065
+    else:
+        ratio = 0.08
+
+    target_amount = min(safe_balance * ratio, safe_balance * 0.15, cap)
+    return round(max(target_amount, safe_balance * 0.02), 2)
+
+
 def enforce_small_live_account_guard(
     data: Dict[str, Any],
     symbols: List[str],
@@ -13343,6 +13431,7 @@ def enforce_small_live_account_guard(
     guarded_data = dict(data)
     filtered_symbols = [symbol for symbol in symbols if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS]
     warnings = [f"Small live account guard applied for {currency} balance {balance:.2f}"]
+    derived_trade_amount = derive_small_account_trade_amount(balance, currency)
 
     if filtered_symbols:
         if len(filtered_symbols) != len(symbols):
@@ -13364,7 +13453,7 @@ def enforce_small_live_account_guard(
 
     guarded_data.update({
         'intelligentManagement': intelligent_management,
-        'intelligentScanner': False,
+        'intelligentScanner': True,
         'managementProfile': 'small_account',
         'riskProfile': 'small_account',
         'riskPerTrade': defaults['riskPerTrade'],
@@ -13375,12 +13464,16 @@ def enforce_small_live_account_guard(
         'maxOpenPositions': 1,
         'maxOpenTrades': 1,
         'maxPositionsPerSymbol': 1,
-        'signalThreshold': max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), defaults['signalThreshold']),
+        'signalThreshold': max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 78),
         'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'dynamicSizing': True,
         'displayCurrency': currency,
+        'tradeAmount': derived_trade_amount,
     })
+
+    if derived_trade_amount:
+        warnings.append(f'Set micro trade amount to {derived_trade_amount:.2f} {currency} for adaptive lot sizing')
 
     return guarded_data, filtered_symbols, warnings, True
 
@@ -13422,6 +13515,14 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         effective['allowedVolatility'] = [
             level for level in effective['allowedVolatility'] if level in defaults['allowedVolatility']
         ] or list(defaults['allowedVolatility'])
+
+        if profile == 'small_account':
+            effective['maxOpenPositions'] = 1
+            effective['maxPositionsPerSymbol'] = 1
+            effective['signalThreshold'] = max(effective['signalThreshold'], 78)
+            effective['allowedVolatility'] = [
+                level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
+            ] or ['Very Low', 'Low', 'Medium']
 
         recent_trades = bot_config.get('tradeHistory') or []
         recent_closed = recent_trades[-6:]
@@ -14691,6 +14792,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
 
                         # Dynamic position sizing
                         fixed_trade_amount = bot_config.get('tradeAmount')
+                        if not fixed_trade_amount and _normalize_management_profile(bot_config.get('managementProfile')) == 'small_account':
+                            balance_basis = max(
+                                float(bot_config.get('accountEquity') or 0.0),
+                                float(bot_config.get('accountBalance') or 0.0),
+                            )
+                            fixed_trade_amount = derive_small_account_trade_amount(
+                                balance_basis,
+                                bot_config.get('displayCurrency'),
+                            )
                         bot_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
                         fixed_trade_volume = None
                         mt5_api = mt5_conn.mt5 if (is_mt5 and mt5_conn and hasattr(mt5_conn, 'mt5')) else None
@@ -14749,7 +14859,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         
                         # Log signal details
                         signal_info = trade_params.get('signal', {})
-                        logger.info(f"🎯 Bot {bot_id}: {signal_info.get('signal', 'UNKNOWN')} signal on {symbol}")
+                        logger.info(f"🎯 Bot {bot_id}: {signal_info.get('signal', 'UNKNOWN')} setup on {symbol} -> executing {order_type}")
                         logger.info(f"   Signal Strength: {signal_info.get('strength', 0):.0f}/100 | Reason: {signal_info.get('entry_reason', 'N/A')}")
                         
                         # Place order via broker with RETRY LOGIC
