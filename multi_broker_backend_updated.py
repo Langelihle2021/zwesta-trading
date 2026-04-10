@@ -686,6 +686,28 @@ def get_referrer_id(user_id):
     conn.close()
     return row[0] if row and row[0] else None
 
+
+def _get_default_signup_referrer_id(cursor) -> Optional[str]:
+    try:
+        cfg = _get_commission_config(cursor)
+        developer_id = _get_developer_account_id(cfg)
+        if not developer_id or developer_id == OWNER_USER_ID:
+            return None
+        cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (developer_id,))
+        row = cursor.fetchone()
+        return row[0] if row and row[0] else None
+    except Exception:
+        return None
+
+
+def _resolve_signup_referrer_id(cursor, referral_code: Optional[str] = None) -> Optional[str]:
+    if referral_code:
+        cursor.execute('SELECT user_id FROM users WHERE referral_code = ?', (referral_code.upper(),))
+        referrer = cursor.fetchone()
+        if referrer:
+            return referrer['user_id'] if isinstance(referrer, sqlite3.Row) else referrer[0]
+    return _get_default_signup_referrer_id(cursor)
+
 class PaymentGateway:
     """Unified payment gateway for Stripe, bank transfers, crypto, and internal payments"""
     
@@ -2219,14 +2241,9 @@ class ReferralSystem:
             new_referral_code = ReferralSystem.generate_referral_code()
             created_at = datetime.now().isoformat()
             
-            # Check if referral code is valid
-            referrer_id = None
-            if referral_code:
-                cursor.execute('SELECT user_id FROM users WHERE referral_code = ?', (referral_code.upper(),))
-                referrer = cursor.fetchone()
-                if referrer:
-                    referrer_id = referrer['user_id']
-                    logger.info(f"Valid referrer found: {referrer_id}")
+            referrer_id = _resolve_signup_referrer_id(cursor, referral_code)
+            if referrer_id:
+                logger.info(f"Signup linked to referrer: {referrer_id}")
             
             # Insert new user
             cursor.execute('''
@@ -5510,18 +5527,26 @@ def create_user():
         
         conn = get_db_connection()
         cursor = conn.cursor()
+        referrer_id = _get_default_signup_referrer_id(cursor)
         
         cursor.execute('''
             INSERT INTO users 
-            (user_id, email, name, referral_code, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            (user_id, email, name, referrer_id, referral_code, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             user_id,
             data.get('email'),
             data.get('name'),
+            referrer_id,
             referral_code,
             datetime.now().isoformat()
         ))
+
+        if referrer_id:
+            cursor.execute('''
+                INSERT INTO referrals (referral_id, referrer_id, referred_user_id, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (str(uuid.uuid4()), referrer_id, user_id, datetime.now().isoformat()))
         
         conn.commit()
         conn.close()
@@ -19118,14 +19143,7 @@ def register_user():
         
         user_id = str(uuid.uuid4())
         referral_code = hashlib.sha256(f"{email}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
-        referrer_id = None
-        
-        # Check if referrer exists
-        if referrer_code:
-            cursor.execute('SELECT user_id FROM users WHERE referral_code = ?', (referrer_code,))
-            referrer = cursor.fetchone()
-            if referrer:
-                referrer_id = referrer[0]
+        referrer_id = _resolve_signup_referrer_id(cursor, referrer_code)
         
         cursor.execute('''
             INSERT INTO users (user_id, email, name, password_hash, referrer_id, referral_code, created_at)
