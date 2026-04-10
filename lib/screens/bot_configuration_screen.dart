@@ -443,6 +443,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'icon': '₿',
       'description':
           r'DCA into BTC/ETH with swing trend entries. Best for $10-$1000 crypto accounts.',
+      'intelligentScanner': true,
       'symbols': ['BTCUSD', 'ETHUSD'],
       'strategy': 'Swing Trend DCA',
       'managementProfile': 'small_account',
@@ -463,6 +464,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'icon': '💱',
       'description':
           r'Swing trend following on major pairs with micro lots. Best for $10-$1000 forex accounts.',
+      'intelligentScanner': true,
       'symbols': ['EURUSD'],
       'strategy': 'Swing Trend DCA',
       'managementProfile': 'small_account',
@@ -483,6 +485,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'icon': '📈',
       'description':
           r'Swing pullback entries on blue-chip stocks/ETFs. Best for $50-$1000 stock accounts.',
+      'intelligentScanner': true,
       'symbols': ['NVDA', 'AAPL', 'MSFT'],
       'strategy': 'Swing Trend DCA',
       'managementProfile': 'small_account',
@@ -503,6 +506,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'icon': '🥇',
       'description':
           r'Swing trend following on gold (XAU/USD). Best for $100-$1000 commodity accounts.',
+      'intelligentScanner': true,
       'symbols': ['XAUUSD'],
       'strategy': 'Swing Trend DCA',
       'managementProfile': 'small_account',
@@ -523,6 +527,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'icon': '🎯',
       'description':
           r'Diversified swing trading across forex, crypto, and gold. Best all-rounder for $100-$1000.',
+      'intelligentScanner': true,
       'symbols': ['EURUSD', 'BTCUSD', 'XAUUSD'],
       'strategy': 'Swing Trend DCA',
       'managementProfile': 'small_account',
@@ -548,6 +553,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       _selectedPreset = presetKey;
       _selectedStrategy = preset['strategy'] as String;
       _managementProfile = preset['managementProfile'] as String;
+      _intelligentScanner = preset['intelligentScanner'] as bool? ?? _intelligentScanner;
       _riskPercent = (preset['riskPercent'] as num).toDouble();
       _maxOpenTrades = preset['maxOpenTrades'] as int;
       _maxDrawdownPercent = (preset['maxDrawdownPercent'] as num).toDouble();
