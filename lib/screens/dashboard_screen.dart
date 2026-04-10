@@ -149,6 +149,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
+  Future<String> _currentTradingMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('trading_mode') ?? 'DEMO';
+  }
+
   /// Fetch broker account balances from /api/accounts/balances
   Future<void> _fetchBrokerBalances() async {
     if (_brokerBalancesLoading) return;
@@ -239,9 +244,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _fetchRealBots() async {
     try {
       final botService = context.read<BotService>();
+      final tradingMode = await _currentTradingMode();
       
       // Fetch bots from backend via BotService (mode filter applied server-side)
-      await botService.fetchActiveBots();
+      await botService.fetchActiveBots(tradingMode: tradingMode, force: true);
       
       if (mounted) {
         setState(() {

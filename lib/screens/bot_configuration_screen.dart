@@ -343,6 +343,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     },
   };
 
+  Future<String> _currentTradingMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('trading_mode') ?? 'DEMO';
+  }
+
   // Dialog to input account number
   Future<String?> _showAccountInputDialog(BuildContext context) async {
     String? account;
@@ -994,6 +999,32 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
   }
 
+  String _recommendedTradingMode() {
+    return _intelligentScanner ? 'signal-driven' : 'interval';
+  }
+
+  int _recommendedTradingInterval() {
+    switch (_managementProfile) {
+      case 'beginner':
+        return 300;
+      case 'balanced':
+        return 180;
+      default:
+        return 120;
+    }
+  }
+
+  int _recommendedPollInterval() {
+    switch (_managementProfile) {
+      case 'beginner':
+        return 20;
+      case 'balanced':
+        return 15;
+      default:
+        return 10;
+    }
+  }
+
   final List<String> strategies = [
     'Trend Following',
     'Scalping',
@@ -1271,6 +1302,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
       final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
       final signalThreshold = _recommendedSignalThreshold();
+        final tradingMode = _recommendedTradingMode();
+        final tradingInterval = _recommendedTradingInterval();
+        final pollInterval = _recommendedPollInterval();
       final accountCurrency = credential.accountCurrency.toUpperCase();
       final fixedAmountWarning = _fixedTradeAmountWarningData(context);
       if (fixedAmountWarning != null) {
@@ -1298,6 +1332,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         'maxDrawdownPercent': _maxDrawdownPercent, // ✅ NEW: Max drawdown %
         'drawdownPausePercent': _maxDrawdownPercent,
         'signalThreshold': signalThreshold,
+        'tradingMode': tradingMode,
+        'tradingInterval': tradingInterval,
+        'pollInterval': pollInterval,
         if (_investmentAmountController.text.isNotEmpty)
           'tradeAmount': double.tryParse(_investmentAmountController.text),
         'displayCurrency': accountCurrency,
@@ -1398,7 +1435,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
       // Force-refresh bot list before navigating
       final botService = Provider.of<BotService>(context, listen: false);
-      await botService.fetchActiveBots();
+      final tradingMode = await _currentTradingMode();
+      await botService.fetchActiveBots(tradingMode: tradingMode, force: true);
 
       // Show success snackbar immediately
       if (mounted) {

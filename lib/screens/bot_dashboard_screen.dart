@@ -39,11 +39,6 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   void initState() {
     super.initState();
     _loadTradingMode();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final botService = context.read<BotService>();
-      botService.startPolling(tradingMode: _tradingMode);
-      botService.fetchActiveBots(tradingMode: _tradingMode, force: true);
-    });
   }
 
   Future<void> _loadTradingMode() async {

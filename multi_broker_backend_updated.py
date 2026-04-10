@@ -13680,6 +13680,31 @@ def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[
         data.get('dynamicSizing', intelligent_settings.get('dynamicSizing', profile_defaults['dynamicSizing'])),
         profile_defaults['dynamicSizing'],
     )
+    intelligent_scanner = _coerce_bool(data.get('intelligentScanner', False), False)
+
+    trading_mode = str(data.get('tradingMode') or '').strip().lower()
+    if trading_mode not in {'interval', 'signal-driven'}:
+        trading_mode = 'signal-driven' if intelligent_scanner else 'interval'
+
+    default_trading_interval = 300 if management_profile == 'beginner' else 180 if management_profile == 'balanced' else 120
+    default_poll_interval = 20 if management_profile == 'beginner' else 15 if management_profile == 'balanced' else 10
+
+    trading_interval = _clamp_int_value(
+        'tradingInterval',
+        data.get('tradingInterval', default_trading_interval),
+        30,
+        900,
+        default_trading_interval,
+        warnings,
+    )
+    poll_interval = _clamp_int_value(
+        'pollInterval',
+        data.get('pollInterval', default_poll_interval),
+        5,
+        120,
+        default_poll_interval,
+        warnings,
+    )
 
     if management_mode == 'assisted':
         max_open_positions = min(max_open_positions, profile_defaults['maxOpenPositions'])
@@ -13701,6 +13726,9 @@ def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[
         'allowedVolatility': allowed_volatility,
         'autoSwitch': auto_switch,
         'dynamicSizing': dynamic_sizing,
+        'tradingMode': trading_mode,
+        'tradingInterval': trading_interval,
+        'pollInterval': poll_interval,
         'managementMode': management_mode,
         'managementProfile': management_profile,
         'displayCurrency': display_currency,
@@ -13928,6 +13956,9 @@ def create_bot():
             management_mode = sanitized_risk_config['managementMode']
             management_profile = sanitized_risk_config['managementProfile']
             display_currency = sanitized_risk_config['displayCurrency']
+            trading_mode = sanitized_risk_config['tradingMode']
+            trading_interval = sanitized_risk_config['tradingInterval']
+            poll_interval = sanitized_risk_config['pollInterval']
             trading_enabled = data.get('enabled', True)
             trade_amount = data.get('tradeAmount')  # Fixed amount in the broker account currency (overrides risk %)
             if trade_amount is not None:
@@ -14014,6 +14045,9 @@ def create_bot():
                 'dynamicSizing': dynamic_sizing,
                 'managementMode': management_mode,
                 'managementProfile': management_profile,
+                'tradingMode': trading_mode,
+                'tradingInterval': trading_interval,
+                'pollInterval': poll_interval,
                 'managementState': 'normal',
                 'smallAccountGuard': small_account_guard,
                 'displayCurrency': display_currency,
@@ -14203,6 +14237,9 @@ def create_bot():
                     'maxOpenPositions': max_open_positions,
                     'maxPositionsPerSymbol': max_positions_per_symbol,
                     'signalThreshold': signal_threshold,
+                    'tradingMode': trading_mode,
+                    'tradingInterval': trading_interval,
+                    'pollInterval': poll_interval,
                     'allowedVolatility': allowed_volatility,
                     'autoSwitch': auto_switch,
                     'dynamicSizing': dynamic_sizing,
