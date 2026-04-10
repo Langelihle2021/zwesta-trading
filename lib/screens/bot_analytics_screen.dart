@@ -2047,7 +2047,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                       if (currentPrice > 0 || profit != 0) ...[
                         const SizedBox(height: 3),
                         Text(
-                          'Now: ${currentPrice.toStringAsFixed(currentPrice > 100 ? 2 : 5)} • P/L: ${_formatAmount(profit, currencyCode: acctCur)}',
+                          'Now: ${currentPrice.toStringAsFixed(currentPrice > 100 ? 2 : 5)} • P/L: ${_formatAmount(profit, currencyCode: _displayCurrencyCode())}',
                           style: TextStyle(
                             color: profit >= 0
                                 ? Colors.greenAccent
