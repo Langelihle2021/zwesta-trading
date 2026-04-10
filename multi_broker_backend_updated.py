@@ -914,29 +914,48 @@ def pay_user(user_id: str, amount: float, reason: str, method: str = 'auto') -> 
     return result.get('success', False)
 
 def distribute_profit_split_and_commissions(user_id, profit, bot_id):
-    """Distribute profit: 20% owner, 5% referrer, 75% trader. Record commissions."""
-    owner_id = OWNER_USER_ID
-    referrer_id = get_referrer_id(user_id)
-    trader_id = user_id
+    """Settle a trader withdrawal internally after per-trade commissions are already booked."""
+    if profit <= 0:
+        return {'owner': 0.0, 'referrer': 0.0, 'trader': 0.0, 'settledInternally': False}
 
-    owner_share = profit * 0.20
-    referrer_share = profit * 0.05
-    trader_share = profit * 0.75
-
-    # Pay owner
-    pay_user(owner_id, owner_share, f"Owner 20% profit split from bot {bot_id}")
-    # Pay referrer (if any)
-    if referrer_id:
-        ReferralSystem.add_commission(referrer_id, trader_id, profit, bot_id)  # 5% commission
-        pay_user(referrer_id, referrer_share, f"Referrer 5% commission from bot {bot_id}")
-    # Pay trader
-    pay_user(trader_id, trader_share, f"Trader 75% profit from bot {bot_id}")
-    logger.info(f"[PROFIT SPLIT] Bot {bot_id}: {owner_share:.2f} to owner, {referrer_share:.2f} to referrer, {trader_share:.2f} to trader {trader_id}")
+    trader_share = float(profit)
+    payout_success = pay_user(
+        user_id,
+        trader_share,
+        f"Trader profit withdrawal from bot {bot_id}",
+        method='internal',
+    )
+    logger.info(
+        f"[PROFIT WITHDRAWAL] Bot {bot_id}: credited {trader_share:.2f} internally to trader {user_id} "
+        f"(platform commissions are booked separately per profitable trade)"
+    )
     return {
-        'owner': owner_share,
-        'referrer': referrer_share,
-        'trader': trader_share
+        'owner': 0.0,
+        'referrer': 0.0,
+        'trader': trader_share,
+        'settledInternally': payout_success,
     }
+
+
+def _get_market_data_for_symbol(symbol: str) -> Dict[str, Any]:
+    if symbol in commodity_market_data:
+        return commodity_market_data[symbol]
+    if symbol.endswith('m') and symbol[:-1] in commodity_market_data:
+        return commodity_market_data[symbol[:-1]]
+    return {'current_price': 0, 'volatility_pct': 1.0, 'price_history': [0]}
+
+
+def _get_cached_strategy_params(strategy_cache: Dict[str, Optional[Dict[str, Any]]], strategy_func, symbol: str,
+                                account_id: str, risk_per_trade: float,
+                                market_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    if symbol in strategy_cache:
+        return strategy_cache[symbol]
+
+    if market_data is None:
+        market_data = _get_market_data_for_symbol(symbol)
+
+    strategy_cache[symbol] = strategy_func(symbol, account_id, risk_per_trade, market_data)
+    return strategy_cache[symbol]
 def validate_api_key():
     """Validate API key from request headers"""
     api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
@@ -2247,25 +2266,24 @@ class ReferralSystem:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            
-            # 5% commission to referrer from client profits
-            commission_rate = 0.05
+
+            cfg = _get_commission_config(cursor)
+            commission_rate = float(cfg.get('recruiter_rate', 0.05) or 0.05)
             commission_amount = profit_amount * commission_rate
-            
-            commission_id = str(uuid.uuid4())
+
             created_at = datetime.now().isoformat()
-            
-            # Record commission
-            cursor.execute('''
-                INSERT INTO commissions 
-                (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, created_at))
-            
-            # Update user total commission
-            cursor.execute('''
-                UPDATE users SET total_commission = total_commission + ? WHERE user_id = ?
-            ''', (commission_amount, earner_id))
+
+            commission_id = _insert_commission_record(
+                cursor,
+                earner_id,
+                client_id,
+                bot_id,
+                profit_amount,
+                commission_rate,
+                commission_amount,
+                created_at,
+                'referral',
+            )
             
             conn.commit()
             conn.close()
@@ -9620,17 +9638,25 @@ position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
 
 # ==================== INTELLIGENT OPPORTUNITY SCANNER & REALLOCATION ====================
 
-def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold):
+def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold, strategy_cache=None):
     """Scan ALL valid symbols across every asset class for the best trade opportunities.
     
     Returns a ranked list of (symbol, signal_strength, signal_eval, trade_params) sorted
     by signal strength descending.  The caller decides how many to act on.
     """
     opportunities = []
+    strategy_cache = strategy_cache if strategy_cache is not None else {}
     for symbol in sorted(VALID_SYMBOLS):
         try:
-            market_data = commodity_market_data.get(symbol, {'current_price': 0, 'volatility_pct': 1.0})
-            trade_params = strategy_func(symbol, account_id, risk_per_trade, market_data)
+            market_data = _get_market_data_for_symbol(symbol)
+            trade_params = _get_cached_strategy_params(
+                strategy_cache,
+                strategy_func,
+                symbol,
+                account_id,
+                risk_per_trade,
+                market_data,
+            )
             if trade_params is None:
                 continue
             strength = trade_params.get('signal', {}).get('strength', 0)
@@ -9653,8 +9679,15 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
         logger.debug(f"[SCANNER] No opportunities above {signal_threshold}. Falling back to {fallback_threshold}.")
         for symbol in sorted(VALID_SYMBOLS):
             try:
-                market_data = commodity_market_data.get(symbol, {'current_price': 0, 'volatility_pct': 1.0})
-                trade_params = strategy_func(symbol, account_id, risk_per_trade, market_data)
+                market_data = _get_market_data_for_symbol(symbol)
+                trade_params = _get_cached_strategy_params(
+                    strategy_cache,
+                    strategy_func,
+                    symbol,
+                    account_id,
+                    risk_per_trade,
+                    market_data,
+                )
                 if trade_params is None:
                     continue
                 strength = trade_params.get('signal', {}).get('strength', 0)
@@ -9670,6 +9703,8 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
             except Exception as e:
                 logger.debug(f"[SCANNER] Fallback error scanning {symbol}: {e}")
         opportunities.sort(key=lambda x: x['strength'], reverse=True)
+
+    return opportunities
 
 def evaluate_open_positions_for_reallocation(bot_config, opportunities, active_conn, is_mt5, signal_threshold):
     """Evaluate open positions and decide which to close in favour of better opportunities.
@@ -9762,7 +9797,7 @@ def evaluate_open_positions_for_reallocation(bot_config, opportunities, active_c
 
 
 def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt5_conn, 
-                                       strategy_func, signal_threshold, broker_type):
+                                       strategy_func, signal_threshold, broker_type, strategy_cache=None):
     """Main intelligence loop: scan, evaluate, close weak, reallocate to strong.
     
     Called once per trading cycle when intelligentScanner is enabled.
@@ -9776,7 +9811,13 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
     max_positions = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions', 2)
     
     # 1. SCAN all symbols for opportunities
-    opportunities = scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold)
+    opportunities = scan_all_opportunities(
+        strategy_func,
+        account_id,
+        risk_per_trade,
+        signal_threshold,
+        strategy_cache,
+    )
     
     if opportunities:
         top_3 = ', '.join([f"{o['symbol']}:{o['strength']:.0f}" for o in opportunities[:3]])
@@ -12287,29 +12328,36 @@ def get_user_commissions():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get all commissions as earner
+        # Get all commission ledger entries as earner.
         cursor.execute('''
-            SELECT commission_id, bot_id, profit_amount, commission_rate, commission_amount, created_at
-            FROM commissions
-            WHERE earner_id = ?
+            SELECT commission_id, bot_id, trading_profit, amount, type, payout_status, created_at
+            FROM commission_ledger
+            WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT 100
         ''', (user_id,))
         
         commission_rows = cursor.fetchall()
         
-        # Get commission stats
+        # Get commission stats.
         cursor.execute('''
             SELECT 
                 COUNT(*) as total_count,
-                SUM(commission_amount) as total_earned,
-                SUM(CASE WHEN created_at > datetime('now', '-30 days') THEN commission_amount ELSE 0 END) as pending,
-                SUM(CASE WHEN bot_id IN (SELECT bot_id FROM user_bots WHERE status='completed') THEN commission_amount ELSE 0 END) as withdrawn
-            FROM commissions
-            WHERE earner_id = ?
+                COALESCE(SUM(amount), 0) as total_earned,
+                COALESCE(SUM(CASE WHEN payout_status = 'pending' THEN amount ELSE 0 END), 0) as pending,
+                COALESCE(SUM(CASE WHEN payout_status = 'completed' THEN amount ELSE 0 END), 0) as withdrawn
+            FROM commission_ledger
+            WHERE user_id = ?
         ''', (user_id,))
         
         stats_row = cursor.fetchone()
+
+        cursor.execute('''
+            SELECT COALESCE(SUM(amount), 0)
+            FROM commission_withdrawals
+            WHERE user_id = ? AND status IN ('pending', 'approved', 'processing')
+        ''', (user_id,))
+        reserved_amount = float(cursor.fetchone()[0] or 0)
         
         commissions = []
         for row in commission_rows:
@@ -12317,21 +12365,21 @@ def get_user_commissions():
                 'commission_id': row[0],
                 'bot_id': row[1],
                 'profit_amount': row[2],
-                'commission_rate': row[3],
-                'amount': row[4],
-                'source': 'trade',
-                'status': 'completed',
-                'created_at': row[5],
+                'amount': row[3],
+                'source': row[4],
+                'status': row[5],
+                'created_at': row[6],
             })
         
         conn.close()
         
         stats = {
             'total_earned': stats_row[1] or 0,
-            'total_pending': stats_row[2] or 0,
+            'total_pending': max((stats_row[2] or 0) - reserved_amount, 0),
             'total_withdrawn': stats_row[3] or 0,
             'trade_commissions': stats_row[0] or 0,
             'referral_commissions': 0,
+            'reserved_for_withdrawal': reserved_amount,
         }
         
         logger.info(f"✅ Retrieved commissions for user {user_id}: ${stats['total_earned']:.2f} earned")
@@ -12404,18 +12452,28 @@ def request_commission_withdrawal():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Check available balance
+        # Check available balance after excluding already settled and already requested entries.
         cursor.execute('''
-            SELECT SUM(commission_amount) as total FROM commissions WHERE earner_id = ?
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM commission_ledger
+            WHERE user_id = ? AND payout_status = 'pending'
         ''', (user_id,))
         
-        total = cursor.fetchone()[0] or 0
+        total = float(cursor.fetchone()[0] or 0)
+
+        cursor.execute('''
+            SELECT COALESCE(SUM(amount), 0)
+            FROM commission_withdrawals
+            WHERE user_id = ? AND status IN ('pending', 'approved', 'processing')
+        ''', (user_id,))
+        reserved = float(cursor.fetchone()[0] or 0)
+        available = max(total - reserved, 0.0)
         
-        if amount > total:
+        if amount > available:
             conn.close()
             return jsonify({
                 'success': False,
-                'error': f'Insufficient balance. Available: ${total:.2f}, Requested: ${amount:.2f}'
+                'error': f'Insufficient balance. Available: ${available:.2f}, Requested: ${amount:.2f}'
             }), 400
         
         # Create withdrawal request
@@ -12475,6 +12533,103 @@ def _get_commission_config(cursor):
     }
 
 
+def _get_developer_account_id(cfg: Dict[str, Any]) -> str:
+    developer_id = str(cfg.get('developer_id') or '').strip()
+    return developer_id or OWNER_USER_ID
+
+
+def _get_active_referrer(cursor, user_id: str) -> Optional[str]:
+    cursor.execute('''
+        SELECT referrer_id FROM referrals
+        WHERE referred_user_id = ? AND status = 'active'
+        ORDER BY created_at DESC
+        LIMIT 1
+    ''', (user_id,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def _build_commission_distribution(cursor, user_id: str, profit_amount: float, source: str = 'MT5') -> Dict[str, Any]:
+    cfg = _get_commission_config(cursor)
+    developer_id = _get_developer_account_id(cfg)
+    referrer_id = _get_active_referrer(cursor, user_id)
+    entries: List[Dict[str, Any]] = []
+
+    if profit_amount <= 0:
+        return {
+            'cfg': cfg,
+            'developer_id': developer_id,
+            'entries': [],
+            'total_commission': 0.0,
+            'trader_keeps': 0.0,
+            'referrer_id': referrer_id,
+            'source': source,
+        }
+
+    if source == 'IG' and not cfg.get('ig_commission_enabled', 1):
+        return {
+            'cfg': cfg,
+            'developer_id': developer_id,
+            'entries': [],
+            'total_commission': 0.0,
+            'trader_keeps': float(profit_amount),
+            'referrer_id': referrer_id,
+            'source': source,
+        }
+
+    if source == 'IG':
+        direct_rate = float(cfg.get('developer_direct_rate', 0.25) or 0.25)
+        developer_rate = float(cfg.get('ig_developer_rate', 0.25) or 0.25)
+        recruiter_rate = float(cfg.get('ig_recruiter_rate', 0.05) or 0.05)
+    else:
+        direct_rate = float(cfg.get('developer_direct_rate', 0.25) or 0.25)
+        developer_rate = float(cfg.get('developer_referral_rate', direct_rate) or direct_rate)
+        recruiter_rate = float(cfg.get('recruiter_rate', 0.05) or 0.05)
+
+    if referrer_id:
+        entries.append({
+            'recipient_id': developer_id,
+            'rate': developer_rate,
+            'amount': profit_amount * developer_rate,
+            'entry_type': 'profit_share',
+        })
+        entries.append({
+            'recipient_id': referrer_id,
+            'rate': recruiter_rate,
+            'amount': profit_amount * recruiter_rate,
+            'entry_type': 'referral',
+        })
+
+        if bool(cfg.get('multi_tier_enabled', 0)):
+            tier2_id = _get_active_referrer(cursor, referrer_id)
+            tier2_rate = float(cfg.get('tier2_rate', 0.02) or 0.02)
+            if tier2_id and tier2_rate > 0:
+                entries.append({
+                    'recipient_id': tier2_id,
+                    'rate': tier2_rate,
+                    'amount': profit_amount * tier2_rate,
+                    'entry_type': 'affiliate',
+                })
+    else:
+        entries.append({
+            'recipient_id': developer_id,
+            'rate': direct_rate,
+            'amount': profit_amount * direct_rate,
+            'entry_type': 'profit_share',
+        })
+
+    total_commission = sum(float(entry['amount'] or 0) for entry in entries)
+    return {
+        'cfg': cfg,
+        'developer_id': developer_id,
+        'entries': entries,
+        'total_commission': total_commission,
+        'trader_keeps': max(float(profit_amount) - total_commission, 0.0),
+        'referrer_id': referrer_id,
+        'source': source,
+    }
+
+
 def _insert_commission_record(cursor, earner_id: str, client_id: str, bot_id: str, profit_amount: float, commission_rate: float, commission_amount: float, now: str, entry_type: str):
     commission_id = str(uuid.uuid4())
     cursor.execute('''
@@ -12490,6 +12645,81 @@ def _insert_commission_record(cursor, earner_id: str, client_id: str, bot_id: st
     cursor.execute('''
         UPDATE users SET total_commission = COALESCE(total_commission, 0) + ? WHERE user_id = ?
     ''', (commission_amount, earner_id))
+    return commission_id
+
+
+def _settle_commission_to_internal_balance(cursor, commission_id: str, earner_id: str, amount: float, reason: str, now: str):
+    if amount <= 0:
+        return False
+
+    cursor.execute('''
+        UPDATE users
+        SET internal_balance = COALESCE(internal_balance, 0) + ?
+        WHERE user_id = ?
+    ''', (amount, earner_id))
+
+    if cursor.rowcount <= 0:
+        logger.warning(f"Commission settlement skipped for {earner_id}: user not found")
+        return False
+
+    cursor.execute('''
+        INSERT INTO transactions (transaction_id, user_id, type, amount, method, status, reason, created_at, completed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (str(uuid.uuid4()), earner_id, 'commission', amount, 'internal', 'completed', reason, now, now))
+
+    cursor.execute('''
+        UPDATE commission_ledger
+        SET payout_status = 'completed', payout_method = 'internal', payout_date = ?
+        WHERE commission_id = ? AND user_id = ?
+    ''', (now, commission_id, earner_id))
+    return True
+
+
+def _record_commission_distribution(cursor, user_id: str, bot_id: str, profit_amount: float,
+                                    distribution: Dict[str, Any], auto_credit_platform: bool = False) -> List[Dict[str, Any]]:
+    now = datetime.now().isoformat()
+    recorded_entries: List[Dict[str, Any]] = []
+    developer_id = distribution.get('developer_id')
+
+    for entry in distribution.get('entries', []):
+        recipient_id = entry['recipient_id']
+        amount = float(entry['amount'] or 0)
+        if amount <= 0:
+            continue
+
+        commission_id = _insert_commission_record(
+            cursor,
+            recipient_id,
+            user_id,
+            bot_id,
+            profit_amount,
+            float(entry['rate'] or 0),
+            amount,
+            now,
+            entry['entry_type'],
+        )
+
+        auto_settled = False
+        if auto_credit_platform and recipient_id == developer_id and entry['entry_type'] == 'profit_share':
+            auto_settled = _settle_commission_to_internal_balance(
+                cursor,
+                commission_id,
+                recipient_id,
+                amount,
+                f"Automated platform profit share from bot {bot_id}",
+                now,
+            )
+
+        recorded_entries.append({
+            'commission_id': commission_id,
+            'recipient_id': recipient_id,
+            'amount': amount,
+            'rate': float(entry['rate'] or 0),
+            'entry_type': entry['entry_type'],
+            'auto_settled': auto_settled,
+        })
+
+    return recorded_entries
 
 
 def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float, source: str = 'MT5'):
@@ -12500,80 +12730,44 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
     """
     try:
         if profit_amount <= 0:
-            return  # Only commission on profits
+            return {'success': True, 'entries': [], 'trader_keeps': 0.0}
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        cfg = _get_commission_config(cursor)
+        distribution = _build_commission_distribution(cursor, user_id, profit_amount, source)
+        if not distribution['entries']:
+            conn.close()
+            logger.info(f"[{source}] No commission entries generated for profit ${profit_amount:.2f}")
+            return {'success': True, 'entries': [], 'trader_keeps': distribution['trader_keeps']}
 
-        DEVELOPER_ID = cfg['developer_id']
-
-        if source == 'IG':
-            if not cfg.get('ig_commission_enabled', 1):
-                conn.close()
-                logger.info(f"IG commission disabled — skipping for profit ${profit_amount:.2f}")
-                return
-            DEV_REFERRAL_RATE = float(cfg.get('ig_developer_rate', 0.25))
-            RECRUITER_RATE = float(cfg.get('ig_recruiter_rate', 0.05))
-            DEV_DIRECT_RATE = float(cfg.get('developer_direct_rate', 0.25))
-        else:
-            DEV_DIRECT_RATE = float(cfg.get('developer_direct_rate', 0.25))
-            DEV_REFERRAL_RATE = float(cfg.get('developer_referral_rate', 0.25))
-            RECRUITER_RATE = float(cfg.get('recruiter_rate', 0.05))
-
-        MULTI_TIER = bool(cfg.get('multi_tier_enabled', 0))
-        TIER2_RATE = float(cfg.get('tier2_rate', 0.02))
-
-        # Check if bot owner has a referrer (upline)
-        cursor.execute('''
-            SELECT referrer_id FROM referrals
-            WHERE referred_user_id = ? AND status = 'active'
-        ''', (user_id,))
-        referrer_row = cursor.fetchone()
-        has_referrer = referrer_row is not None
-        referrer_id = referrer_row[0] if has_referrer else None
-
-        now = datetime.now().isoformat()
-
-        if has_referrer:
-            # Developer always earns the full platform rate even when a recruiter exists.
-            developer_commission = profit_amount * DEV_REFERRAL_RATE
-            _insert_commission_record(cursor, DEVELOPER_ID, user_id, bot_id, profit_amount, DEV_REFERRAL_RATE, developer_commission, now, 'profit_share')
-
-            # Recruiter portion
-            recruiter_commission = profit_amount * RECRUITER_RATE
-            _insert_commission_record(cursor, referrer_id, user_id, bot_id, profit_amount, RECRUITER_RATE, recruiter_commission, now, 'referral')
-
-            logger.info(
-                f"💰 [{source}] Commission split: Developer gets ${developer_commission:.2f} ({DEV_REFERRAL_RATE*100:.0f}%), "
-                f"Recruiter {referrer_id} gets ${recruiter_commission:.2f} ({RECRUITER_RATE*100:.0f}%) from ${profit_amount:.2f}"
-            )
-
-            # Multi-tier: recruiter's recruiter gets tier2_rate
-            if MULTI_TIER and TIER2_RATE > 0:
-                cursor.execute('''
-                    SELECT referrer_id FROM referrals
-                    WHERE referred_user_id = ? AND status = 'active'
-                ''', (referrer_id,))
-                tier2_row = cursor.fetchone()
-                if tier2_row:
-                    tier2_id = tier2_row[0]
-                    tier2_commission = profit_amount * TIER2_RATE
-                    _insert_commission_record(cursor, tier2_id, user_id, bot_id, profit_amount, TIER2_RATE, tier2_commission, now, 'affiliate')
-                    logger.info(f"💰 [{source}] Tier-2: {tier2_id} gets ${tier2_commission:.2f} ({TIER2_RATE*100:.0f}%)")
-        else:
-            # Full developer rate (no recruiter)
-            developer_commission = profit_amount * DEV_DIRECT_RATE
-            _insert_commission_record(cursor, DEVELOPER_ID, user_id, bot_id, profit_amount, DEV_DIRECT_RATE, developer_commission, now, 'profit_share')
-            logger.info(f"💰 [{source}] Commission: Developer gets ${developer_commission:.2f} ({DEV_DIRECT_RATE*100:.0f}%) from ${profit_amount:.2f} [Direct signup]")
+        recorded_entries = _record_commission_distribution(
+            cursor,
+            user_id,
+            bot_id,
+            profit_amount,
+            distribution,
+            auto_credit_platform=True,
+        )
 
         conn.commit()
         conn.close()
 
+        summary = ', '.join(
+            f"{entry['recipient_id']}=${entry['amount']:.2f}" for entry in recorded_entries
+        )
+        logger.info(f"💰 [{source}] Commission distribution for ${profit_amount:.2f} on {bot_id}: {summary}")
+        return {
+            'success': True,
+            'entries': recorded_entries,
+            'trader_keeps': distribution['trader_keeps'],
+            'total_commission': distribution['total_commission'],
+        }
+
     except Exception as e:
         logger.error(f"❌ Error in distribute_trade_commissions: {e}")
         # Don't raise - don't break trading if commission fails
+        return {'success': False, 'error': str(e)}
 
 
 # ==================== EMAIL NOTIFICATIONS ====================
@@ -14148,17 +14342,18 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 # ENHANCED LOGGING: Log signal evaluation for ALL symbols upfront
                 management_state = apply_assisted_management_overrides(bot_config)
                 signal_threshold = management_state['signalThreshold']
+                strategy_cache: Dict[str, Optional[Dict[str, Any]]] = {}
                 signal_summary = []
                 for eval_symbol in symbols:
-                    # Try symbol as-is, then without 'm' suffix for fallback
-                    if eval_symbol in commodity_market_data:
-                        eval_market_data = commodity_market_data[eval_symbol]
-                    elif eval_symbol.endswith('m') and eval_symbol[:-1] in commodity_market_data:
-                        eval_market_data = commodity_market_data[eval_symbol[:-1]]  # Remove 'm' suffix
-                    else:
-                        eval_market_data = {'current_price': 0, 'volatility_pct': 1.0, 'price_history': [0]}
-                    
-                    eval_params = strategy_func(eval_symbol, bot_config['accountId'], bot_config['riskPerTrade'], eval_market_data)
+                    eval_market_data = _get_market_data_for_symbol(eval_symbol)
+                    eval_params = _get_cached_strategy_params(
+                        strategy_cache,
+                        strategy_func,
+                        eval_symbol,
+                        bot_config['accountId'],
+                        bot_config['riskPerTrade'],
+                        eval_market_data,
+                    )
                     signal_score = eval_params.get('signal', {}).get('strength', 0) if eval_params else 0
                     status = "✅" if eval_params and signal_score >= signal_threshold else "⏭️"
                     signal_summary.append(f"{eval_symbol}:{signal_score:.0f}")
@@ -14170,7 +14365,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 if bot_config.get('intelligentScanner', False):
                     symbols = execute_intelligent_reallocation(
                         bot_id, bot_config, active_conn, is_mt5, mt5_conn,
-                        strategy_func, signal_threshold, broker_type
+                        strategy_func, signal_threshold, broker_type, strategy_cache
                     )
                 
                 trades_this_cycle = 0
@@ -14211,13 +14406,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         else:
                             position_size = bot_config.get('basePositionSize', 1.0)
                         
-                        # Get market data for this symbol (with fallback for 'm' suffix)
-                        if symbol in commodity_market_data:
-                            market_data = commodity_market_data[symbol]
-                        elif symbol.endswith('m') and symbol[:-1] in commodity_market_data:
-                            market_data = commodity_market_data[symbol[:-1]]  # Try without 'm' suffix
-                        else:
-                            market_data = {'current_price': 0, 'volatility_pct': 1.0, 'price_history': [0]}
+                        market_data = _get_market_data_for_symbol(symbol)
 
                         if fixed_trade_amount and mt5_api is None:
                             fixed_trade_volume, volume_details = estimate_fixed_trade_volume(
@@ -14228,8 +14417,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 market_price=float(market_data.get('current_price', 0.0) or 0.0),
                             )
                         
-                        # Get trade direction from REAL signal-based strategy
-                        trade_params = strategy_func(symbol, bot_config['accountId'], bot_config['riskPerTrade'], market_data)
+                        # Get trade direction from the cached signal evaluation for this cycle.
+                        trade_params = _get_cached_strategy_params(
+                            strategy_cache,
+                            strategy_func,
+                            symbol,
+                            bot_config['accountId'],
+                            bot_config['riskPerTrade'],
+                            market_data,
+                        )
                         
                         # Skip trade if signal strength is too low
                         if trade_params is None:
@@ -18054,45 +18250,91 @@ def admin_dashboard():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        cfg = _get_commission_config(cursor)
+        developer_id = _get_developer_account_id(cfg)
         
         # Get total users
         cursor.execute('SELECT COUNT(*) as count FROM users')
         total_users = cursor.fetchone()['count'] or 0
         
-        # Get total active bots
-        total_bots = len([b for b in active_bots.values() if b.get('enabled', False)])
-        
-        # Get platform earnings (25% of all profits)
-        cursor.execute('SELECT SUM(commission_amount * 5) as total_earned FROM commissions')
-        platform_earnings_from_referrals = (cursor.fetchone()['total_earned'] or 0) / 5  # Divide back to get 25%
-        
-        # Calculate from actual bot profits
-        total_profit = sum([b.get('totalProfit', 0) for b in active_bots.values()])
-        platform_earnings = total_profit * 0.25  # 25% of all profits
+        cursor.execute("SELECT COUNT(*) as count FROM user_bots WHERE status = 'active' AND enabled = 1")
+        total_bots = cursor.fetchone()['count'] or 0
+
+        cursor.execute('''
+            SELECT
+                COALESCE(SUM(amount), 0) AS total_earned,
+                COALESCE(SUM(CASE WHEN payout_status = 'completed' THEN amount ELSE 0 END), 0) AS paid_earned,
+                COALESCE(SUM(CASE WHEN payout_status != 'completed' THEN amount ELSE 0 END), 0) AS pending_earned
+            FROM commission_ledger
+            WHERE user_id = ? AND type = 'profit_share'
+        ''', (developer_id,))
+        platform_commission_row = dict(cursor.fetchone())
+
+        cursor.execute('''
+            SELECT COALESCE(SUM(amount), 0) AS total_referral
+            FROM commission_ledger
+            WHERE type IN ('referral', 'affiliate')
+        ''')
+        referral_earnings = cursor.fetchone()['total_referral'] or 0
+
+        cursor.execute('SELECT COALESCE(internal_balance, 0) AS internal_balance FROM users WHERE user_id = ?', (developer_id,))
+        balance_row = cursor.fetchone()
+        platform_internal_balance = balance_row['internal_balance'] if balance_row else 0
         
         # Get all users with their bots
         cursor.execute('SELECT user_id, name, email FROM users ORDER BY created_at DESC LIMIT 100')
         users_list = [dict(row) for row in cursor.fetchall()]
+
+        user_ids = [user['user_id'] for user in users_list]
+        bots_by_user: Dict[str, List[Dict[str, Any]]] = {}
+        earnings_by_user: Dict[str, Dict[str, float]] = {}
+
+        if user_ids:
+            placeholders = ','.join(['?'] * len(user_ids))
+            cursor.execute(
+                f'''
+                    SELECT user_id, bot_id, name, strategy, total_profit, enabled
+                    FROM user_bots
+                    WHERE status = 'active' AND user_id IN ({placeholders})
+                    ORDER BY updated_at DESC, created_at DESC
+                ''',
+                user_ids,
+            )
+            for row in cursor.fetchall():
+                live_profit = active_bots.get(row['bot_id'], {}).get('totalProfit', row['total_profit'])
+                bots_by_user.setdefault(row['user_id'], []).append({
+                    'botId': row['bot_id'],
+                    'name': row['name'],
+                    'strategy': row['strategy'] or 'Unknown',
+                    'profit': round(float(live_profit or 0), 2),
+                    'enabled': bool(row['enabled']),
+                })
+
+            cursor.execute(
+                f'''
+                    SELECT
+                        source_user_id,
+                        COALESCE(SUM(CASE WHEN user_id = ? AND type = 'profit_share' THEN amount ELSE 0 END), 0) AS platform_commission,
+                        COALESCE(SUM(CASE WHEN type IN ('referral', 'affiliate') THEN amount ELSE 0 END), 0) AS referral_earnings
+                    FROM commission_ledger
+                    WHERE source_user_id IN ({placeholders})
+                    GROUP BY source_user_id
+                ''',
+                [developer_id, *user_ids],
+            )
+            for row in cursor.fetchall():
+                earnings_by_user[row['source_user_id']] = {
+                    'platform_commission': float(row['platform_commission'] or 0),
+                    'referral_earnings': float(row['referral_earnings'] or 0),
+                }
         
         users_with_bots = []
+        total_profit = 0.0
         for user in users_list:
-            # Find bots belonging to this user (simplified - would need more DB tracking)
-            user_bots = [
-                {
-                    'botId': bot_id,
-                    'strategy': bot_config.get('strategy', 'Unknown'),
-                    'profit': bot_config.get('totalProfit', 0)
-                }
-                for bot_id, bot_config in active_bots.items()
-            ]
-            
-            # Get user's commission info
-            cursor.execute('''
-                SELECT COUNT(DISTINCT client_id) as client_count, SUM(commission_amount) as total_commission
-                FROM commissions WHERE earner_id = ?
-            ''', (user['user_id'],))
-            
-            commission_data = dict(cursor.fetchone())
+            user_bots = bots_by_user.get(user['user_id'], [])
+            user_total_profit = round(sum(float(bot.get('profit', 0) or 0) for bot in user_bots), 2)
+            total_profit += user_total_profit
+            commission_data = earnings_by_user.get(user['user_id'], {})
             
             users_with_bots.append({
                 'user_id': user['user_id'],
@@ -18100,9 +18342,9 @@ def admin_dashboard():
                 'email': user['email'],
                 'bot_count': len(user_bots),
                 'bots': user_bots[:5],  # First 5 bots
-                'total_profit': sum([b.get('profit', 0) for b in user_bots]),
-                'recruiter_count': commission_data.get('client_count', 0),
-                'referral_earnings': commission_data.get('total_commission', 0)
+                'total_profit': user_total_profit,
+                'platform_commission': round(float(commission_data.get('platform_commission', 0) or 0), 2),
+                'referral_earnings': round(float(commission_data.get('referral_earnings', 0) or 0), 2),
             })
         
         conn.close()
@@ -18111,11 +18353,24 @@ def admin_dashboard():
             'success': True,
             'total_users': total_users,
             'total_bots': total_bots,
-            'total_profit': total_profit,
-            'platform_earnings': platform_earnings,
-            'referral_earnings': platform_earnings_from_referrals,
-            'commission_rate_platform': 0.25,
-            'commission_rate_referrer': 0.05,
+            'total_profit': round(total_profit, 2),
+            'platform_earnings': round(float(platform_commission_row.get('total_earned', 0) or 0), 2),
+            'platform_paid_earnings': round(float(platform_commission_row.get('paid_earned', 0) or 0), 2),
+            'platform_pending_earnings': round(float(platform_commission_row.get('pending_earned', 0) or 0), 2),
+            'platform_internal_balance': round(float(platform_internal_balance or 0), 2),
+            'referral_earnings': round(float(referral_earnings or 0), 2),
+            'commission_rate_platform': float(cfg.get('developer_direct_rate', 0.25) or 0.25),
+            'commission_rate_referrer': float(cfg.get('recruiter_rate', 0.05) or 0.05),
+            'commission_rates': {
+                'developer_direct_rate': float(cfg.get('developer_direct_rate', 0.25) or 0.25),
+                'developer_referral_rate': float(cfg.get('developer_referral_rate', 0.25) or 0.25),
+                'recruiter_rate': float(cfg.get('recruiter_rate', 0.05) or 0.05),
+                'ig_developer_rate': float(cfg.get('ig_developer_rate', 0.25) or 0.25),
+                'ig_recruiter_rate': float(cfg.get('ig_recruiter_rate', 0.05) or 0.05),
+                'tier2_rate': float(cfg.get('tier2_rate', 0.02) or 0.02),
+                'multi_tier_enabled': bool(cfg.get('multi_tier_enabled', 0)),
+            },
+            'developer_id': developer_id,
             'users': users_with_bots
         }), 200
     
@@ -20364,30 +20619,29 @@ def record_exness_trade_profit():
         ))
 
         # ==================== PROFIT COMMISSION SPLIT ====================
-        
-        # Get user's referrer (if any)
-        cursor.execute('SELECT referrer_id FROM users WHERE user_id = ?', (user_id,))
-        user_row = cursor.fetchone()
-        referrer_id = user_row['referrer_id'] if user_row else None
-        
-        # Calculate commission split based on registration type
-        developer_id = 'SYSTEM_OWNER_USER_ID'  # System developer/owner account
+        cfg = _get_commission_config(cursor)
+        developer_id = _get_developer_account_id(cfg)
+        referrer_id = _get_active_referrer(cursor, user_id)
         
         if profit_loss > 0:  # Only split if profitable
             if referrer_id:
-                # Via referrer: Dev 25%, Referrer 5%, User 70%
-                dev_commission = profit_loss * 0.25
-                referrer_commission = profit_loss * 0.05
+                dev_rate = float(cfg.get('developer_referral_rate', cfg.get('developer_direct_rate', 0.25)) or cfg.get('developer_direct_rate', 0.25))
+                recruiter_rate = float(cfg.get('recruiter_rate', 0.05) or 0.05)
+                dev_commission = profit_loss * dev_rate
+                referrer_commission = profit_loss * recruiter_rate
                 user_profit = profit_loss * 0.70
                 
-                logger.info(f"📊 Profit split (WITH REFERRER): Dev ${dev_commission:.2f} (25%), Referrer ${referrer_commission:.2f} (5%), User ${user_profit:.2f} (70%)")
+                logger.info(
+                    f"📊 Profit split (WITH REFERRER): Dev ${dev_commission:.2f} ({dev_rate*100:.0f}%), "
+                    f"Referrer ${referrer_commission:.2f} ({recruiter_rate*100:.0f}%), User ${user_profit:.2f} (70%)"
+                )
             else:
-                # Direct registration: Dev 30%, User 70%
-                dev_commission = profit_loss * 0.30
+                direct_rate = float(cfg.get('developer_direct_rate', 0.30) or 0.30)
+                dev_commission = profit_loss * direct_rate
                 referrer_commission = 0
                 user_profit = profit_loss * 0.70
                 
-                logger.info(f"📊 Profit split (DIRECT): Dev ${dev_commission:.2f} (30%), User ${user_profit:.2f} (70%)")
+                logger.info(f"📊 Profit split (DIRECT): Dev ${dev_commission:.2f} ({direct_rate*100:.0f}%), User ${user_profit:.2f} (70%)")
             
             # Insert commission records
             commission_id_dev = str(uuid.uuid4())
@@ -20757,8 +21011,10 @@ def admin_verify_exness_withdrawal():
         profit_amount = withdrawal['profit_from_trades']
         
         # ==================== COMMISSION SPLIT LOGIC ====================
-        developer_id = 'SYSTEM_OWNER_USER_ID'
-        dev_share = profit_amount * 0.30  # Developer gets 30%
+        cfg = _get_commission_config(cursor)
+        developer_id = _get_developer_account_id(cfg)
+        direct_rate = float(cfg.get('developer_direct_rate', 0.30) or 0.30)
+        dev_share = profit_amount * direct_rate
         user_share = profit_amount * 0.70  # User gets 70%
         
         now = datetime.now().isoformat()
@@ -20815,7 +21071,7 @@ def admin_verify_exness_withdrawal():
         conn.close()
         
         logger.info(f"✅ ADMIN verified withdrawal {withdrawal_id}: User {user_id}")
-        logger.info(f"   Commission split: Dev ${dev_share:.2f} (30%), User ${user_share:.2f} (70%)")
+        logger.info(f"   Commission split: Dev ${dev_share:.2f} ({direct_rate*100:.0f}%), User ${user_share:.2f} (70%)")
         
         return jsonify({
             'success': True,

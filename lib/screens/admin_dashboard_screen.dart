@@ -91,7 +91,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           final totalUsers = data['total_users'] ?? 0;
           final totalBots = data['total_bots'] ?? 0;
           final platformEarnings = (data['platform_earnings'] ?? 0.0).toDouble();
+          final platformPaidEarnings = (data['platform_paid_earnings'] ?? 0.0).toDouble();
+          final platformPendingEarnings = (data['platform_pending_earnings'] ?? 0.0).toDouble();
+          final platformInternalBalance = (data['platform_internal_balance'] ?? 0.0).toDouble();
+          final referralEarnings = (data['referral_earnings'] ?? 0.0).toDouble();
           final totalProfit = (data['total_profit'] ?? 0.0).toDouble();
+          final commissionRates = Map<String, dynamic>.from(data['commission_rates'] ?? const {});
+          final directRate = ((commissionRates['developer_direct_rate'] ?? 0.25) as num).toDouble();
+          final referredRate = ((commissionRates['developer_referral_rate'] ?? directRate) as num).toDouble();
+          final recruiterRate = ((commissionRates['recruiter_rate'] ?? 0.05) as num).toDouble();
+          final tier2Rate = ((commissionRates['tier2_rate'] ?? 0.02) as num).toDouble();
+          final multiTierEnabled = commissionRates['multi_tier_enabled'] == true;
           final users = data['users'] ?? [];
 
           return SingleChildScrollView(
@@ -131,6 +141,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       icon: Icons.attach_money,
                       color: Colors.purple,
                     ),
+                    _StatCard(
+                      title: 'Platform Wallet',
+                      value: '\$${platformInternalBalance.toStringAsFixed(2)}',
+                      icon: Icons.account_balance_wallet,
+                      color: Colors.teal,
+                    ),
+                    _StatCard(
+                      title: 'Referral Earnings',
+                      value: '\$${referralEarnings.toStringAsFixed(2)}',
+                      icon: Icons.groups_2_outlined,
+                      color: Colors.lightBlueAccent,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -155,12 +177,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'Platform Share (25%)',
+                                  'Platform Share (Paid)',
                                   style: TextStyle(fontSize: 12),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '\$${platformEarnings.toStringAsFixed(2)}',
+                                  '\$${platformPaidEarnings.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
@@ -173,12 +195,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 const Text(
-                                  'Referrer Share (5%)',
+                                  'Platform Pending',
                                   style: TextStyle(fontSize: 12),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '\$${(platformEarnings * 0.2).toStringAsFixed(2)}',
+                                  '\$${platformPendingEarnings.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
@@ -192,8 +214,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         const SizedBox(height: 12),
                         const Divider(),
                         const SizedBox(height: 12),
-                        const Text(
-                          r'Revenue Model: $100 profit → $25 to platform, $5 to referrer, $70 to client',
+                        Text(
+                          multiTierEnabled
+                              ? 'Direct signup: ${(directRate * 100).toStringAsFixed(1)}% platform. Referred trade: ${(referredRate * 100).toStringAsFixed(1)}% platform, ${(recruiterRate * 100).toStringAsFixed(1)}% recruiter, ${(tier2Rate * 100).toStringAsFixed(1)}% tier-2.'
+                              : 'Direct signup: ${(directRate * 100).toStringAsFixed(1)}% platform. Referred trade: ${(referredRate * 100).toStringAsFixed(1)}% platform and ${(recruiterRate * 100).toStringAsFixed(1)}% recruiter.',
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey,
@@ -345,6 +369,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           fontWeight: FontWeight.bold,
                                           fontSize: 12,
                                           color: Colors.green,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Platform cut \$${(user['platform_commission'] ?? 0).toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 11,
+                                          color: Colors.orange,
                                         ),
                                       ),
                                     ],
