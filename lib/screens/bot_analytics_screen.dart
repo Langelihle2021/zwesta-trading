@@ -1953,6 +1953,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
 
   Widget _buildOpenPositionsSection() {
     final openPositions = (_botData['openPositions'] as List?) ?? [];
+    final activeSymbolCooldowns = (_botData['activeSymbolCooldowns'] as List?) ?? [];
 
     if (openPositions.isEmpty) {
       return Container(
@@ -1975,6 +1976,19 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (activeSymbolCooldowns.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: activeSymbolCooldowns.take(4).map((cooldown) {
+              final until = DateTime.tryParse(cooldown['until']?.toString() ?? '');
+              final symbol = cooldown['symbol']?.toString() ?? 'Symbol';
+              final label = until == null ? '$symbol cooldown' : '$symbol blocked until ${until.toLocal().hour.toString().padLeft(2, '0')}:${until.toLocal().minute.toString().padLeft(2, '0')}';
+              return _buildProtectionBadge(label, const Color(0xFFFFA726));
+            }).toList(),
+          ),
+          const SizedBox(height: 10),
+        ],
         Row(
           children: [
             const Icon(Icons.candlestick_chart,
@@ -1997,6 +2011,9 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           final entryPrice = (pos['entryPrice'] ?? 0).toDouble();
           final currentPrice = (pos['currentPrice'] ?? 0).toDouble();
           final profit = (pos['profit'] ?? 0).toDouble();
+          final lockedProfitFloor = (pos['lockedProfitFloor'] ?? 0).toDouble();
+          final breakEvenFloor = (pos['breakEvenFloor'] ?? 0).toDouble();
+          final protectionBucket = pos['profitProtectionBucket']?.toString();
           final entryTime = pos['entryTime']?.toString() ?? '';
           final isBuy = type.toUpperCase().contains('BUY');
 
@@ -2057,6 +2074,21 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                           ),
                         ),
                       ],
+                      if (protectionBucket != null || lockedProfitFloor > 0 || breakEvenFloor > 0) ...[
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            if (protectionBucket != null)
+                              _buildProtectionBadge('Protect $protectionBucket', const Color(0xFF26A69A)),
+                            if (lockedProfitFloor > 0)
+                              _buildProtectionBadge('Floor ${_formatAmount(lockedProfitFloor, currencyCode: _displayCurrencyCode())}', const Color(0xFF26A69A)),
+                            if (breakEvenFloor > 0)
+                              _buildProtectionBadge('BE+ ${_formatAmount(breakEvenFloor, currencyCode: _displayCurrencyCode())}', const Color(0xFF42A5F5)),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -2072,6 +2104,25 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           );
         }),
       ],
+    );
+  }
+
+  Widget _buildProtectionBadge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }

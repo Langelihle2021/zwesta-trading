@@ -1002,6 +1002,27 @@ def _get_market_data_for_symbol(symbol: str) -> Dict[str, Any]:
     return {'current_price': 0, 'volatility_pct': 1.0, 'price_history': [0]}
 
 
+def _enrich_market_data_with_bot_context(
+    bot_config: Optional[Dict[str, Any]],
+    symbol: str,
+    market_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    base_market_data = dict(market_data or _get_market_data_for_symbol(symbol))
+    if not bot_config:
+        return base_market_data
+
+    adaptive_offset = int(bot_config.get('adaptiveSignalThresholdOffset') or 0)
+    adaptive_miss_count = int(bot_config.get('adaptiveSignalMissCount') or 0)
+    adaptive_reduction = min(adaptive_offset, ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX)
+    if bot_config.get('managementState') == 'recovery':
+        adaptive_reduction = 0
+
+    base_market_data['adaptive_signal_threshold_offset'] = adaptive_offset
+    base_market_data['adaptive_signal_miss_count'] = adaptive_miss_count
+    base_market_data['adaptive_min_signal_reduction'] = adaptive_reduction
+    return base_market_data
+
+
 def _get_cached_strategy_params(strategy_cache: Dict[str, Optional[Dict[str, Any]]], strategy_func, symbol: str,
                                 account_id: str, risk_per_trade: float,
                                 market_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -1013,6 +1034,52 @@ def _get_cached_strategy_params(strategy_cache: Dict[str, Optional[Dict[str, Any
 
     strategy_cache[symbol] = strategy_func(symbol, account_id, risk_per_trade, market_data)
     return strategy_cache[symbol]
+
+
+def _get_effective_symbol_params(symbol: str, market_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    params = dict(SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS))
+    adaptive_reduction = 0
+    if isinstance(market_data, dict):
+        try:
+            adaptive_reduction = int(market_data.get('adaptive_min_signal_reduction') or 0)
+        except (TypeError, ValueError):
+            adaptive_reduction = 0
+
+    params['effective_min_signal_strength'] = max(45, int(params['min_signal_strength']) - max(0, adaptive_reduction))
+    return params
+
+
+def _build_adaptive_raw_trade_params(symbol: str, market_data: Dict[str, Any], raw_signal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Build a conservative fallback trade when scanner finds a strong raw setup.
+
+    Used only by adaptive scanner mode when strategy-specific filters reject a
+    setup that still has unusually strong raw signal quality.
+    """
+    order_type = extract_signal_direction(raw_signal.get('signal'))
+    if order_type is None:
+        return None
+
+    if raw_signal.get('trend') == 'RANGING':
+        return None
+
+    params = _get_effective_symbol_params(symbol, market_data)
+    strength = float(raw_signal.get('strength') or 0.0)
+    volume = 0.6 if strength < 85 else 0.75
+    signal_payload = dict(raw_signal)
+    raw_reason = signal_payload.get('entry_reason', 'High-conviction raw scanner setup')
+    signal_payload['entry_reason'] = f"{raw_reason} + Adaptive scanner raw-signal fallback"
+
+    return {
+        'symbol': symbol,
+        'type': order_type,
+        'volume': volume,
+        'stop_loss': params['stop_loss_pips'],
+        'take_profit': params['take_profit_pips'] * 1.4,
+        'signal': attach_execution_direction(signal_payload, order_type, 'Adaptive Scanner Fallback'),
+        'duration_seconds': 900,
+        'execution_source': 'adaptive_raw_fallback',
+    }
+
 def validate_api_key():
     """Validate API key from request headers"""
     api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
@@ -3415,6 +3482,19 @@ class MT5Connection(BrokerConnection):
             if self.is_symbol_available(symbol):
                 return symbol
         return normalize_symbol_for_broker('EURUSD', self.mt5_broker) or "EURUSD"
+
+    def get_related_fallback_symbol(self, requested_symbol: str) -> Optional[str]:
+        """Find a safe fallback in the same asset family as the requested symbol."""
+        requested_base = _normalize_symbol_base(requested_symbol)
+        if not requested_base:
+            return None
+
+        ready_symbols = get_mt5_ready_symbols_for_broker(self.mt5_broker)
+        for candidate in ready_symbols:
+            if _normalize_symbol_base(candidate) == requested_base and self.is_symbol_available(candidate):
+                return candidate
+
+        return None
     
     def wait_for_critical_symbols(self, symbols: list, timeout_seconds: int = 30) -> bool:
         """
@@ -3503,6 +3583,10 @@ class MT5Connection(BrokerConnection):
 
             # STEP 1: Validate requested symbol before attempting order
             original_symbol = symbol
+            critical_symbols = {
+                normalize_symbol_for_broker('BTCUSD', self.mt5_broker),
+                normalize_symbol_for_broker('ETHUSD', self.mt5_broker),
+            }
             if not self.is_symbol_available(symbol):
                 logger.warning(f"⚠️  Symbol {symbol} is NOT available - checking if it's in VALID_SYMBOLS")
                 if symbol in VALID_SYMBOLS:
@@ -3511,10 +3595,6 @@ class MT5Connection(BrokerConnection):
                     
                     # ❌ CRITICAL FIX: Don't silently fall back for important symbols like BTC/ETH
                     # This was causing BTC trades to execute as EUR/USD instead
-                    critical_symbols = {
-                        normalize_symbol_for_broker('BTCUSD', self.mt5_broker),
-                        normalize_symbol_for_broker('ETHUSD', self.mt5_broker),
-                    }
                     if symbol in critical_symbols:
                         logger.error(f"❌ CRITICAL: {symbol} requested but NOT available - refusing to fall back to another symbol")
                         logger.error(f"   User requested {symbol}, but system would execute on wrong symbol if we fell back")
@@ -3523,14 +3603,17 @@ class MT5Connection(BrokerConnection):
                 else:
                     logger.warning(f"   Symbol {symbol} is NOT in VALID_SYMBOLS (list: {sorted(VALID_SYMBOLS)})")
                 
-                # For non-critical symbols, try fallback
-                if original_symbol not in critical_symbols:
-                    fallback = self.get_fallback_symbol()
-                    logger.info(f"🔄 Falling back from {original_symbol} to {fallback}")
-                    symbol = fallback
-                    
-                    if not self.is_symbol_available(symbol):
-                        return {'success': False, 'error': f'Symbol {original_symbol} not available, and fallback {fallback} also unavailable'}
+                broker_normalized_symbol = normalize_symbol_for_broker(original_symbol, self.mt5_broker)
+                if broker_normalized_symbol != original_symbol and self.is_symbol_available(broker_normalized_symbol):
+                    logger.info(f"🔄 Normalized symbol for broker: {original_symbol} -> {broker_normalized_symbol}")
+                    symbol = broker_normalized_symbol
+                elif original_symbol not in critical_symbols:
+                    related_fallback = self.get_related_fallback_symbol(original_symbol)
+                    if related_fallback:
+                        logger.info(f"🔄 Falling back from {original_symbol} to related symbol {related_fallback}")
+                        symbol = related_fallback
+                    else:
+                        return {'success': False, 'error': f'Symbol {original_symbol} not available on this account and no safe related fallback exists'}
 
             # STEP 2: Select symbol so broker metadata and ticks are available.
             if not self.mt5.symbol_select(symbol, True):
@@ -8526,7 +8609,7 @@ def normalize_symbol_for_broker(symbol: str, broker_name: str = None) -> str:
 
     if broker_name in ('Exness', 'XM', 'XM Global'):
         mapped_upper = str(mapped_symbol).upper()
-        if mapped_upper.endswith('M'):
+        if mapped_upper.endswith('M') and mapped_upper[:-1] in VALID_SYMBOLS:
             return mapped_upper[:-1] + 'm'
         return f"{mapped_upper}m"
 
@@ -9319,10 +9402,11 @@ def scalping_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
     
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
+    min_signal_strength = params['effective_min_signal_strength']
     
     # Check if signal is strong enough
-    if signal_eval['strength'] < params['min_signal_strength']:
+    if signal_eval['strength'] < min_signal_strength:
         return None  # Don't trade on weak signal
     
     # Determine direction from signal
@@ -9353,10 +9437,11 @@ def momentum_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
     
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
+    min_signal_strength = params['effective_min_signal_strength']
     
     # Only trade strong signals in momentum mode
-    if signal_eval['strength'] < params['min_signal_strength'] + 5:
+    if signal_eval['strength'] < min_signal_strength + 5:
         return None
     
     # Only trade if trend exists
@@ -9390,10 +9475,11 @@ def trend_following_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
     
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
+    min_signal_strength = params['effective_min_signal_strength']
     
     # Trend following needs trend + signal (ranging allowed at normal threshold)
-    if signal_eval['strength'] < params['min_signal_strength']:
+    if signal_eval['strength'] < min_signal_strength:
         return None
     
     # Use the actual signal direction from the evaluator
@@ -9425,13 +9511,14 @@ def mean_reversion_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
     
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
+    min_signal_strength = params['effective_min_signal_strength']
     
     # Mean reversion works best when price is extreme (RSI <30 or >70)
     if not (signal_eval['rsi'] < 30 or signal_eval['rsi'] > 70):
         return None  # Only trade at extremes
     
-    if signal_eval['strength'] < params['min_signal_strength'] - 5:
+    if signal_eval['strength'] < min_signal_strength - 5:
         return None
     
     # Trade AGAINST the extreme — sell overbought, buy oversold (mean reversion)
@@ -9459,13 +9546,14 @@ def range_trading_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
     
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
+    min_signal_strength = params['effective_min_signal_strength']
     
     # Range trading only works in ranging market
     if signal_eval['trend'] != 'RANGING':
         return None
     
-    if signal_eval['strength'] < params['min_signal_strength'] - 10:
+    if signal_eval['strength'] < min_signal_strength - 10:
         return None
     
     order_type = extract_signal_direction(signal_eval.get('signal'))
@@ -9494,10 +9582,11 @@ def breakout_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
     
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
+    min_signal_strength = params['effective_min_signal_strength']
     
     # Breakout needs strong signal and trend presence
-    if signal_eval['strength'] < params['min_signal_strength'] + 10:
+    if signal_eval['strength'] < min_signal_strength + 10:
         return None
     
     if signal_eval['trend'] == 'RANGING':
@@ -9533,14 +9622,14 @@ def swing_trend_dca_strategy(symbol, account_id, risk_amount, market_data=None):
         market_data = commodity_market_data.get(symbol, {})
 
     signal_eval = evaluate_real_trade_signal(symbol, market_data)
-    params = SYMBOL_PARAMETERS.get(symbol, DEFAULT_SYMBOL_PARAMS)
+    params = _get_effective_symbol_params(symbol, market_data)
 
     # Must have a clear trend — no RANGING markets
     if signal_eval['trend'] == 'RANGING':
         return None
 
     # Need a strong signal (higher bar than normal strategies)
-    min_strength = max(params['min_signal_strength'] + 10, 60)
+    min_strength = max(params['effective_min_signal_strength'] + 10, 60)
     if signal_eval['strength'] < min_strength:
         return None
 
@@ -9591,10 +9680,11 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
     )
     normalized_configured = validate_and_correct_symbols(configured_symbols, normalized_broker) if configured_symbols else []
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
+    broker_symbol_universe = get_mt5_ready_symbols_for_broker(normalized_broker)
 
     if profile == 'small_account':
         allowed_symbols = [
-            symbol for symbol in sorted(VALID_SYMBOLS)
+            symbol for symbol in broker_symbol_universe
             if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
         ]
         if normalized_configured:
@@ -9604,9 +9694,11 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
             ]
             if configured_safe:
                 return configured_safe + [symbol for symbol in allowed_symbols if symbol not in configured_safe]
-        return allowed_symbols or normalized_configured or sorted(VALID_SYMBOLS)
+        return allowed_symbols or normalized_configured or broker_symbol_universe
 
-    return sorted(VALID_SYMBOLS)
+    if normalized_configured:
+        return normalized_configured + [symbol for symbol in broker_symbol_universe if symbol not in normalized_configured]
+    return broker_symbol_universe
 
 
 STRATEGY_MAP = {
@@ -9951,18 +10043,20 @@ position_sizer = DynamicPositionSizer(base_size=1.0, min_size=0.1, max_size=5.0)
 # ==================== INTELLIGENT OPPORTUNITY SCANNER & REALLOCATION ====================
 
 def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_threshold, strategy_cache=None,
-                          symbol_universe=None, fallback_slack=20):
+                          symbol_universe=None, fallback_slack=20, bot_config=None,
+                          allow_raw_signal_fallback=False):
     """Scan ALL valid symbols across every asset class for the best trade opportunities.
-    
+
     Returns a ranked list of (symbol, signal_strength, signal_eval, trade_params) sorted
     by signal strength descending.  The caller decides how many to act on.
     """
     opportunities = []
+    near_misses = []
     strategy_cache = strategy_cache if strategy_cache is not None else {}
     symbols_to_scan = list(symbol_universe or sorted(VALID_SYMBOLS))
     for symbol in symbols_to_scan:
         try:
-            market_data = _get_market_data_for_symbol(symbol)
+            market_data = _enrich_market_data_with_bot_context(bot_config, symbol)
             trade_params = _get_cached_strategy_params(
                 strategy_cache,
                 strategy_func,
@@ -9971,7 +10065,32 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
                 risk_per_trade,
                 market_data,
             )
+            raw_signal = evaluate_real_trade_signal(symbol, market_data)
+            raw_strength = raw_signal.get('strength', 0)
             if trade_params is None:
+                raw_fallback_min_strength = max(55, signal_threshold)
+                fallback_trade_params = None
+                if allow_raw_signal_fallback and raw_strength >= raw_fallback_min_strength:
+                    fallback_trade_params = _build_adaptive_raw_trade_params(symbol, market_data, raw_signal)
+                if fallback_trade_params is not None:
+                    strategy_cache[symbol] = fallback_trade_params
+                    opportunities.append({
+                        'symbol': symbol,
+                        'strength': raw_strength,
+                        'signal': fallback_trade_params['signal']['signal'],
+                        'trend': raw_signal.get('trend', 'UNKNOWN'),
+                        'rsi': raw_signal.get('rsi', 50),
+                        'trade_params': fallback_trade_params,
+                        'source': 'adaptive_raw_fallback',
+                    })
+                    continue
+                if raw_strength > 0:
+                    near_misses.append({
+                        'symbol': symbol,
+                        'strength': raw_strength,
+                        'signal': raw_signal.get('signal', 'NEUTRAL'),
+                        'reason': raw_signal.get('entry_reason', 'Rejected by strategy'),
+                    })
                 continue
             strength = trade_params.get('signal', {}).get('strength', 0)
             if strength >= signal_threshold:
@@ -9982,6 +10101,14 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
                     'trend': trade_params['signal'].get('trend', 'UNKNOWN'),
                     'rsi': trade_params['signal'].get('rsi', 50),
                     'trade_params': trade_params,
+                    'source': trade_params.get('execution_source', 'strategy'),
+                })
+            else:
+                near_misses.append({
+                    'symbol': symbol,
+                    'strength': strength,
+                    'signal': trade_params['signal'].get('signal', 'NEUTRAL'),
+                    'reason': trade_params['signal'].get('entry_reason', 'Below threshold'),
                 })
         except Exception as e:
             logger.debug(f"[SCANNER] Error scanning {symbol}: {e}")
@@ -9993,7 +10120,7 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
         logger.debug(f"[SCANNER] No opportunities above {signal_threshold}. Falling back to {fallback_threshold}.")
         for symbol in symbols_to_scan:
             try:
-                market_data = _get_market_data_for_symbol(symbol)
+                market_data = _enrich_market_data_with_bot_context(bot_config, symbol)
                 trade_params = _get_cached_strategy_params(
                     strategy_cache,
                     strategy_func,
@@ -10017,6 +10144,15 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
             except Exception as e:
                 logger.debug(f"[SCANNER] Fallback error scanning {symbol}: {e}")
         opportunities.sort(key=lambda x: x['strength'], reverse=True)
+
+    if not opportunities and near_misses:
+        near_misses.sort(key=lambda x: x['strength'], reverse=True)
+        top_near_misses = ', '.join(
+            [f"{item['symbol']}:{item['strength']:.0f} {item['signal']} ({item['reason']})" for item in near_misses[:3]]
+        )
+        logger.info(
+            f"[SCANNER] No symbols met threshold {signal_threshold}. Closest setups: {top_near_misses}"
+        )
 
     return opportunities
 
@@ -10111,13 +10247,14 @@ def evaluate_open_positions_for_reallocation(bot_config, opportunities, active_c
 
 
 def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt5_conn, 
-                                       strategy_func, signal_threshold, broker_type, strategy_cache=None):
+                                       strategy_func, signal_threshold, broker_type, strategy_cache=None,
+                                       force_scan=False):
     """Main intelligence loop: scan, evaluate, close weak, reallocate to strong.
     
     Called once per trading cycle when intelligentScanner is enabled.
     Returns the list of symbols to trade THIS cycle (may differ from bot's original list).
     """
-    if not bot_config.get('intelligentScanner', False):
+    if not bot_config.get('intelligentScanner', False) and not force_scan:
         return bot_config.get('symbols', ['EURUSDm'])
     
     account_id = bot_config.get('accountId', '')
@@ -10125,7 +10262,8 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
     max_positions = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions', 2)
     symbol_universe = build_scanner_symbol_universe(bot_config)
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
-    fallback_slack = 0 if profile == 'small_account' or bot_config.get('managementState') == 'recovery' else 10
+    adaptive_offset = int(bot_config.get('adaptiveSignalThresholdOffset') or 0)
+    fallback_slack = 0 if profile == 'small_account' or bot_config.get('managementState') == 'recovery' else max(10, adaptive_offset)
     
     # 1. SCAN all symbols for opportunities
     opportunities = scan_all_opportunities(
@@ -10136,13 +10274,17 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         strategy_cache,
         symbol_universe=symbol_universe,
         fallback_slack=fallback_slack,
+        bot_config=bot_config,
+        allow_raw_signal_fallback=force_scan,
     )
     
     if opportunities:
-        top_3 = ', '.join([f"{o['symbol']}:{o['strength']:.0f}" for o in opportunities[:3]])
-        logger.info(f"🧠 Bot {bot_id} SCANNER: Top opportunities: {top_3} (of {len(opportunities)} qualifying)")
+        top_3 = ', '.join([f"{o['symbol']}:{o['strength']:.0f} [{o.get('source', 'strategy')}]" for o in opportunities[:3]])
+        scanner_mode = 'adaptive' if force_scan and not bot_config.get('intelligentScanner', False) else 'configured'
+        logger.info(f"🧠 Bot {bot_id} SCANNER[{scanner_mode}]: Top opportunities: {top_3} (of {len(opportunities)} qualifying)")
     else:
-        logger.info(f"🧠 Bot {bot_id} SCANNER: No qualifying opportunities across {len(symbol_universe)} symbols")
+        scanner_mode = 'adaptive' if force_scan and not bot_config.get('intelligentScanner', False) else 'configured'
+        logger.info(f"🧠 Bot {bot_id} SCANNER[{scanner_mode}]: No qualifying opportunities across {len(symbol_universe)} symbols")
         return bot_config.get('symbols', ['EURUSDm'])
     
     # 2. EVALUATE open positions for potential reallocation
@@ -10220,6 +10362,7 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         'timestamp': datetime.now().isoformat(),
         'totalScanned': len(symbol_universe),
         'qualifyingOpportunities': len(opportunities),
+        'scannerMode': 'adaptive' if force_scan and not bot_config.get('intelligentScanner', False) else ('always_on' if bot_config.get('intelligentScanner', False) else 'disabled'),
         'topOpportunities': [{'symbol': o['symbol'], 'strength': o['strength'], 'signal': o['signal'], 'trend': o['trend']} for o in opportunities[:5]],
         'closedForReallocation': len(tickets_to_close),
         'cycleSymbols': cycle_symbols,
@@ -10343,13 +10486,14 @@ PERSISTED_BOT_STATE_FIELDS = {
     'maxPositionsPerSymbol', 'profitLock', 'drawdownPausePercent', 'drawdownPauseHours',
     'allowedVolatility', 'autoSwitch', 'dynamicSizing', 'basePositionSize', 'managementMode',
     'managementProfile', 'managementState', 'signalThreshold', 'effectiveSignalThreshold',
+    'adaptiveSignalThresholdOffset', 'adaptiveSignalMissCount', 'adaptiveSignalThresholdReason',
     'effectiveMaxOpenPositions', 'effectiveMaxPositionsPerSymbol', 'effectiveAllowedVolatility',
     'displayCurrency', 'totalTrades', 'winningTrades', 'totalProfit', 'totalLosses',
     'totalInvestment', 'profitHistory', 'tradeHistory', 'dailyProfits', 'dailyProfit',
     'maxDrawdown', 'peakProfit', 'strategyHistory', 'lastStrategySwitch', 'volatilityLevel',
     'profit', 'drawdownPauseUntil', 'accountBalance', 'accountEquity', 'tradeAmount',
     'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode',
-    'profitProtection'
+    'profitProtection', 'symbolReentryCooldowns'
 }
 
 
@@ -10376,6 +10520,9 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'managementProfile': 'beginner',
         'managementState': 'normal',
         'signalThreshold': 70,
+        'adaptiveSignalThresholdOffset': 0,
+        'adaptiveSignalMissCount': 0,
+        'adaptiveSignalThresholdReason': None,
         'displayCurrency': 'USD',
         'totalTrades': 0,
         'winningTrades': 0,
@@ -10402,6 +10549,7 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'intelligentScanner': False,
         'lastScanResults': None,
         'profitProtection': dict(DEFAULT_PROFIT_PROTECTION_CONFIG),
+        'symbolReentryCooldowns': {},
     }
 
 
@@ -11227,6 +11375,25 @@ def should_trade_today(bot_config, symbol):
     drawdown_pause_hours = bot_config.get('drawdownPauseHours', 6.0) or 6.0
     today = datetime.now().strftime('%Y-%m-%d')
     now = datetime.now()
+
+    cooldowns = bot_config.get('symbolReentryCooldowns') or {}
+    cooldown_keys = [str(symbol or '').strip(), _normalize_symbol_base(symbol)]
+    for cooldown_key in cooldown_keys:
+        cooldown_entry = cooldowns.get(cooldown_key)
+        if not cooldown_entry:
+            continue
+        try:
+            cooldown_until = datetime.fromisoformat(str(cooldown_entry.get('until')))
+            if now < cooldown_until:
+                logger.info(
+                    f"[RISK] Bot {bot_config.get('botId')} protected-profit cooldown active for {symbol} until "
+                    f"{cooldown_until.isoformat()}, skipping re-entry."
+                )
+                return False
+            cooldowns.pop(cooldown_key, None)
+        except Exception:
+            cooldowns.pop(cooldown_key, None)
+
     daily_profit = bot_config.get('dailyProfits', {}).get(today, 0.0)
     if profit_lock > 0 and daily_profit >= profit_lock:
         logger.info(f"[RISK] Bot {bot_config.get('botId')} hit daily profit lock-in (${daily_profit:.2f} >= ${profit_lock:.2f}), pausing trading for today.")
@@ -13271,6 +13438,13 @@ BOT_RISK_LIMITS = {
     'drawdownPauseHours': (2.0, 12.0),
 }
 
+ADAPTIVE_SIGNAL_THRESHOLD_STEP = 5
+ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP = 10
+ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 15
+ADAPTIVE_SIGNAL_THRESHOLD_MIN = 45
+ADAPTIVE_SCANNER_TRIGGER_MISSES = 1
+ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 15
+
 BOT_MANAGEMENT_PROFILES = {
     'small_account': {
         'riskPerTrade': 5.0,          # 1% risk on scale (5/10 = 0.5%, ultra conservative)
@@ -13360,8 +13534,51 @@ DEFAULT_PROFIT_PROTECTION_CONFIG = {
     'activationPercent': 5.0,
     'activationMinProfit': 5.0,
     'minLockedProfit': 0.0,
-    'retraceClosePercent': 70.0,
+    'retraceClosePercent': 35.0,
     'switchOnReversal': True,
+    'adaptiveByVolatility': True,
+    'breakEvenLockEnabled': True,
+    'breakEvenBufferProfit': 1.5,
+    'breakEvenActivationShare': 0.5,
+    'protectedSymbolCooldownMinutes': 5.0,
+}
+
+PROFIT_PROTECTION_VOLATILITY_PROFILES = {
+    'very_low': {
+        'activationMinProfit': 5.0,
+        'minLockedProfit': 3.0,
+        'retraceClosePercent': 18.0,
+        'breakEvenBufferProfit': 1.0,
+        'breakEvenActivationShare': 0.4,
+    },
+    'low': {
+        'activationMinProfit': 5.0,
+        'minLockedProfit': 4.0,
+        'retraceClosePercent': 22.0,
+        'breakEvenBufferProfit': 1.5,
+        'breakEvenActivationShare': 0.45,
+    },
+    'medium': {
+        'activationMinProfit': 7.0,
+        'minLockedProfit': 5.0,
+        'retraceClosePercent': 25.0,
+        'breakEvenBufferProfit': 2.5,
+        'breakEvenActivationShare': 0.5,
+    },
+    'high': {
+        'activationMinProfit': 10.0,
+        'minLockedProfit': 7.0,
+        'retraceClosePercent': 30.0,
+        'breakEvenBufferProfit': 4.0,
+        'breakEvenActivationShare': 0.55,
+    },
+    'very_high': {
+        'activationMinProfit': 15.0,
+        'minLockedProfit': 10.0,
+        'retraceClosePercent': 35.0,
+        'breakEvenBufferProfit': 7.5,
+        'breakEvenActivationShare': 0.6,
+    },
 }
 
 DEFAULT_MILESTONE_WITHDRAWAL_PLAN = [
@@ -13400,7 +13617,128 @@ def _normalize_profit_protection_config(config: Optional[Dict[str, Any]]) -> Dic
     normalized['minLockedProfit'] = max(0.0, _safe_float(raw.get('minLockedProfit', raw.get('min_locked_profit', normalized['minLockedProfit'])), normalized['minLockedProfit']))
     normalized['retraceClosePercent'] = max(5.0, min(95.0, _safe_float(raw.get('retraceClosePercent', raw.get('retrace_close_percent', normalized['retraceClosePercent'])), normalized['retraceClosePercent'])))
     normalized['switchOnReversal'] = _coerce_bool(raw.get('switchOnReversal', raw.get('switch_on_reversal', normalized['switchOnReversal'])), normalized['switchOnReversal'])
+    normalized['adaptiveByVolatility'] = _coerce_bool(raw.get('adaptiveByVolatility', raw.get('adaptive_by_volatility', normalized['adaptiveByVolatility'])), normalized['adaptiveByVolatility'])
+    normalized['breakEvenLockEnabled'] = _coerce_bool(raw.get('breakEvenLockEnabled', raw.get('break_even_lock_enabled', normalized['breakEvenLockEnabled'])), normalized['breakEvenLockEnabled'])
+    normalized['breakEvenBufferProfit'] = max(0.0, _safe_float(raw.get('breakEvenBufferProfit', raw.get('break_even_buffer_profit', normalized['breakEvenBufferProfit'])), normalized['breakEvenBufferProfit']))
+    normalized['breakEvenActivationShare'] = max(0.1, min(1.0, _safe_float(raw.get('breakEvenActivationShare', raw.get('break_even_activation_share', normalized['breakEvenActivationShare'])), normalized['breakEvenActivationShare'])))
+    normalized['protectedSymbolCooldownMinutes'] = max(0.0, min(30.0, _safe_float(raw.get('protectedSymbolCooldownMinutes', raw.get('protected_symbol_cooldown_minutes', normalized['protectedSymbolCooldownMinutes'])), normalized['protectedSymbolCooldownMinutes'])))
     return normalized
+
+
+def _promote_profit_protection_bucket(bucket: str) -> str:
+    order = ['very_low', 'low', 'medium', 'high', 'very_high']
+    try:
+        return order[min(order.index(bucket) + 1, len(order) - 1)]
+    except ValueError:
+        return bucket
+
+
+def _demote_profit_protection_bucket(bucket: str) -> str:
+    order = ['very_low', 'low', 'medium', 'high', 'very_high']
+    try:
+        return order[max(order.index(bucket) - 1, 0)]
+    except ValueError:
+        return bucket
+
+
+def _classify_profit_protection_bucket(symbol: str, market_data: Optional[Dict[str, Any]] = None) -> str:
+    base_symbol = _normalize_symbol_base(symbol)
+    params = SYMBOL_PARAMETERS.get(base_symbol, DEFAULT_SYMBOL_PARAMS)
+    volatility_high = max(_safe_float(params.get('volatility_high'), 1.0), 0.01)
+    volatility_low = max(_safe_float(params.get('volatility_low'), 0.1), 0.0)
+    atr_multiplier = _safe_float(params.get('atr_multiplier'), 1.5)
+    live_volatility = max(_safe_float((market_data or {}).get('volatility_pct'), volatility_low), 0.0)
+
+    if base_symbol in {'BTCUSD', 'ETHUSD', 'TSLA', 'NVDA', 'AMD'}:
+        bucket = 'very_high'
+    elif atr_multiplier >= 1.7 or volatility_high >= 2.0:
+        bucket = 'high'
+    elif atr_multiplier >= 1.45 or volatility_high >= 0.8:
+        bucket = 'medium'
+    elif atr_multiplier <= 1.15 and volatility_high <= 0.15:
+        bucket = 'very_low'
+    else:
+        bucket = 'low'
+
+    if live_volatility >= volatility_high * 1.1:
+        bucket = _promote_profit_protection_bucket(bucket)
+    elif live_volatility <= max(volatility_low * 1.05, 0.01):
+        bucket = _demote_profit_protection_bucket(bucket)
+
+    return bucket
+
+
+def _resolve_profit_protection_for_symbol(
+    bot_config: Dict[str, Any],
+    symbol: str,
+    market_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    normalized = _normalize_profit_protection_config(bot_config.get('profitProtection'))
+    resolved = dict(normalized)
+    resolved['volatilityBucket'] = None
+
+    if not normalized.get('adaptiveByVolatility', True):
+        return resolved
+
+    bucket = _classify_profit_protection_bucket(symbol, market_data)
+    profile = PROFIT_PROTECTION_VOLATILITY_PROFILES.get(bucket, PROFIT_PROTECTION_VOLATILITY_PROFILES['medium'])
+    resolved['activationMinProfit'] = max(
+        _safe_float(normalized.get('activationMinProfit'), 0.0),
+        _safe_float(profile.get('activationMinProfit'), 0.0),
+    )
+    resolved['minLockedProfit'] = max(
+        _safe_float(normalized.get('minLockedProfit'), 0.0),
+        _safe_float(profile.get('minLockedProfit'), 0.0),
+    )
+    resolved['retraceClosePercent'] = min(
+        _safe_float(normalized.get('retraceClosePercent'), 35.0),
+        _safe_float(profile.get('retraceClosePercent'), 35.0),
+    )
+    resolved['breakEvenBufferProfit'] = max(
+        _safe_float(normalized.get('breakEvenBufferProfit'), 0.0),
+        _safe_float(profile.get('breakEvenBufferProfit'), 0.0),
+    )
+    resolved['breakEvenActivationShare'] = max(
+        _safe_float(normalized.get('breakEvenActivationShare'), 0.5),
+        _safe_float(profile.get('breakEvenActivationShare'), 0.5),
+    )
+
+    account_balance = max(
+        _safe_float(bot_config.get('accountBalance'), 0.0),
+        _safe_float(bot_config.get('accountEquity'), 0.0),
+    )
+    account_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
+    small_account_threshold = _get_small_live_account_threshold(account_currency)
+    is_small_account = _normalize_management_profile(bot_config.get('managementProfile')) == 'small_account'
+    base_symbol = _normalize_symbol_base(symbol)
+    if is_small_account and account_balance > 0 and account_balance <= small_account_threshold * 1.5 and base_symbol in {'BTCUSD', 'ETHUSD'}:
+        resolved['retraceClosePercent'] = min(_safe_float(resolved.get('retraceClosePercent'), 35.0), 20.0)
+        resolved['breakEvenBufferProfit'] = max(_safe_float(resolved.get('breakEvenBufferProfit'), 0.0), 4.0 if base_symbol == 'BTCUSD' else 2.5)
+        resolved['breakEvenActivationShare'] = min(_safe_float(resolved.get('breakEvenActivationShare'), 0.5), 0.4)
+        resolved['protectedSymbolCooldownMinutes'] = max(_safe_float(resolved.get('protectedSymbolCooldownMinutes'), 5.0), 8.0)
+
+    resolved['volatilityBucket'] = bucket
+    return resolved
+
+
+def _set_symbol_reentry_cooldown(
+    bot_config: Dict[str, Any],
+    symbol: str,
+    minutes: float,
+    reason: str,
+) -> Optional[str]:
+    if minutes <= 0:
+        return None
+
+    cooldown_until = (datetime.now() + timedelta(minutes=minutes)).isoformat()
+    exact_symbol = str(symbol or '').strip()
+    base_symbol = _normalize_symbol_base(symbol)
+    cooldowns = bot_config.setdefault('symbolReentryCooldowns', {})
+    if exact_symbol:
+        cooldowns[exact_symbol] = {'until': cooldown_until, 'reason': reason, 'baseSymbol': base_symbol}
+    if base_symbol:
+        cooldowns[base_symbol] = {'until': cooldown_until, 'reason': reason, 'baseSymbol': base_symbol}
+    return cooldown_until
 
 
 def _normalize_milestone_withdrawal_plan(raw_plan: Any) -> List[Dict[str, float]]:
@@ -13476,7 +13814,6 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
     if not tracked_positions or not current_positions:
         return []
 
-    activation_amount = _profit_protection_activation_amount(bot_config, protection_config)
     protection_events = []
 
     for current_position in current_positions:
@@ -13485,18 +13822,33 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
             continue
 
         tracked = tracked_positions[ticket]
+        symbol = tracked.get('symbol', current_position.get('symbol', ''))
+        symbol_market_data = _get_market_data_for_symbol(symbol)
+        effective_protection = _resolve_profit_protection_for_symbol(bot_config, symbol, symbol_market_data)
+        activation_amount = _profit_protection_activation_amount(bot_config, effective_protection)
+        break_even_activation_amount = max(
+            _safe_float(effective_protection.get('breakEvenBufferProfit'), 0.0) * 2.0,
+            activation_amount * _safe_float(effective_protection.get('breakEvenActivationShare'), 0.5),
+        )
         current_profit = round(_safe_float(current_position.get('profit', current_position.get('pnl', tracked.get('profit', 0.0))), 0.0), 2)
         tracked['profit'] = current_profit
         tracked['currentPrice'] = current_position.get('currentPrice') or current_position.get('marketPrice') or current_position.get('price_current') or tracked.get('currentPrice', 0)
         tracked['peakProfit'] = round(max(_safe_float(tracked.get('peakProfit'), 0.0), current_profit), 2)
+        tracked['profitProtectionBucket'] = effective_protection.get('volatilityBucket')
 
         if tracked['peakProfit'] >= activation_amount:
             tracked['profitProtectionArmed'] = True
             protected_floor = max(
-                _safe_float(protection_config.get('minLockedProfit'), 0.0),
-                tracked['peakProfit'] * (1.0 - (_safe_float(protection_config.get('retraceClosePercent'), 70.0) / 100.0)),
+                _safe_float(effective_protection.get('minLockedProfit'), 0.0),
+                tracked['peakProfit'] * (1.0 - (_safe_float(effective_protection.get('retraceClosePercent'), 35.0) / 100.0)),
             )
             tracked['lockedProfitFloor'] = round(max(0.0, min(protected_floor, tracked['peakProfit'])), 2)
+
+        if effective_protection.get('breakEvenLockEnabled') and tracked['peakProfit'] >= break_even_activation_amount:
+            break_even_floor = round(max(0.0, _safe_float(effective_protection.get('breakEvenBufferProfit'), 0.0)), 2)
+            tracked['breakEvenLocked'] = True
+            tracked['breakEvenFloor'] = break_even_floor
+            tracked['lockedProfitFloor'] = round(max(_safe_float(tracked.get('lockedProfitFloor'), 0.0), break_even_floor), 2)
 
         if not tracked.get('profitProtectionArmed') or _recent_close_request(tracked):
             continue
@@ -13508,7 +13860,7 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
 
         if current_profit <= locked_floor:
             close_reason = 'PROFIT_RETRACE'
-        elif protection_config.get('switchOnReversal') and current_profit > 0 and _signal_reversed_for_position(tracked.get('type', ''), current_signal):
+        elif effective_protection.get('switchOnReversal') and current_profit > 0 and _signal_reversed_for_position(tracked.get('type', ''), current_signal):
             close_reason = 'LOCKED_PROFIT_SIGNAL_REVERSAL'
         elif tracked['peakProfit'] >= activation_amount and current_profit <= 0:
             close_reason = 'BREAK_EVEN_FAILURE'
@@ -13528,16 +13880,25 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
                 tracked['closeRequestedAt'] = datetime.now().isoformat()
                 tracked['closeReason'] = close_reason
                 tracked['status'] = 'closing'
+                cooldown_until = _set_symbol_reentry_cooldown(
+                    bot_config,
+                    tracked.get('symbol', ''),
+                    _safe_float(effective_protection.get('protectedSymbolCooldownMinutes'), 5.0),
+                    close_reason,
+                )
                 protection_events.append({
                     'ticket': ticket,
                     'symbol': tracked.get('symbol', ''),
                     'reason': close_reason,
                     'profit': current_profit,
                     'lockedProfitFloor': locked_floor,
+                    'breakEvenFloor': _safe_float(tracked.get('breakEvenFloor'), 0.0),
+                    'cooldownUntil': cooldown_until,
                 })
                 logger.info(
                     f"🛡️ Bot {bot_id}: Closed protected winner {tracked.get('symbol')} (ticket {ticket}) "
-                    f"at {current_profit:.2f} due to {close_reason} with floor {locked_floor:.2f}"
+                    f"at {current_profit:.2f} due to {close_reason} with floor {locked_floor:.2f} "
+                    f"[{effective_protection.get('volatilityBucket') or 'manual'}]"
                 )
             else:
                 logger.warning(f"🛡️ Bot {bot_id}: Failed to close protected position {tracked.get('symbol')}: {result.get('error')}")
@@ -13808,6 +14169,66 @@ def _normalize_management_profile(raw_profile) -> str:
     return profile
 
 
+def _reset_adaptive_signal_threshold(bot_config: Dict[str, Any]) -> bool:
+    had_adaptive_state = any(
+        [
+            int(bot_config.get('adaptiveSignalThresholdOffset') or 0) > 0,
+            int(bot_config.get('adaptiveSignalMissCount') or 0) > 0,
+            bool(bot_config.get('adaptiveSignalThresholdReason')),
+        ]
+    )
+    bot_config['adaptiveSignalThresholdOffset'] = 0
+    bot_config['adaptiveSignalMissCount'] = 0
+    bot_config['adaptiveSignalThresholdReason'] = None
+    return had_adaptive_state
+
+
+def update_adaptive_signal_threshold_state(
+    bot_id: str,
+    bot_config: Dict[str, Any],
+    base_threshold: int,
+    best_signal_strength: float,
+    configured_signal_hits: int,
+    scanner_signal_hits: int,
+    trades_placed: int,
+    open_positions: int,
+) -> None:
+    if bot_config.get('managementState') == 'recovery':
+        if _reset_adaptive_signal_threshold(bot_config):
+            logger.info(
+                f"🛡️ Bot {bot_id}: Adaptive threshold reset while recovery mode is active "
+                f"(base threshold restored to {base_threshold})"
+            )
+        return
+
+    has_qualifying_signal = configured_signal_hits > 0 or scanner_signal_hits > 0
+    if trades_placed > 0 or has_qualifying_signal or open_positions > 0:
+        if _reset_adaptive_signal_threshold(bot_config):
+            logger.info(
+                f"🎯 Bot {bot_id}: Adaptive threshold reset to base {base_threshold} "
+                f"after {'trade execution' if trades_placed > 0 else 'signal recovery'}"
+            )
+        return
+
+    miss_count = int(bot_config.get('adaptiveSignalMissCount') or 0) + 1
+    current_offset = int(bot_config.get('adaptiveSignalThresholdOffset') or 0)
+    signal_gap = max(0.0, float(base_threshold) - float(best_signal_strength or 0.0))
+    reduction_step = ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP if signal_gap >= 10.0 else ADAPTIVE_SIGNAL_THRESHOLD_STEP
+    new_offset = min(ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION, current_offset + reduction_step)
+
+    bot_config['adaptiveSignalMissCount'] = miss_count
+    bot_config['adaptiveSignalThresholdOffset'] = new_offset
+    bot_config['adaptiveSignalThresholdReason'] = 'no_qualifying_signal'
+
+    if new_offset != current_offset:
+        lowered_threshold = max(ADAPTIVE_SIGNAL_THRESHOLD_MIN, base_threshold - new_offset)
+        logger.info(
+            f"📉 Bot {bot_id}: No qualifying signals for {miss_count} cycle(s) - "
+            f"best raw signal was {best_signal_strength:.0f}/100, reducing threshold by {reduction_step} "
+            f"for next cycle ({base_threshold} -> {lowered_threshold})"
+        )
+
+
 def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str, Any]:
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
     is_assisted = bot_config.get('managementMode', 'assisted') != 'manual'
@@ -13860,6 +14281,10 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
             bot_config['managementState'] = 'normal'
     else:
         bot_config['managementState'] = 'manual'
+
+    adaptive_offset = int(bot_config.get('adaptiveSignalThresholdOffset') or 0)
+    if adaptive_offset > 0 and bot_config.get('managementState') != 'recovery':
+        effective['signalThreshold'] = max(ADAPTIVE_SIGNAL_THRESHOLD_MIN, effective['signalThreshold'] - adaptive_offset)
 
     bot_config['effectiveSignalThreshold'] = effective['signalThreshold']
     bot_config['effectiveMaxOpenPositions'] = effective['maxOpenPositions']
@@ -15128,11 +15553,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 
                 # ENHANCED LOGGING: Log signal evaluation for ALL symbols upfront
                 management_state = apply_assisted_management_overrides(bot_config)
+                base_signal_threshold = max(int(bot_config.get('signalThreshold', 70) or 70), ADAPTIVE_SIGNAL_THRESHOLD_MIN)
                 signal_threshold = management_state['signalThreshold']
                 strategy_cache: Dict[str, Optional[Dict[str, Any]]] = {}
                 signal_summary = []
+                best_signal_strength = 0.0
+                configured_signal_hits = 0
                 for eval_symbol in symbols:
-                    eval_market_data = _get_market_data_for_symbol(eval_symbol)
+                    eval_market_data = _enrich_market_data_with_bot_context(bot_config, eval_symbol)
+                    eval_signal = evaluate_real_trade_signal(eval_symbol, eval_market_data)
                     eval_params = _get_cached_strategy_params(
                         strategy_cache,
                         strategy_func,
@@ -15141,19 +15570,38 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         bot_config['riskPerTrade'],
                         eval_market_data,
                     )
-                    signal_score = eval_params.get('signal', {}).get('strength', 0) if eval_params else 0
+                    signal_score = eval_signal.get('strength', 0)
+                    best_signal_strength = max(best_signal_strength, float(signal_score or 0.0))
+                    signal_label = eval_signal.get('signal', 'NEUTRAL')
+                    if eval_params:
+                        configured_signal_hits += 1
                     status = "✅" if eval_params and signal_score >= signal_threshold else "⏭️"
-                    signal_summary.append(f"{eval_symbol}:{signal_score:.0f}")
+                    signal_summary.append(f"{status}{eval_symbol}:{signal_score:.0f} {signal_label}")
                 
                 logger.info(f"📊 Bot {bot_id} Cycle #{trade_cycle}: Signal check: {' | '.join(signal_summary)} (threshold: {signal_threshold}/100)")
                 
                 # ==================== INTELLIGENT SCANNER & REALLOCATION ====================
                 # If enabled, scan ALL symbols, close weak positions, and trade the best ones
-                if bot_config.get('intelligentScanner', False):
+                adaptive_scanner_active = (
+                    not bot_config.get('open_positions')
+                    and (
+                        bot_config.get('intelligentScanner', False)
+                        or int(bot_config.get('adaptiveSignalMissCount') or 0) >= ADAPTIVE_SCANNER_TRIGGER_MISSES
+                        or configured_signal_hits == 0
+                    )
+                )
+                if adaptive_scanner_active and not bot_config.get('intelligentScanner', False):
+                    logger.info(f"🧠 Bot {bot_id}: Adaptive scanner engaged for this cycle because assigned symbols produced no qualifying setup")
+
+                if adaptive_scanner_active:
                     symbols = execute_intelligent_reallocation(
                         bot_id, bot_config, active_conn, is_mt5, mt5_conn,
-                        strategy_func, signal_threshold, broker_type, strategy_cache
+                        strategy_func, signal_threshold, broker_type, strategy_cache,
+                        force_scan=not bot_config.get('intelligentScanner', False),
                     )
+                scanner_signal_hits = 0
+                if adaptive_scanner_active:
+                    scanner_signal_hits = int((bot_config.get('lastScanResults') or {}).get('qualifyingOpportunities') or 0)
                 
                 trades_this_cycle = 0
                 for symbol in symbols:
@@ -15202,7 +15650,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         else:
                             position_size = bot_config.get('basePositionSize', 1.0)
                         
-                        market_data = _get_market_data_for_symbol(symbol)
+                        market_data = _enrich_market_data_with_bot_context(bot_config, symbol)
 
                         if fixed_trade_amount and mt5_api is None:
                             fixed_trade_volume, volume_details = estimate_fixed_trade_volume(
@@ -15225,7 +15673,14 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         
                         # Skip trade if signal strength is too low
                         if trade_params is None:
-                            logger.info(f"⏭️ Bot {bot_id}: Skipping {symbol} - signal strength insufficient")
+                            raw_signal = evaluate_real_trade_signal(symbol, market_data)
+                            logger.info(
+                                f"⏭️ Bot {bot_id}: Skipping {symbol} - "
+                                f"signal={raw_signal.get('signal', 'NEUTRAL')} "
+                                f"strength={raw_signal.get('strength', 0):.0f}/100 "
+                                f"trend={raw_signal.get('trend', 'UNKNOWN')} "
+                                f"reason={raw_signal.get('entry_reason', 'Rejected by strategy')}"
+                            )
                             continue
                         
                         adjusted_volume = fixed_trade_volume if fixed_trade_volume is not None else trade_params['volume'] * position_size
@@ -15953,12 +16408,26 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 except Exception as e:
                     logger.warning(f"Bot {bot_id}: Could not update account balance: {e}")
 
+                open_pos_count = len(bot_config.get('open_positions', {}))
+                update_adaptive_signal_threshold_state(
+                    bot_id,
+                    bot_config,
+                    base_signal_threshold,
+                    best_signal_strength,
+                    configured_signal_hits,
+                    scanner_signal_hits,
+                    trades_placed,
+                    open_pos_count,
+                )
                 persist_bot_runtime_state(bot_id)
                 
                 # Log cycle summary with position status for debugging
-                open_pos_count = len(bot_config.get('open_positions', {}))
                 display_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
-                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Open positions: {open_pos_count} | Total P&L: {bot_config.get('totalProfit', 0):.2f} {display_currency}")
+                adaptive_offset = int(bot_config.get('adaptiveSignalThresholdOffset') or 0)
+                adaptive_note = ''
+                if adaptive_offset > 0:
+                    adaptive_note = f" | Next threshold: {max(ADAPTIVE_SIGNAL_THRESHOLD_MIN, base_signal_threshold - adaptive_offset)}/{base_signal_threshold}"
+                logger.info(f"✅ Bot {bot_id}: Cycle #{trade_cycle} complete | Trades placed: {trades_placed} | Open positions: {open_pos_count} | Total P&L: {bot_config.get('totalProfit', 0):.2f} {display_currency}{adaptive_note}")
                 
                 # DUAL MODE: TIME-BASED vs SIGNAL-DRIVEN waiting
                 if trading_mode == 'signal-driven':
@@ -15967,8 +16436,31 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     
                     poll_elapsed = 0
                     while not bot_stop_flags.get(bot_id, False) and poll_elapsed < trading_interval:
-                        time.sleep(poll_interval)
-                        poll_elapsed += poll_interval
+                        actual_poll_interval = min(poll_interval, 5) if bot_config.get('open_positions') else poll_interval
+                        time.sleep(actual_poll_interval)
+                        poll_elapsed += actual_poll_interval
+
+                        if bot_config.get('open_positions'):
+                            try:
+                                if is_mt5 and mt5_conn:
+                                    polled_positions = mt5_conn.get_positions()
+                                elif active_conn:
+                                    polled_positions = active_conn.get_positions()
+                                else:
+                                    polled_positions = []
+
+                                protection_events = manage_protected_open_positions(
+                                    bot_id,
+                                    bot_config,
+                                    polled_positions or [],
+                                    active_conn,
+                                    is_mt5,
+                                    mt5_conn,
+                                )
+                                if protection_events:
+                                    persist_bot_runtime_state(bot_id)
+                            except Exception as protection_poll_error:
+                                logger.debug(f"🛡️ Bot {bot_id}: Profit protection poll failed: {protection_poll_error}")
                         
                         # Check if strong signal exists for any symbol
                         best_signal_strength = 0
@@ -16847,6 +17339,33 @@ def bot_summary():
                     'entryPrice': pos.get('entryPrice') or pos.get('price'),
                     'currentPrice': pos.get('currentPrice'),
                     'profit': pos.get('profit'),
+                    'lockedProfitFloor': round(_safe_float(pos.get('lockedProfitFloor'), 0.0), 2),
+                    'breakEvenFloor': round(_safe_float(pos.get('breakEvenFloor'), 0.0), 2),
+                    'profitProtectionArmed': bool(pos.get('profitProtectionArmed', False)),
+                    'profitProtectionBucket': pos.get('profitProtectionBucket'),
+                })
+
+            active_symbol_cooldowns = []
+            cooldowns = bot.get('symbolReentryCooldowns') or {}
+            seen_cooldowns = set()
+            for cooldown_key, cooldown_entry in cooldowns.items():
+                if not isinstance(cooldown_entry, dict):
+                    continue
+                until_raw = cooldown_entry.get('until')
+                try:
+                    until_dt = datetime.fromisoformat(str(until_raw))
+                except Exception:
+                    continue
+                if until_dt <= datetime.now():
+                    continue
+                base_symbol = cooldown_entry.get('baseSymbol') or cooldown_key
+                if base_symbol in seen_cooldowns:
+                    continue
+                seen_cooldowns.add(base_symbol)
+                active_symbol_cooldowns.append({
+                    'symbol': base_symbol,
+                    'until': until_dt.isoformat(),
+                    'reason': cooldown_entry.get('reason'),
                 })
 
             bots_list.append({
@@ -16890,6 +17409,7 @@ def bot_summary():
                 'accountEquity': round(bot.get('accountEquity', 0), 2),
                 'openPositionsCount': len(open_positions),
                 'openPositionsPreview': open_positions_preview,
+                'activeSymbolCooldowns': active_symbol_cooldowns,
                 'createdAt': created_at,
             })
 
@@ -16966,6 +17486,40 @@ def get_bot_analytics_snapshot(bot_id: str):
         trade_history = bot.get('tradeHistory', [])
         last_trade_time = trade_history[-1].get('time') if trade_history else bot.get('createdAt', datetime.now().isoformat())
 
+        open_positions_payload = []
+        for pos in open_positions:
+            open_positions_payload.append({
+                **pos,
+                'profit': round(_safe_float(pos.get('profit'), 0.0), 2),
+                'lockedProfitFloor': round(_safe_float(pos.get('lockedProfitFloor'), 0.0), 2),
+                'breakEvenFloor': round(_safe_float(pos.get('breakEvenFloor'), 0.0), 2),
+                'profitProtectionArmed': bool(pos.get('profitProtectionArmed', False)),
+                'profitProtectionBucket': pos.get('profitProtectionBucket'),
+            })
+
+        active_symbol_cooldowns = []
+        cooldowns = bot.get('symbolReentryCooldowns') or {}
+        seen_cooldowns = set()
+        for cooldown_key, cooldown_entry in cooldowns.items():
+            if not isinstance(cooldown_entry, dict):
+                continue
+            until_raw = cooldown_entry.get('until')
+            try:
+                until_dt = datetime.fromisoformat(str(until_raw))
+            except Exception:
+                continue
+            if until_dt <= datetime.now():
+                continue
+            base_symbol = cooldown_entry.get('baseSymbol') or cooldown_key
+            if base_symbol in seen_cooldowns:
+                continue
+            seen_cooldowns.add(base_symbol)
+            active_symbol_cooldowns.append({
+                'symbol': base_symbol,
+                'until': until_dt.isoformat(),
+                'reason': cooldown_entry.get('reason'),
+            })
+
         return jsonify({
             'success': True,
             'bot': {
@@ -17013,9 +17567,11 @@ def get_bot_analytics_snapshot(bot_id: str):
                 'profitField': round(current_profit, 2),
                 'tradeHistory': trade_history,
                 'dailyProfits': daily_profits,
-                'openPositions': open_positions,
+                'openPositions': open_positions_payload,
                 'accountBalance': round(bot.get('accountBalance', 0), 2),
                 'accountEquity': round(bot.get('accountEquity', 0), 2),
+                'activeSymbolCooldowns': active_symbol_cooldowns,
+                'profitProtection': _normalize_profit_protection_config(bot.get('profitProtection')),
             },
             'timestamp': datetime.now().isoformat(),
         }), 200

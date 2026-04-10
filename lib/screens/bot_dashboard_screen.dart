@@ -594,6 +594,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
       ? null
       : DateTime.tryParse(drawdownPauseUntilText);
     final isCoolingDown = drawdownPauseUntil != null && drawdownPauseUntil.isAfter(DateTime.now());
+    final activeSymbolCooldowns = (bot['activeSymbolCooldowns'] as List?) ?? [];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -894,6 +895,30 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     ],
                   ],
                 ),
+                if ((pos['profitProtectionArmed'] == true) || (pos['lockedProfitFloor'] != null) || (pos['breakEvenFloor'] != null)) ...[
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (pos['profitProtectionBucket'] != null)
+                        _buildProtectionChip(
+                          'Protect ${pos['profitProtectionBucket']}',
+                          const Color(0xFF26A69A),
+                        ),
+                      if ((double.tryParse(pos['lockedProfitFloor']?.toString() ?? '0') ?? 0) > 0)
+                        _buildProtectionChip(
+                          'Floor ${_formatAmount(currencyProvider, double.tryParse(pos['lockedProfitFloor']?.toString() ?? '0') ?? 0, currencyCode: displayCurrency)}',
+                          const Color(0xFF26A69A),
+                        ),
+                      if ((double.tryParse(pos['breakEvenFloor']?.toString() ?? '0') ?? 0) > 0)
+                        _buildProtectionChip(
+                          'BE+ ${_formatAmount(currencyProvider, double.tryParse(pos['breakEvenFloor']?.toString() ?? '0') ?? 0, currencyCode: displayCurrency)}',
+                          const Color(0xFF42A5F5),
+                        ),
+                    ],
+                  ),
+                ],
               );
             }),
             if (openPositionsCount > 5)
@@ -904,6 +929,20 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
                 ),
               ),
+            if (activeSymbolCooldowns.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: activeSymbolCooldowns.take(3).map((cooldown) {
+                  final cooldownUntil = DateTime.tryParse(cooldown['until']?.toString() ?? '');
+                  final label = cooldownUntil == null
+                      ? '${cooldown['symbol']} cooldown'
+                      : '${cooldown['symbol']} until ${DateFormat('HH:mm').format(cooldownUntil.toLocal())}';
+                  return _buildProtectionChip(label, const Color(0xFFFFA726));
+                }).toList(),
+              ),
+            ],
           ],
           const SizedBox(height: 14),
           Row(
@@ -1076,6 +1115,25 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildProtectionChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.4)),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
