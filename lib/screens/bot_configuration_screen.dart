@@ -1507,8 +1507,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
       // Force-refresh bot list before navigating
       final botService = Provider.of<BotService>(context, listen: false);
-      final tradingMode = await _currentTradingMode();
-      await botService.fetchActiveBots(tradingMode: tradingMode, force: true);
+      final currentTradingMode = await _currentTradingMode();
+      await botService.fetchActiveBots(
+        tradingMode: currentTradingMode,
+        force: true,
+      );
 
       // Show success snackbar immediately
       if (mounted) {
