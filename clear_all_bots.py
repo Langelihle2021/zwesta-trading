@@ -122,9 +122,7 @@ def clear_all_bots(user_id=None):
             cursor.execute('DELETE FROM user_bots')
         
         conn.commit()
-        affected = cursor.total_changes
         conn.close()
-        
         print(f"✅ Deleted successfully!")
         return True
     

@@ -10188,96 +10188,90 @@ def initialize_demo_bots():
             'strategy': bot_config['strategy'],
             'riskPerTrade': bot_config['riskPerTrade'],
             'maxDailyLoss': bot_config['maxDailyLoss'],
-            'enabled': bot_config['enabled'],
-            'autoSwitch': bot_config['autoSwitch'],
-            'dynamicSizing': bot_config['dynamicSizing'],
-            'basePositionSize': bot_config['basePositionSize'],
-            'totalTrades': 0,
-            'winningTrades': 0,
-            'totalProfit': 0,
-            'totalLosses': 0,
-            'totalInvestment': 0,
-            'createdAt': now.isoformat(),
-            'startTime': now.isoformat(),
-            'profitHistory': [],
-            'tradeHistory': [],
-            'dailyProfits': {},
-            'maxDrawdown': 0,
-            'peakProfit': 0,
-            'strategyHistory': [],
-            'lastStrategySwitch': now.isoformat(),
-            'volatilityLevel': 'Medium',
-        }
-        logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
 
-
-PERSISTED_BOT_STATE_FIELDS = {
-    'accountBalance',
-    'accountId',
-    'allowedVolatility',
-    'autoSwitch',
-    'basePositionSize',
-    'botId',
-    'brokerName',
-    'broker_type',
-    'createdAt',
-    'credentialId',
-    'dailyProfit',
-    'dailyProfits',
-    'displayCurrency',
-    'drawdownPauseHours',
-    'drawdownPausePercent',
-    'drawdownPauseUntil',
-    'dynamicSizing',
-    'enabled',
-    'lastStrategySwitch',
-    'maxDailyLoss',
-    'maxDrawdown',
-    'maxOpenPositions',
-    'maxPositionsPerSymbol',
-    'managementMode',
-    'managementProfile',
-    'managementState',
-    'mode',
-    'name',
-    'peakProfit',
-    'profit',
-    'profitHistory',
-    'profitLock',
-    'riskPerTrade',
-    'signalThreshold',
-    'startTime',
-    'strategy',
-    'strategyHistory',
-    'symbols',
-    'open_positions',
-    'totalInvestment',
-    'totalLosses',
-    'totalProfit',
-    'totalTrades',
-    'tradeHistory',
-    'tradeAmount',
-    'intelligentScanner',
-    'lastScanResults',
-    'user_id',
-    'volatilityLevel',
-    'winningTrades',
-}
-
-
-def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
-    created_at = row['created_at'] or datetime.now().isoformat()
-    daily_profit = float(row['daily_profit'] or 0.0)
-    total_profit = float(row['total_profit'] or 0.0)
-
-    return {
-        'botId': row['bot_id'],
-        'user_id': row['user_id'],
-        'name': row['name'],
-        'accountId': row['broker_account_id'],
-        'credentialId': row['credential_id'],
-        'brokerName': row['broker_name'],
-        'broker_type': row['broker_name'] or 'MT5',
+                # Initialize demo bots on startup using VALID_SYMBOLS
+                valid_symbols_list = sorted(list(VALID_SYMBOLS))
+                symbols_per_bot = len(valid_symbols_list) // 3
+                forex_symbols = [s for s in valid_symbols_list if s in ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD', 'USDSEK']]
+                metals_symbols = [s for s in valid_symbols_list if s in ['XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD']]
+                crypto_stock_symbols = [s for s in valid_symbols_list if s in ['BTCUSD', 'ETHUSD', 'XNIUSD', 'NVDA', 'AMD', 'INTC']]
+                # Ensure we have symbols for each bot, fallback to evenly distributed if needed
+                if not forex_symbols:
+                    forex_symbols = valid_symbols_list[:symbols_per_bot]
+                if not metals_symbols:
+                    metals_symbols = valid_symbols_list[symbols_per_bot:2*symbols_per_bot]
+                if not crypto_stock_symbols:
+                    crypto_stock_symbols = valid_symbols_list[2*symbols_per_bot:]
+    
+                demo_bots_config = [
+                    {
+                        'botId': 'DemoBot_EURUSD_TrendFollow',
+                        'accountId': 'Demo MT5 - XM Global',
+                        'symbols': forex_symbols if forex_symbols else valid_symbols_list[:max(1, len(valid_symbols_list)//3)],
+                        'strategy': 'Trend Following',
+                        'riskPerTrade': 100,
+                        'maxDailyLoss': 500,
+                        'enabled': True,
+                        'autoSwitch': True,
+                        'dynamicSizing': True,
+                        'basePositionSize': 1.0
+                    },
+                    {
+                        'botId': 'DemoBot_Commodities_MeanReversion',
+                        'accountId': 'Demo MT5 - XM Global',
+                        'symbols': metals_symbols if metals_symbols else valid_symbols_list[max(1, len(valid_symbols_list)//3):max(2, 2*len(valid_symbols_list)//3)],
+                        'strategy': 'Mean Reversion',
+                        'riskPerTrade': 75,
+                        'maxDailyLoss': 400,
+                        'enabled': True,
+                        'autoSwitch': True,
+                        'dynamicSizing': True,
+                        'basePositionSize': 0.8
+                    },
+                    {
+                        'botId': 'DemoBot_Crypto_AlternativeAssets',
+                        'accountId': 'Demo MT5 - XM Global',
+                        'symbols': crypto_stock_symbols if crypto_stock_symbols else valid_symbols_list[max(2, 2*len(valid_symbols_list)//3):],
+                        'strategy': 'Momentum Trading',
+                        'riskPerTrade': 80,
+                        'maxDailyLoss': 450,
+                        'enabled': True,
+                        'autoSwitch': True,
+                        'dynamicSizing': True,
+                        'basePositionSize': 0.9
+                    }
+                ]
+    
+                for bot_config in demo_bots_config:
+                    now = datetime.now()
+                    active_bots[bot_config['botId']] = {
+                        'botId': bot_config['botId'],
+                        'accountId': bot_config['accountId'],
+                        'symbols': bot_config['symbols'],
+                        'strategy': bot_config['strategy'],
+                        'riskPerTrade': bot_config['riskPerTrade'],
+                        'maxDailyLoss': bot_config['maxDailyLoss'],
+                        'enabled': bot_config['enabled'],
+                        'autoSwitch': bot_config['autoSwitch'],
+                        'dynamicSizing': bot_config['dynamicSizing'],
+                        'basePositionSize': bot_config['basePositionSize'],
+                        'totalTrades': 0,
+                        'winningTrades': 0,
+                        'totalProfit': 0,
+                        'totalLosses': 0,
+                        'totalInvestment': 0,
+                        'createdAt': now.isoformat(),
+                        'startTime': now.isoformat(),
+                        'profitHistory': [],
+                        'tradeHistory': [],
+                        'dailyProfits': {},
+                        'maxDrawdown': 0,
+                        'peakProfit': 0,
+                        'strategyHistory': [],
+                        'lastStrategySwitch': now.isoformat(),
+                        'volatilityLevel': 'Medium',
+                    }
+                    logger.info(f"Initialized demo bot: {bot_config['botId']} ({bot_config['strategy']})")
         'mode': 'live' if row['is_live'] else 'demo',
         'symbols': row['symbols'].split(',') if row['symbols'] else ['EURUSDm'],
         'strategy': row['strategy'],
@@ -22228,10 +22222,9 @@ if __name__ == '__main__':
     else:
         logger.info("[STARTUP] MT5 startup warm-up disabled; backend will not open MT5 automatically on boot")
     
-    # Initialize demo bots on startup (DISABLED for production cleanup)
-    # logger.info("Initializing demo trading bots...")
-    # initialize_demo_bots()
-    # logger.info(f"[OK] {len(active_bots)} demo bots initialized and ready")
+    # Demo/sample bot auto-creation is DISABLED for production safety.
+    # Only bots restored from the database will be loaded on startup.
+    # To re-enable demo bots, restore the initialize_demo_bots() function and call it here (not recommended for production).
     
     # Repopulate active bots from database
     repopulate_active_bots()
