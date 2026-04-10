@@ -32,14 +32,13 @@ jobs:
       
       - name: Clear all caches
         run: |
-          rm -f pubspec.lock
           rm -rf ~/.gradle
           rm -rf android/.gradle
           flutter clean
           flutter pub cache clean --force
       
       - name: Get dependencies
-        run: 'flutter pub get'
+        run: 'flutter pub get --enforce-lockfile'
       
       - name: Build APK
         run: 'flutter build apk --release --verbose'
@@ -57,7 +56,6 @@ jobs:
           files: build/app/outputs/flutter-apk/app-release.apk
           tag_name: apk-${{ github.run_number }}
           body: Build ${{ github.run_number }} - Zwesta Trading System APK
-          makeLatest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       

@@ -32,7 +32,6 @@ jobs:
     
     - name: Clear all caches
       run: |
-        rm -f pubspec.lock
         rm -rf ~/.gradle
         rm -rf android/.gradle
         rm -rf build/
@@ -41,7 +40,7 @@ jobs:
       shell: bash
     
     - name: Get dependencies
-      run: flutter pub get
+      run: flutter pub get --enforce-lockfile
     
     - name: Build APK
       run: flutter build apk --release --verbose
