@@ -13327,6 +13327,27 @@ SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
 SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'EURUSDm', 'USDCHFm', 'USDCADm']
 
 
+def _default_strategy_trading_cadence(strategy_name: str, management_profile: str, intelligent_scanner: bool = False) -> Dict[str, int]:
+    normalized_strategy = str(strategy_name or 'Trend Following').strip().lower()
+    normalized_profile = _normalize_management_profile(management_profile)
+
+    if normalized_strategy == 'scalping':
+        return {'tradingMode': 'signal-driven', 'tradingInterval': 60, 'pollInterval': 5}
+
+    if normalized_strategy in {'momentum trading', 'breakout trading'}:
+        return {'tradingMode': 'signal-driven', 'tradingInterval': 90, 'pollInterval': 8}
+
+    if normalized_strategy == 'swing trend dca':
+        return {'tradingMode': 'signal-driven', 'tradingInterval': 300, 'pollInterval': 30}
+
+    if intelligent_scanner:
+        return {'tradingMode': 'signal-driven', 'tradingInterval': 120, 'pollInterval': 10}
+
+    base_interval = 150 if normalized_profile == 'beginner' else 120 if normalized_profile == 'balanced' else 90
+    base_poll = 15 if normalized_profile == 'beginner' else 12 if normalized_profile == 'balanced' else 10
+    return {'tradingMode': 'signal-driven', 'tradingInterval': base_interval, 'pollInterval': base_poll}
+
+
 def _clamp_bot_config_value(field_name: str, raw_value, minimum: float, maximum: float, default_value: float, warnings: List[str]) -> float:
     """Clamp bot risk inputs into a safe range and track any overrides."""
     try:
@@ -13681,28 +13702,30 @@ def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[
         profile_defaults['dynamicSizing'],
     )
     intelligent_scanner = _coerce_bool(data.get('intelligentScanner', False), False)
+    cadence_defaults = _default_strategy_trading_cadence(
+        data.get('strategy', 'Trend Following'),
+        management_profile,
+        intelligent_scanner,
+    )
 
     trading_mode = str(data.get('tradingMode') or '').strip().lower()
     if trading_mode not in {'interval', 'signal-driven'}:
-        trading_mode = 'signal-driven' if intelligent_scanner else 'interval'
-
-    default_trading_interval = 300 if management_profile == 'beginner' else 180 if management_profile == 'balanced' else 120
-    default_poll_interval = 20 if management_profile == 'beginner' else 15 if management_profile == 'balanced' else 10
+        trading_mode = cadence_defaults['tradingMode']
 
     trading_interval = _clamp_int_value(
         'tradingInterval',
-        data.get('tradingInterval', default_trading_interval),
+        data.get('tradingInterval', cadence_defaults['tradingInterval']),
         30,
         900,
-        default_trading_interval,
+        cadence_defaults['tradingInterval'],
         warnings,
     )
     poll_interval = _clamp_int_value(
         'pollInterval',
-        data.get('pollInterval', default_poll_interval),
+        data.get('pollInterval', cadence_defaults['pollInterval']),
         5,
         120,
-        default_poll_interval,
+        cadence_defaults['pollInterval'],
         warnings,
     )
 

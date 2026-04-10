@@ -999,30 +999,58 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
   }
 
+  Map<String, dynamic> _recommendedTradingCadence() {
+    final strategy = _selectedStrategy.trim().toLowerCase();
+
+    if (strategy == 'scalping') {
+      return {
+        'mode': 'signal-driven',
+        'tradingInterval': 60,
+        'pollInterval': 5,
+      };
+    }
+
+    if (strategy == 'momentum trading' || strategy == 'breakout trading') {
+      return {
+        'mode': 'signal-driven',
+        'tradingInterval': 90,
+        'pollInterval': 8,
+      };
+    }
+
+    if (strategy == 'swing trend dca') {
+      return {
+        'mode': 'signal-driven',
+        'tradingInterval': 300,
+        'pollInterval': 30,
+      };
+    }
+
+    if (_intelligentScanner) {
+      return {
+        'mode': 'signal-driven',
+        'tradingInterval': 120,
+        'pollInterval': 10,
+      };
+    }
+
+    return {
+      'mode': 'signal-driven',
+      'tradingInterval': 120,
+      'pollInterval': 12,
+    };
+  }
+
   String _recommendedTradingMode() {
-    return _intelligentScanner ? 'signal-driven' : 'interval';
+    return _recommendedTradingCadence()['mode'] as String;
   }
 
   int _recommendedTradingInterval() {
-    switch (_managementProfile) {
-      case 'beginner':
-        return 300;
-      case 'balanced':
-        return 180;
-      default:
-        return 120;
-    }
+    return _recommendedTradingCadence()['tradingInterval'] as int;
   }
 
   int _recommendedPollInterval() {
-    switch (_managementProfile) {
-      case 'beginner':
-        return 20;
-      case 'balanced':
-        return 15;
-      default:
-        return 10;
-    }
+    return _recommendedTradingCadence()['pollInterval'] as int;
   }
 
   final List<String> strategies = [
