@@ -1045,7 +1045,7 @@ def _get_effective_symbol_params(symbol: str, market_data: Optional[Dict[str, An
         except (TypeError, ValueError):
             adaptive_reduction = 0
 
-    params['effective_min_signal_strength'] = max(45, int(params['min_signal_strength']) - max(0, adaptive_reduction))
+    params['effective_min_signal_strength'] = max(20, int(params['min_signal_strength']) - max(0, adaptive_reduction))
     return params
 
 
@@ -10069,7 +10069,7 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
             raw_signal = evaluate_real_trade_signal(symbol, market_data)
             raw_strength = raw_signal.get('strength', 0)
             if trade_params is None:
-                raw_fallback_min_strength = max(55, signal_threshold)
+                raw_fallback_min_strength = max(20, signal_threshold)
                 fallback_trade_params = None
                 if allow_raw_signal_fallback and raw_strength >= raw_fallback_min_strength:
                     fallback_trade_params = _build_adaptive_raw_trade_params(symbol, market_data, raw_signal)
@@ -10116,8 +10116,8 @@ def scan_all_opportunities(strategy_func, account_id, risk_per_trade, signal_thr
     
     # Sort by signal strength descending
     opportunities.sort(key=lambda x: x['strength'], reverse=True)
-    if not opportunities and signal_threshold > 45 and fallback_slack > 0:
-        fallback_threshold = max(45, signal_threshold - fallback_slack)
+    if not opportunities and signal_threshold > 20 and fallback_slack > 0:
+        fallback_threshold = max(20, signal_threshold - fallback_slack)
         logger.debug(f"[SCANNER] No opportunities above {signal_threshold}. Falling back to {fallback_threshold}.")
         for symbol in symbols_to_scan:
             try:
@@ -13477,8 +13477,8 @@ BOT_RISK_LIMITS = {
 
 ADAPTIVE_SIGNAL_THRESHOLD_STEP = 5
 ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP = 10
-ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 50
-ADAPTIVE_SIGNAL_THRESHOLD_MIN = 30
+ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 70
+ADAPTIVE_SIGNAL_THRESHOLD_MIN = 10
 ADAPTIVE_SCANNER_TRIGGER_MISSES = 1
 ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 25
 
@@ -13491,7 +13491,7 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 12.0,   # Long cooldown after drawdown
         'maxOpenPositions': 2,        # Max 2 trades open at once
         'maxPositionsPerSymbol': 1,   # 1 trade per symbol
-        'signalThreshold': 75,        # Only high-quality signals
+        'signalThreshold': 40,        # Balanced for small live accounts
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],  # Allow High (crypto/gold are naturally High spread)
         'autoSwitch': False,          # Stick to swing trend strategy
         'dynamicSizing': True,        # Scale with equity
@@ -13504,7 +13504,7 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 8.0,
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
-        'signalThreshold': 70,
+        'signalThreshold': 45,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
@@ -13517,7 +13517,7 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 6.0,
         'maxOpenPositions': 3,
         'maxPositionsPerSymbol': 2,
-        'signalThreshold': 60,
+        'signalThreshold': 40,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
@@ -13530,7 +13530,7 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 4.0,
         'maxOpenPositions': 5,
         'maxPositionsPerSymbol': 2,
-        'signalThreshold': 50,
+        'signalThreshold': 35,
         'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
@@ -13543,7 +13543,7 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 3.0,
         'maxOpenPositions': 6,
         'maxPositionsPerSymbol': 2,
-        'signalThreshold': 50,
+        'signalThreshold': 35,
         'allowedVolatility': ['Low', 'Medium', 'High'],
         'autoSwitch': True,
         'dynamicSizing': True,
@@ -14196,7 +14196,7 @@ def enforce_small_live_account_guard(
         'maxOpenPositions': 1,
         'maxOpenTrades': 1,
         'maxPositionsPerSymbol': 1,
-        'signalThreshold': max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 78),
+        'signalThreshold': min(max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 20), 40),
         'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'dynamicSizing': True,
@@ -14311,7 +14311,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         if profile == 'small_account':
             effective['maxOpenPositions'] = 1
             effective['maxPositionsPerSymbol'] = 1
-            effective['signalThreshold'] = max(effective['signalThreshold'], 78)
+            effective['signalThreshold'] = min(max(effective['signalThreshold'], 20), 40)
             effective['allowedVolatility'] = [
                 level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
             ] or ['Very Low', 'Low', 'Medium']

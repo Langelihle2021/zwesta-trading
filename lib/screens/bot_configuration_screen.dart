@@ -990,11 +990,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   int _recommendedSignalThreshold() {
     switch (_managementProfile) {
       case 'beginner':
-        return 70;
+        return 45;
       case 'balanced':
-        return 60;
+        return 40;
       default:
-        return 50;
+        return 35;
     }
   }
 
