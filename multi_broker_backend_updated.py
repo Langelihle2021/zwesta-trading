@@ -9694,10 +9694,21 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
             symbol for symbol in broker_symbol_universe
             if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
         ]
+
+        # On weekends, prioritize symbols that are often tradable (e.g., crypto CFDs)
+        now_utc = datetime.utcnow()
+        if now_utc.weekday() >= 5:
+            weekend_symbols = [
+                symbol for symbol in broker_symbol_universe
+                if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS
+            ]
+            if weekend_symbols:
+                allowed_symbols = weekend_symbols + [s for s in allowed_symbols if s not in weekend_symbols]
+
         if normalized_configured:
             configured_safe = [
                 symbol for symbol in normalized_configured
-                if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
+                if _normalize_symbol_base(symbol) in (SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS | SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS)
             ]
             if configured_safe:
                 return configured_safe + [symbol for symbol in allowed_symbols if symbol not in configured_safe]
@@ -10343,6 +10354,34 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         except Exception as e:
             logger.error(f"🧠 Bot {bot_id}: Exception closing {symbol}: {e}")
     
+    def _is_symbol_tradeable_now(symbol_to_test: str) -> bool:
+        """Best-effort tradability check to avoid selecting closed/illiquid symbols."""
+        if not (is_mt5 and mt5_conn and getattr(mt5_conn, 'mt5', None)):
+            return True
+        try:
+            mt5_api = mt5_conn.mt5
+            if not mt5_conn.is_symbol_available(symbol_to_test):
+                return False
+            mt5_api.symbol_select(symbol_to_test, True)
+            info = mt5_api.symbol_info(symbol_to_test)
+            if info is None:
+                return False
+            if int(getattr(info, 'trade_mode', 1) or 1) == 0:
+                return False
+            tick = mt5_api.symbol_info_tick(symbol_to_test)
+            if tick is None:
+                return False
+            bid = float(getattr(tick, 'bid', 0.0) or 0.0)
+            ask = float(getattr(tick, 'ask', 0.0) or 0.0)
+            if bid <= 0 or ask <= 0 or ask <= bid:
+                return False
+            tick_ts = int(getattr(tick, 'time', 0) or 0)
+            if tick_ts > 0 and (time.time() - tick_ts) > 180:
+                return False
+            return True
+        except Exception:
+            return True
+
     # 4. BUILD optimal symbol list for this cycle
     # Start with existing open positions (don't duplicate), then add best new opportunities
     current_open_symbols = set(p.get('symbol', '') for p in bot_config.get('open_positions', {}).values())
@@ -10353,14 +10392,14 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
     for opp in opportunities:
         if len(cycle_symbols) >= max_positions:
             break
-        if opp['symbol'] not in current_open_symbols:
+        if opp['symbol'] not in current_open_symbols and _is_symbol_tradeable_now(opp['symbol']):
             cycle_symbols.append(opp['symbol'])
     
     # If we still have slots, add the bot's original symbols as fallback
     for s in bot_config.get('symbols', ['EURUSDm']):
         if len(cycle_symbols) >= max_positions:
             break
-        if s not in cycle_symbols:
+        if s not in cycle_symbols and _is_symbol_tradeable_now(s):
             cycle_symbols.append(s)
     
     if set(cycle_symbols) != set(bot_config.get('symbols', [])):
@@ -13570,6 +13609,7 @@ SMALL_ACCOUNT_TRADE_AMOUNT_CAPS = {
 SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
     'AUDUSD', 'EURUSD', 'GBPUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'USDJPY', 'EURJPY', 'GBPJPY', 'EURGBP'
 }
+SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS = {'BTCUSD', 'ETHUSD'}
 SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'EURUSDm', 'USDCHFm', 'USDCADm']
 
 DEFAULT_PROFIT_PROTECTION_CONFIG = {
