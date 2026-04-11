@@ -29,7 +29,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
   String _currencySymbol(String currency) {
     switch (_normalizeCurrency(currency)) {
       case 'ZAR':
-        return r'$';
+        return 'R';
       case 'GBP':
         return 'GBP';
       case 'USD':

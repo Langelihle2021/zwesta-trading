@@ -38,7 +38,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
   String get _currencySymbol {
     switch (_currencyCode) {
       case 'ZAR':
-        return r'$';
+        return 'R';
       case 'GBP':
         return '£';
       case 'EUR':

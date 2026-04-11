@@ -195,7 +195,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   String _symbolForCode(String currencyCode) {
     switch (_normalizeCurrencyCode(currencyCode)) {
       case 'ZAR':
-        return r'$';
+        return 'R';
       case 'GBP':
         return '£';
       case 'EUR':

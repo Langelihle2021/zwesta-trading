@@ -111,7 +111,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
   String _currencySymbol(String currency) {
     switch (currency.toUpperCase()) {
       case 'ZAR':
-        return r'$';
+        return 'R';
       case 'GBP':
         return '£';
       case 'EUR':

@@ -33,7 +33,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
   String _currencySymbol(String currencyCode) {
     switch (currencyCode) {
       case 'ZAR':
-        return r'$';
+        return 'R';
       case 'GBP':
         return '£';
       case 'EUR':
