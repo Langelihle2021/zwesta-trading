@@ -58,7 +58,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Convert currency code to symbol (e.g., ZAR → R, USD → $, EUR → €)
   String _currencySymbol(String code) {
     const symbols = {
-      'USD': r'$', 'EUR': '€', 'GBP': '£', 'ZAR': 'R',
+      'USD': r'$', 'EUR': '€', 'GBP': '£', 'ZAR': r'$',
       'JPY': '¥', 'CHF': 'CHF', 'AUD': r'A$', 'CAD': r'C$',
       'NZD': r'NZ$', 'SGD': r'S$', 'HKD': r'HK$', 'CNY': '¥',
       'INR': '₹', 'BRL': r'R$', 'KRW': '₩', 'TRY': '₺',

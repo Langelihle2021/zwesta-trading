@@ -72,7 +72,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
       case AppCurrency.usd:
         return r'$';
       case AppCurrency.zar:
-        return 'R';
+        return r'$';
       case AppCurrency.gbp:
         return 'GBP';
     }
@@ -97,7 +97,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   String _symbolForCode(String currencyCode) {
     switch (_normalizeCurrencyCode(currencyCode)) {
       case 'ZAR':
-        return 'R';
+        return r'$';
       case 'GBP':
         return 'GBP';
       case 'USD':

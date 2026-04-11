@@ -30,7 +30,7 @@ class _TradingBotsDashboardScreenState extends State<TradingBotsDashboardScreen>
   String _currencySymbol(String currency) {
     switch (_normalizeCurrency(currency)) {
       case 'ZAR':
-        return 'R';
+        return r'$';
       case 'GBP':
         return 'GBP';
       case 'USD':

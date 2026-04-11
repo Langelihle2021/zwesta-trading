@@ -38,7 +38,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
   String get _currencySymbol {
     switch (_currencyCode) {
       case 'ZAR':
-        return 'R';
+        return r'$';
       case 'GBP':
         return '£';
       case 'EUR':
@@ -239,8 +239,8 @@ class _AccountDetailScreenState extends State<AccountDetailScreen>
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isLive
-              ? [const Color(0xFF1A0A0A), const Color(0xFF2A1515)]
-              : [const Color(0xFF0A1A0A), const Color(0xFF152A15)],
+              ? [const Color(0xFF0A0A1A), const Color(0xFF15152A)]
+              : [const Color(0xFF0A1A2A), const Color(0xFF152A3A)],
         ),
       ),
       child: Column(
