@@ -160,15 +160,15 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                 width: double.infinity,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Colors.blue.withOpacity(0.15), Colors.purple.withOpacity(0.1)],
+                    colors: [const Color(0xFF1A237E).withOpacity(0.3), const Color(0xFF006064).withOpacity(0.2)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  border: Border.all(color: const Color(0xFF1A237E).withOpacity(0.3)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.blue.withOpacity(0.15),
+                      color: const Color(0xFF1A237E).withOpacity(0.15),
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
@@ -186,13 +186,13 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           gradient: LinearGradient(
-                            colors: [Colors.blue.shade400, Colors.purple.shade400],
+                            colors: [const Color(0xFF1A237E), const Color(0xFF006064)],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.blue.withOpacity(0.4),
+                              color: const Color(0xFF1A237E).withOpacity(0.4),
                               blurRadius: 20,
                               offset: const Offset(0, 8),
                             ),
@@ -230,14 +230,14 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                         ),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [Colors.blue.shade600, Colors.purple.shade600],
+                            colors: [const Color(0xFF1A237E), const Color(0xFF283593)],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.blue.withOpacity(0.3),
+                              color: const Color(0xFF1A237E).withOpacity(0.3),
                               blurRadius: 8,
                               offset: const Offset(0, 4),
                             ),
@@ -453,7 +453,7 @@ class _AccountManagementScreenState extends State<AccountManagementScreen>
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    connected ? 'Balance: \$${balance.toStringAsFixed(2)}' : 'Tap to connect your trading account',
+                                    connected ? 'Balance: R${balance.toStringAsFixed(2)}' : 'Tap to connect your trading account',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: Colors.white70,

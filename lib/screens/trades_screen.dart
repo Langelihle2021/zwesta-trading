@@ -247,7 +247,7 @@ class _TradesScreenState extends State<TradesScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '\$${value.toStringAsFixed(2)}',
+            'R${value.toStringAsFixed(2)}',
             style: GoogleFonts.poppins(
               color: color,
               fontSize: 14,
@@ -363,7 +363,7 @@ class _TradesScreenState extends State<TradesScreen> {
                     Text('Open Price',
                         style: GoogleFonts.poppins(
                             color: Colors.white60, fontSize: 10)),
-                    Text('\$${openPrice.toStringAsFixed(5)}',
+                    Text('R${openPrice.toStringAsFixed(5)}',
                         style: GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 13,
@@ -376,7 +376,7 @@ class _TradesScreenState extends State<TradesScreen> {
                     Text('Current Price',
                         style: GoogleFonts.poppins(
                             color: Colors.white60, fontSize: 10)),
-                    Text('\$${currentPrice.toStringAsFixed(5)}',
+                    Text('R${currentPrice.toStringAsFixed(5)}',
                         style: GoogleFonts.poppins(
                             color: const Color(0xFF00E5FF),
                             fontSize: 13,
@@ -419,7 +419,7 @@ class _TradesScreenState extends State<TradesScreen> {
                               style: GoogleFonts.poppins(
                                   color: Colors.white60, fontSize: 10)),
                           Text(
-                            '${isProfitable ? '+' : ''}\$${profit.toStringAsFixed(2)}',
+                            '${isProfitable ? '+' : ''}R${profit.toStringAsFixed(2)}',
                             style: GoogleFonts.poppins(
                               color: isProfitable
                                   ? const Color(0xFF69F0AE)
