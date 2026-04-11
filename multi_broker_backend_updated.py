@@ -710,7 +710,7 @@ else:
     logger.info(f"[DEMO] Available in LIVE: 295677214")
 
 # ==================== API AUTHENTICATION ====================
-OWNER_USER_ID = 'SYSTEM_OWNER_USER_ID'  # TODO: Set your real owner user_id here
+OWNER_USER_ID = '8e74db37-fd1e-4c57-87c4-ad3b64012ecf'  # Zwexman@gmail.com - Commission receiver
 
 def get_referrer_id(user_id):
     """Get the referrer user_id for a given user (returns None if no referrer)"""
@@ -8766,7 +8766,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 8,
         'take_profit_pips': 15,
         'max_slippage': 0.0005,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.15,
         'volatility_low': 0.02,
     },
@@ -8775,7 +8775,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 10,
         'take_profit_pips': 20,
         'max_slippage': 0.0006,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.20,
         'volatility_low': 0.03,
     },
@@ -8784,7 +8784,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 8,
         'take_profit_pips': 16,
         'max_slippage': 0.0006,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.12,
         'volatility_low': 0.02,
     },
@@ -8793,7 +8793,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 9,
         'take_profit_pips': 17,
         'max_slippage': 0.0005,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.18,
         'volatility_low': 0.03,
     },
@@ -8802,7 +8802,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 9,
         'take_profit_pips': 17,
         'max_slippage': 0.0005,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.15,
         'volatility_low': 0.02,
     },
@@ -8811,7 +8811,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 8,
         'take_profit_pips': 15,
         'max_slippage': 0.0005,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.14,
         'volatility_low': 0.02,
     },
@@ -8820,7 +8820,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 9,
         'take_profit_pips': 17,
         'max_slippage': 0.0006,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.18,
         'volatility_low': 0.03,
     },
@@ -8829,7 +8829,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 7,
         'take_profit_pips': 14,
         'max_slippage': 0.0005,
-        'min_signal_strength': 65,
+        'min_signal_strength': 50,
         'volatility_high': 0.10,
         'volatility_low': 0.02,
     },
@@ -8838,7 +8838,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 10,
         'take_profit_pips': 20,
         'max_slippage': 0.0006,
-        'min_signal_strength': 68,
+        'min_signal_strength': 50,
         'volatility_high': 0.18,
         'volatility_low': 0.03,
     },
@@ -8847,7 +8847,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0008,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 0.25,
         'volatility_low': 0.05,
     },
@@ -8857,7 +8857,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 25,
         'max_slippage': 0.001,
-        'min_signal_strength': 65,  # Adjusted from 75 - allow more trades while maintaining quality
+        'min_signal_strength': 50,  # Lowered to allow more frequent trading on low-volatility symbols
         'volatility_high': 1.5,
         'volatility_low': 0.3,
     },
@@ -8866,7 +8866,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 2.0,
         'volatility_low': 0.4,
     },
@@ -8876,7 +8876,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -8885,7 +8885,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -8895,7 +8895,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 20,
         'take_profit_pips': 40,
         'max_slippage': 0.001,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 1.0,
         'volatility_low': 0.2,
     },
@@ -8904,7 +8904,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 68,
+        'min_signal_strength': 50,
         'volatility_high': 0.8,
         'volatility_low': 0.15,
     },
@@ -8913,7 +8913,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 18,
         'take_profit_pips': 36,
         'max_slippage': 0.001,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 1.2,
         'volatility_low': 0.2,
     },
@@ -8923,7 +8923,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.001,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -8932,7 +8932,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 20,
         'take_profit_pips': 40,
         'max_slippage': 0.0015,
-        'min_signal_strength': 75,
+        'min_signal_strength': 50,
         'volatility_high': 3.0,
         'volatility_low': 1.0,
     },
@@ -8941,7 +8941,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0012,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 1.8,
         'volatility_low': 0.6,
     },
@@ -8950,7 +8950,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 18,
         'take_profit_pips': 36,
         'max_slippage': 0.0015,
-        'min_signal_strength': 75,
+        'min_signal_strength': 50,
         'volatility_high': 2.8,
         'volatility_low': 0.9,
     },
@@ -8959,7 +8959,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 15,
         'take_profit_pips': 30,
         'max_slippage': 0.0012,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 2.0,
         'volatility_low': 0.5,
     },
@@ -8968,7 +8968,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 16,
         'take_profit_pips': 32,
         'max_slippage': 0.0013,
-        'min_signal_strength': 72,
+        'min_signal_strength': 50,
         'volatility_high': 2.5,
         'volatility_low': 0.7,
     },
@@ -8977,7 +8977,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 25,
         'take_profit_pips': 50,
         'max_slippage': 0.002,
-        'min_signal_strength': 75,
+        'min_signal_strength': 50,
         'volatility_high': 4.0,
         'volatility_low': 1.0,
     },
@@ -8986,7 +8986,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 24,
         'max_slippage': 0.001,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 1.5,
         'volatility_low': 0.4,
     },
@@ -8995,7 +8995,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 24,
         'max_slippage': 0.001,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 1.6,
         'volatility_low': 0.4,
     },
@@ -9004,7 +9004,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 12,
         'take_profit_pips': 24,
         'max_slippage': 0.001,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 1.5,
         'volatility_low': 0.4,
     },
@@ -9013,7 +9013,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 14,
         'take_profit_pips': 28,
         'max_slippage': 0.0012,
-        'min_signal_strength': 70,
+        'min_signal_strength': 50,
         'volatility_high': 1.8,
         'volatility_low': 0.5,
     },
@@ -9037,13 +9037,14 @@ SYMBOL_PARAMETERS = {
         'volatility_low': 1.0,
     },
     'ETHUSD': {
-        'atr_multiplier': 2.0,
-        'stop_loss_pips': 50,  # Reduced from 2000 - crypto pips are 0.01 USD
-        'take_profit_pips': 150,  # Reduced from 5000 - more realistic targets
+        'atr_multiplier': 1.8,
+        'stop_loss_pips': 40,  # Faster ETH exit range for more frequent turnarounds
+        'take_profit_pips': 120,  # Faster ETH TP scaling for quicker crypto exits
         'max_slippage': 0.002,
-        'min_signal_strength': 55,  # Adjusted from 65 - allow more trades while maintaining quality
+        'min_signal_strength': 50,  # More responsive ETH entries while still filtering noise
         'volatility_high': 4.0,
         'volatility_low': 1.0,
+        'max_hold_minutes': 60,  # Close ETH positions after 1 hour to prevent holding too long in volatile crypto
     },
 }
 
@@ -10210,14 +10211,16 @@ def evaluate_open_positions_for_reallocation(bot_config, opportunities, active_c
         # Signal weakened below threshold
         signal_weak = current_strength < signal_threshold * 0.6  # Below 60% of threshold
         
-        if signal_reversed or signal_weak:
-            close_candidates.append({
-                'ticket': ticket_str,
-                'symbol': pos_symbol,
-                'profit': profit,
-                'strength': current_strength,
-                'reason': 'SIGNAL_REVERSED' if signal_reversed else 'SIGNAL_WEAKENED',
-            })
+        eth_reversal = signal_reversed and pos_symbol.upper().startswith('ETHUSD')
+        if signal_reversed or signal_weak or eth_reversal:
+            if profit > 0 or signal_weak or eth_reversal:
+                close_candidates.append({
+                    'ticket': ticket_str,
+                    'symbol': pos_symbol,
+                    'profit': profit,
+                    'strength': current_strength,
+                    'reason': 'SIGNAL_REVERSED' if signal_reversed else 'SIGNAL_WEAKENED',
+                })
     
     if not close_candidates:
         return [], []
@@ -11367,7 +11370,8 @@ def get_best_trading_assets(limit=5):
 # --- ENHANCED RISK MANAGEMENT: Profit Lock-In, Volatility Filter, Regime Check, Drawdown Pause ---
 def should_trade_today(bot_config, symbol):
     """
-    Returns False if bot should NOT trade today due to profit lock-in, drawdown, volatility, or regime filter.
+    Returns False if bot should NOT trade today due to profit lock-in, drawdown, volatility, regime filter,
+    or cumulative profit protection floor (30% max loss of historical profits).
     """
     # 1. Profit Lock-In: If daily profit exceeds lock threshold, stop trading for the day
     profit_lock = bot_config.get('profitLock', 0.0) or 0.0  # e.g., 500 (set per bot)
@@ -11375,6 +11379,27 @@ def should_trade_today(bot_config, symbol):
     drawdown_pause_hours = bot_config.get('drawdownPauseHours', 6.0) or 6.0
     today = datetime.now().strftime('%Y-%m-%d')
     now = datetime.now()
+    
+    # CUMULATIVE PROFIT PROTECTION: 30% loss floor on historical profits
+    cumulative_profit = bot_config.get('totalProfit', 0.0) or 0.0
+    cumulative_loss_allowance = (cumulative_profit * 0.30) if cumulative_profit > 0 else 0
+    
+    if cumulative_loss_allowance > 0:
+        # Calculate current session losses (closed trades + open position P&L)
+        current_day_profit = bot_config.get('dailyProfits', {}).get(today, 0.0)
+        open_positions = bot_config.get('open_positions', {})
+        open_position_pnl = sum([float(pos.get('profit', 0)) for pos in open_positions.values()])
+        current_session_pnl = current_day_profit + open_position_pnl
+        
+        current_session_loss = abs(current_session_pnl) if current_session_pnl < 0 else 0
+        
+        if current_session_loss >= cumulative_loss_allowance:
+            logger.warning(
+                f"[RISK] Bot {bot_config.get('botId')} HIT CUMULATIVE PROFIT FLOOR: "
+                f"Historical profit: ${cumulative_profit:.2f}, Max allowed loss (30%): ${cumulative_loss_allowance:.2f}, "
+                f"Current session loss: ${current_session_loss:.2f}. PAUSING TRADING."
+            )
+            return False
 
     cooldowns = bot_config.get('symbolReentryCooldowns') or {}
     cooldown_keys = [str(symbol or '').strip(), _normalize_symbol_base(symbol)]
@@ -13188,12 +13213,24 @@ def _record_commission_distribution(cursor, user_id: str, bot_id: str, profit_am
 def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float, source: str = 'MT5'):
     """
     Distribute commissions for profitable trades.
+    SKIP COMMISSION if user is the system owner (your own bots = no commission).
     Reads rates from commission_config DB table (admin-editable).
     source: 'MT5' or 'IG' — uses matching rate set.
     """
     try:
         if profit_amount <= 0:
             return {'success': True, 'entries': [], 'trader_keeps': 0.0}
+
+        # 🔑 OWNER EXCEPTION: System owner doesn't pay commission on own bots
+        if user_id == OWNER_USER_ID:
+            logger.info(f"✅ [{source}] Bot {bot_id}: Owner {user_id} keeps 100% of profit ${profit_amount:.2f} (no commission charged)")
+            return {
+                'success': True,
+                'entries': [],
+                'trader_keeps': profit_amount,
+                'total_commission': 0.0,
+                'reason': 'owner_exemption'
+            }
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -13219,7 +13256,7 @@ def distribute_trade_commissions(bot_id: str, user_id: str, profit_amount: float
         summary = ', '.join(
             f"{entry['recipient_id']}=${entry['amount']:.2f}" for entry in recorded_entries
         )
-        logger.info(f"💰 [{source}] Commission distribution for ${profit_amount:.2f} on {bot_id}: {summary}")
+        logger.info(f"💰 [{source}] Commission distribution for ${profit_amount:.2f} on {bot_id}: {summary} (User keeps: ${distribution['trader_keeps']:.2f})")
         return {
             'success': True,
             'entries': recorded_entries,
@@ -13440,10 +13477,10 @@ BOT_RISK_LIMITS = {
 
 ADAPTIVE_SIGNAL_THRESHOLD_STEP = 5
 ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP = 10
-ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 15
-ADAPTIVE_SIGNAL_THRESHOLD_MIN = 45
+ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 50
+ADAPTIVE_SIGNAL_THRESHOLD_MIN = 30
 ADAPTIVE_SCANNER_TRIGGER_MISSES = 1
-ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 15
+ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 25
 
 BOT_MANAGEMENT_PROFILES = {
     'small_account': {
@@ -13793,6 +13830,19 @@ def _recent_close_request(position_state: Dict[str, Any], window_seconds: int = 
         return False
 
 
+def _position_age_minutes(entry_time: Optional[str]) -> float:
+    if not entry_time:
+        return 0.0
+    try:
+        if isinstance(entry_time, (int, float)):
+            entry_dt = datetime.fromtimestamp(float(entry_time))
+        else:
+            entry_dt = datetime.fromisoformat(str(entry_time))
+        return max(0.0, (datetime.now() - entry_dt).total_seconds() / 60.0)
+    except Exception:
+        return 0.0
+
+
 def _profit_protection_activation_amount(bot_config: Dict[str, Any], protection_config: Dict[str, Any]) -> float:
     activation_min_profit = float(protection_config.get('activationMinProfit') or 0.0)
     activation_percent = float(protection_config.get('activationPercent') or 0.0)
@@ -13807,8 +13857,6 @@ def _profit_protection_activation_amount(bot_config: Dict[str, Any], protection_
 
 def manage_protected_open_positions(bot_id, bot_config, current_positions, active_conn, is_mt5, mt5_conn):
     protection_config = _normalize_profit_protection_config(bot_config.get('profitProtection'))
-    if not protection_config.get('enabled'):
-        return []
 
     tracked_positions = bot_config.get('open_positions', {})
     if not tracked_positions or not current_positions:
@@ -13850,20 +13898,30 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
             tracked['breakEvenFloor'] = break_even_floor
             tracked['lockedProfitFloor'] = round(max(_safe_float(tracked.get('lockedProfitFloor'), 0.0), break_even_floor), 2)
 
-        if not tracked.get('profitProtectionArmed') or _recent_close_request(tracked):
-            continue
+        symbol_params = _get_effective_symbol_params(symbol, symbol_market_data)
+        max_hold_minutes = _safe_float(symbol_params.get('max_hold_minutes'), 0.0)
+        time_in_position = _position_age_minutes(tracked.get('entryTime'))
+        if max_hold_minutes > 0 and time_in_position >= max_hold_minutes:
+            close_reason = 'MAX_HOLD_TIME_EXCEEDED'
 
         signal_eval = evaluate_real_trade_signal(tracked.get('symbol', ''), _get_market_data_for_symbol(tracked.get('symbol', '')))
         current_signal = signal_eval.get('signal', 'NEUTRAL')
-        close_reason = None
+        close_reason = close_reason or None
         locked_floor = _safe_float(tracked.get('lockedProfitFloor'), 0.0)
 
-        if current_profit <= locked_floor:
-            close_reason = 'PROFIT_RETRACE'
-        elif effective_protection.get('switchOnReversal') and current_profit > 0 and _signal_reversed_for_position(tracked.get('type', ''), current_signal):
-            close_reason = 'LOCKED_PROFIT_SIGNAL_REVERSAL'
-        elif tracked['peakProfit'] >= activation_amount and current_profit <= 0:
-            close_reason = 'BREAK_EVEN_FAILURE'
+        if not close_reason:
+            if not tracked.get('profitProtectionArmed') or _recent_close_request(tracked):
+                continue
+
+            if current_profit <= locked_floor:
+                close_reason = 'PROFIT_RETRACE'
+            elif effective_protection.get('switchOnReversal') and _signal_reversed_for_position(tracked.get('type', ''), current_signal):
+                if symbol.upper().startswith('ETHUSD'):
+                    close_reason = 'SIGNAL_REVERSAL_ETH'
+                elif current_profit > 0:
+                    close_reason = 'LOCKED_PROFIT_SIGNAL_REVERSAL'
+            elif tracked['peakProfit'] >= activation_amount and current_profit <= 0:
+                close_reason = 'BREAK_EVEN_FAILURE'
 
         if not close_reason:
             continue
@@ -15573,7 +15631,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     signal_score = eval_signal.get('strength', 0)
                     best_signal_strength = max(best_signal_strength, float(signal_score or 0.0))
                     signal_label = eval_signal.get('signal', 'NEUTRAL')
-                    if eval_params:
+                    if eval_params and signal_score >= signal_threshold:
                         configured_signal_hits += 1
                     status = "✅" if eval_params and signal_score >= signal_threshold else "⏭️"
                     signal_summary.append(f"{status}{eval_symbol}:{signal_score:.0f} {signal_label}")
@@ -17368,6 +17426,17 @@ def bot_summary():
                     'reason': cooldown_entry.get('reason'),
                 })
 
+            # Calculate cumulative profit protection floor (30% max loss)
+            cumulative_profit = float(total_profit or 0)
+            cumulative_loss_allowance = (cumulative_profit * 0.30) if cumulative_profit > 0 else 0
+            current_day_profit = (bot.get('dailyProfits') or {}).get(today, 0.0)
+            open_position_pnl = sum([float(pos.get('profit', 0)) for pos in open_positions])
+            current_session_pnl = current_day_profit + open_position_pnl
+            current_session_loss = abs(current_session_pnl) if current_session_pnl < 0 else 0
+            cumulative_protection_status = 'active' if cumulative_loss_allowance > 0 else 'inactive'
+            if cumulative_loss_allowance > 0 and current_session_loss >= cumulative_loss_allowance:
+                cumulative_protection_status = 'triggered'
+
             bots_list.append({
                 'botId': bot.get('botId', 'unknown'),
                 'symbol': primary_symbol,
@@ -17410,6 +17479,11 @@ def bot_summary():
                 'openPositionsCount': len(open_positions),
                 'openPositionsPreview': open_positions_preview,
                 'activeSymbolCooldowns': active_symbol_cooldowns,
+                'cumulativeProfitFloor': round(cumulative_profit * 0.70, 2) if cumulative_profit > 0 else 0,
+                'cumulativeProfitFloorRemaining': round(max(0, current_profit - (cumulative_profit * 0.70)), 2) if cumulative_profit > 0 else 0,
+                'cumulativeProfitFloorBreach': current_profit <= (cumulative_profit * 0.70) if cumulative_profit > 0 else False,
+                'cumulativeLossAllowance': round(cumulative_loss_allowance, 2),
+                'cumulativeProtectionStatus': cumulative_protection_status,
                 'createdAt': created_at,
             })
 
@@ -17520,6 +17594,17 @@ def get_bot_analytics_snapshot(bot_id: str):
                 'reason': cooldown_entry.get('reason'),
             })
 
+        # Calculate cumulative profit protection floor (30% max loss)
+        cumulative_profit = float(total_profit or 0)
+        cumulative_loss_allowance = (cumulative_profit * 0.30) if cumulative_profit > 0 else 0
+        current_day_profit = bot.get('dailyProfits', {}).get(today, 0.0)
+        open_position_pnl = sum([float(pos.get('profit', 0)) for pos in open_positions])
+        current_session_pnl = current_day_profit + open_position_pnl
+        current_session_loss = abs(current_session_pnl) if current_session_pnl < 0 else 0
+        cumulative_protection_status = 'active' if cumulative_loss_allowance > 0 else 'inactive'
+        if cumulative_loss_allowance > 0 and current_session_loss >= cumulative_loss_allowance:
+            cumulative_protection_status = 'triggered'
+
         return jsonify({
             'success': True,
             'bot': {
@@ -17572,6 +17657,14 @@ def get_bot_analytics_snapshot(bot_id: str):
                 'accountEquity': round(bot.get('accountEquity', 0), 2),
                 'activeSymbolCooldowns': active_symbol_cooldowns,
                 'profitProtection': _normalize_profit_protection_config(bot.get('profitProtection')),
+                'cumulativeProfitProtection': {
+                    'enabled': cumulative_loss_allowance > 0,
+                    'cumulativeProfit': round(cumulative_profit, 2),
+                    'maxAllowedLoss30Percent': round(cumulative_loss_allowance, 2),
+                    'currentSessionLoss': round(current_session_loss, 2),
+                    'remainingLossBuffer': round(max(cumulative_loss_allowance - current_session_loss, 0), 2),
+                    'status': cumulative_protection_status,
+                },
             },
             'timestamp': datetime.now().isoformat(),
         }), 200
@@ -18389,9 +18482,12 @@ def delete_bot(bot_id):
         
         # Log deletion with all stats
         final_stats = bot_config.copy()
-        logger.critical(f"\ud83d\uddd1\ufe0f BOT PERMANENTLY DELETED: {bot_id} by user {user_id}")
+        logger.critical(f"🗑️ BOT PERMANENTLY DELETED: {bot_id} by user {user_id}")
         logger.critical(f"   Final Stats: {json.dumps({'totalTrades': final_stats.get('totalTrades'), 'totalProfit': final_stats.get('totalProfit')}, indent=2)}")
-        logger.critical(f"   Deletion confirmed with token: {confirmation_token[:8]}...")
+        if confirmation_token:
+            logger.critical(f"   Deletion confirmed with token: {confirmation_token[:8]}...")
+        else:
+            logger.critical(f"   Deletion confirmed: legacy request (no token)")
         
         # Delete from database
         cursor.execute('DELETE FROM user_bots WHERE bot_id = ?', (bot_id,))

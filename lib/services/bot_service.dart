@@ -536,7 +536,30 @@ class BotService extends ChangeNotifier {
         }),
       ).timeout(const Duration(seconds: 15));
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      // Add null safety for response body
+      if (response.body.isEmpty) {
+        _errorMessage = 'Server returned empty response';
+        notifyListeners();
+        return false;
+      }
+
+      // Try to parse JSON with error handling
+      Map<String, dynamic>? data;
+      try {
+        data = jsonDecode(response.body) as Map<String, dynamic>?;
+      } catch (parseError) {
+        _errorMessage = 'Server returned invalid response: ${response.body}';
+        notifyListeners();
+        return false;
+      }
+
+      // Check if data is null
+      if (data == null) {
+        _errorMessage = 'Server returned null data';
+        notifyListeners();
+        return false;
+      }
+
       if (response.statusCode == 200 && data['success'] == true) {
         removeBotLocally(botId);
         return true;
