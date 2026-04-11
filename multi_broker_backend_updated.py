@@ -13947,12 +13947,12 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
         symbol_params = _get_effective_symbol_params(symbol, symbol_market_data)
         max_hold_minutes = _safe_float(symbol_params.get('max_hold_minutes'), 0.0)
         time_in_position = _position_age_minutes(tracked.get('entryTime'))
+        close_reason = None  # Initialize before any conditional assignments
         if max_hold_minutes > 0 and time_in_position >= max_hold_minutes:
             close_reason = 'MAX_HOLD_TIME_EXCEEDED'
 
         signal_eval = evaluate_real_trade_signal(tracked.get('symbol', ''), _get_market_data_for_symbol(tracked.get('symbol', '')))
         current_signal = signal_eval.get('signal', 'NEUTRAL')
-        close_reason = close_reason or None
         locked_floor = _safe_float(tracked.get('lockedProfitFloor'), 0.0)
 
         if not close_reason:
@@ -15898,8 +15898,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         _tp_pips = trade_params.get('take_profit', 100)
                                         _sl_dist = _sl_pips * _point
                                         _tp_dist = _tp_pips * _point
-                                        _sl_dist = max(_sl_dist, _spread * 3)
-                                        _tp_dist = max(_tp_dist, _spread * 5)
+                                        # Scale TP for small accounts - more aggressive exits (2.5x spread instead of 5x)
+                                        _spread_multiplier_sl = 3
+                                        _spread_multiplier_tp = 2.5 if bot_config.get('profile') == 'small_account' else 3.5
+                                        _sl_dist = max(_sl_dist, _spread * _spread_multiplier_sl)
+                                        _tp_dist = max(_tp_dist, _spread * _spread_multiplier_tp)
                                         _digits = 5 if _point < 0.01 else 2  # forex=5, gold/indices=2
                                         if order_type == 'BUY':
                                             sl_price = round(_ask - _sl_dist, _digits)
@@ -15918,9 +15921,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         _tp_pips = trade_params.get('take_profit', 100)
                                         _sl_dist = _sl_pips * _point
                                         _tp_dist = _tp_pips * _point
-                                        # Ensure SL is at least 3x spread, TP at least 5x spread
-                                        _sl_dist = max(_sl_dist, _spread * 3)
-                                        _tp_dist = max(_tp_dist, _spread * 5)
+                                        # Scale TP for small accounts - more aggressive exits (2.5x spread instead of 5x)
+                                        _spread_multiplier_sl = 3
+                                        _spread_multiplier_tp = 2.5 if bot_config.get('profile') == 'small_account' else 3.5
+                                        # Ensure SL is at least 3x spread, TP at least (2.5-3.5)x spread
+                                        _sl_dist = max(_sl_dist, _spread * _spread_multiplier_sl)
+                                        _tp_dist = max(_tp_dist, _spread * _spread_multiplier_tp)
                                         if order_type == 'BUY':
                                             sl_price = round(_tick.ask - _sl_dist, _sym_info.digits)
                                             tp_price = round(_tick.ask + _tp_dist, _sym_info.digits)
