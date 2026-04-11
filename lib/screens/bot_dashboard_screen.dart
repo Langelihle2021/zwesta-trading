@@ -829,6 +829,10 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               final posCurrent = double.tryParse(pos['currentPrice']?.toString() ?? '0') ?? 0;
               final posProfit = double.tryParse(pos['profit']?.toString() ?? '0') ?? 0;
               final isBuy = posType.toUpperCase().contains('BUY');
+              final hasProtectionData =
+                  (pos['profitProtectionArmed'] == true) ||
+                  (pos['lockedProfitFloor'] != null) ||
+                  (pos['breakEvenFloor'] != null);
               return Container(
                 margin: const EdgeInsets.only(bottom: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -837,88 +841,93 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.white.withOpacity(0.06)),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      isBuy ? Icons.arrow_upward : Icons.arrow_downward,
-                      color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
-                      size: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      posSymbol,
-                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: (isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)).withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        isBuy ? 'BUY' : 'SELL',
-                        style: GoogleFonts.poppins(
+                    Row(
+                      children: [
+                        Icon(
+                          isBuy ? Icons.arrow_upward : Icons.arrow_downward,
                           color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
+                          size: 14,
                         ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Flexible(
-                      child: Text(
-                        '${posVolume.toStringAsFixed(2)} lots',
-                        style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '@ ${posEntry.toStringAsFixed(posEntry > 100 ? 2 : 5)}',
-                        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (posCurrent > 0 || posProfit != 0) ...[
-                      const SizedBox(width: 6),
-                      Text(
-                        _formatAmount(currencyProvider, posProfit, currencyCode: displayCurrency),
-                        style: GoogleFonts.poppins(
-                          color: posProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                        const SizedBox(width: 6),
+                        Text(
+                          posSymbol,
+                          style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                         ),
-                        overflow: TextOverflow.ellipsis,
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: (isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            isBuy ? 'BUY' : 'SELL',
+                            style: GoogleFonts.poppins(
+                              color: isBuy ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: Text(
+                            '${posVolume.toStringAsFixed(2)} lots',
+                            style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            '@ ${posEntry.toStringAsFixed(posEntry > 100 ? 2 : 5)}',
+                            style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (posCurrent > 0 || posProfit != 0) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            _formatAmount(currencyProvider, posProfit, currencyCode: displayCurrency),
+                            style: GoogleFonts.poppins(
+                              color: posProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (hasProtectionData) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (pos['profitProtectionBucket'] != null)
+                            _buildProtectionChip(
+                              'Protect ${pos['profitProtectionBucket']}',
+                              const Color(0xFF26A69A),
+                            ),
+                          if ((double.tryParse(pos['lockedProfitFloor']?.toString() ?? '0') ?? 0) > 0)
+                            _buildProtectionChip(
+                              'Floor ${_formatAmount(currencyProvider, double.tryParse(pos['lockedProfitFloor']?.toString() ?? '0') ?? 0, currencyCode: displayCurrency)}',
+                              const Color(0xFF26A69A),
+                            ),
+                          if ((double.tryParse(pos['breakEvenFloor']?.toString() ?? '0') ?? 0) > 0)
+                            _buildProtectionChip(
+                              'BE+ ${_formatAmount(currencyProvider, double.tryParse(pos['breakEvenFloor']?.toString() ?? '0') ?? 0, currencyCode: displayCurrency)}',
+                              const Color(0xFF42A5F5),
+                            ),
+                        ],
                       ),
                     ],
                   ],
                 ),
-                if ((pos['profitProtectionArmed'] == true) || (pos['lockedProfitFloor'] != null) || (pos['breakEvenFloor'] != null)) ...[
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      if (pos['profitProtectionBucket'] != null)
-                        _buildProtectionChip(
-                          'Protect ${pos['profitProtectionBucket']}',
-                          const Color(0xFF26A69A),
-                        ),
-                      if ((double.tryParse(pos['lockedProfitFloor']?.toString() ?? '0') ?? 0) > 0)
-                        _buildProtectionChip(
-                          'Floor ${_formatAmount(currencyProvider, double.tryParse(pos['lockedProfitFloor']?.toString() ?? '0') ?? 0, currencyCode: displayCurrency)}',
-                          const Color(0xFF26A69A),
-                        ),
-                      if ((double.tryParse(pos['breakEvenFloor']?.toString() ?? '0') ?? 0) > 0)
-                        _buildProtectionChip(
-                          'BE+ ${_formatAmount(currencyProvider, double.tryParse(pos['breakEvenFloor']?.toString() ?? '0') ?? 0, currencyCode: displayCurrency)}',
-                          const Color(0xFF42A5F5),
-                        ),
-                    ],
-                  ),
-                ],
               );
             }),
             if (openPositionsCount > 5)

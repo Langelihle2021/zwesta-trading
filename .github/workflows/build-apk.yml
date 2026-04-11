@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -53,11 +56,14 @@ jobs:
         run: |
           rm -rf ~/.gradle
           rm -rf android/.gradle
+          rm -rf build/
           flutter clean
-          flutter pub cache clean --force
       
       - name: Get dependencies
         run: 'flutter pub get --enforce-lockfile'
+
+      - name: Flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
       
       - name: Build APK
         run: 'flutter build apk --release --verbose'
@@ -74,7 +80,13 @@ jobs:
         with:
           files: build/app/outputs/flutter-apk/app-release.apk
           tag_name: apk-${{ github.run_number }}
-          body: Build ${{ github.run_number }} - Zwesta Trading System APK
+          name: APK Build ${{ github.run_number }}
+          body: |
+            APK build for commit `${{ github.sha }}`.
+
+            Commit: ${{ steps.commit.outputs.short_sha }}
+            Author: ${{ steps.commit.outputs.author }}
+            Message: ${{ steps.commit.outputs.message }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
