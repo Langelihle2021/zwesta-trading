@@ -9312,6 +9312,12 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
                 rsi_signal = 'SELL'
                 rsi_strength = 15
                 entry_reason.append(f'RSI neutral ({rsi:.0f}) + trend/MD confirmation')
+            elif trend in ['UP', 'DOWN'] and volatility != 'HIGH':
+                # Controlled fallback to avoid hour-long no-trade stalls in low-vol trend phases.
+                # Direction follows trend, with confidence kept moderate and later validated by MACD/trend bonuses.
+                rsi_signal = 'BUY' if trend == 'UP' else 'SELL'
+                rsi_strength = 20
+                entry_reason.append(f'RSI neutral ({rsi:.0f}) + trend-follow fallback ({trend})')
             else:
                 rsi_strength = 0
                 entry_reason.append(f'RSI neutral ({rsi:.0f})')
