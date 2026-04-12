@@ -221,6 +221,31 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     );
   }
 
+  Widget _buildAdaptationChip(Map<String, dynamic> bot) {
+    final adaptationEnabled = bot['autoAdaptationEnabled'] != false;
+    final lastAdaptationReason = (bot['lastAdaptationReason'] ?? '').toString().trim();
+    final lastAdaptationAtRaw = (bot['lastAdaptationAt'] ?? '').toString().trim();
+    final lastAdaptationAt =
+        lastAdaptationAtRaw.isEmpty ? null : DateTime.tryParse(lastAdaptationAtRaw);
+
+    if (!adaptationEnabled) {
+      return _buildMetaChip('Adapt: Off', Colors.white54);
+    }
+
+    var label = 'Adapt: On';
+    if (lastAdaptationAt != null) {
+      label = 'Adapted ${DateFormat('HH:mm').format(lastAdaptationAt.toLocal())}';
+    }
+    if (lastAdaptationReason.isNotEmpty) {
+      final normalizedReason = lastAdaptationReason
+          .replaceAll('; ', ' | ')
+          .replaceAll('recent form', 'form');
+      label = '$label • $normalizedReason';
+    }
+
+    return _buildMetaChip(label, const Color(0xFF80CBC4));
+  }
+
   String _formatBotAggregate(CurrencyProvider currencyProvider, List<Map<String, dynamic>> bots, String field, {int decimals = 2}) {
     final totals = <String, double>{};
     for (final bot in bots) {
@@ -867,6 +892,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   'Fixed: ${_formatAmount(currencyProvider, tradeAmount, decimals: tradeAmount == tradeAmount.roundToDouble() ? 0 : 2, currencyCode: displayCurrency)}',
                   const Color(0xFFAB47BC),
                 ),
+              _buildAdaptationChip(bot),
               if (isDemoBot && promotionStatus != 'not_applicable')
                 _buildPromotionChip(bot),
             ],

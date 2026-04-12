@@ -10627,6 +10627,7 @@ PERSISTED_BOT_STATE_FIELDS = {
     'maxDrawdown', 'peakProfit', 'strategyHistory', 'lastStrategySwitch', 'volatilityLevel',
     'profit', 'drawdownPauseUntil', 'accountBalance', 'accountEquity', 'tradeAmount',
     'selectedPreset', 'presetName',
+    'autoAdaptationEnabled', 'lastAdaptationAt', 'lastAdaptationReason',
     'promotionReadyAt', 'promotionExpiredAt',
     'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode',
     'profitProtection', 'symbolReentryCooldowns'
@@ -10690,6 +10691,9 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'tradeAmount': None,
         'selectedPreset': None,
         'presetName': None,
+        'autoAdaptationEnabled': True,
+        'lastAdaptationAt': None,
+        'lastAdaptationReason': None,
         'promotionReadyAt': None,
         'promotionExpiredAt': None,
         'intelligentScanner': False,
@@ -10999,6 +11003,7 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     bot_state['managementProfile'] = _normalize_management_profile(bot_state.get('managementProfile'))
     bot_state['managementMode'] = bot_state.get('managementMode') or 'assisted'
     bot_state['managementState'] = bot_state.get('managementState') or 'normal'
+    bot_state['autoAdaptationEnabled'] = _coerce_bool(bot_state.get('autoAdaptationEnabled', True), True)
     bot_state['signalThreshold'] = bot_state.get('signalThreshold') or BOT_MANAGEMENT_PROFILES[bot_state['managementProfile']]['signalThreshold']
     restored_symbols = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
     bot_state['symbols'] = validate_and_correct_symbols(restored_symbols, broker_name)
@@ -11630,6 +11635,9 @@ def get_bot_config(bot_id):
                 'allowedVolatility': bot.get('allowedVolatility', ['Very Low', 'Low', 'Medium', 'High']),
                 'managementMode': bot.get('managementMode', 'assisted'),
                 'managementProfile': bot.get('managementProfile', 'beginner'),
+                'autoAdaptationEnabled': _coerce_bool(bot.get('autoAdaptationEnabled', True), True),
+                'lastAdaptationAt': bot.get('lastAdaptationAt'),
+                'lastAdaptationReason': bot.get('lastAdaptationReason'),
                 'tradingMode': bot.get('tradingMode', 'interval'),
                 'tradingInterval': bot.get('tradingInterval', 300),
                 'pollInterval': bot.get('pollInterval', 15),
@@ -14193,6 +14201,11 @@ ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 25
 ADAPTIVE_FORCED_SCANNER_IDLE_CYCLES = 999
 ADAPTIVE_FORCED_SCANNER_THRESHOLD_REDUCTION = 0
 ADAPTIVE_FALLBACK_MIN_STRENGTH = 60
+UNIVERSAL_ADAPTATION_MIN_SAMPLE_TRADES = 6
+UNIVERSAL_ADAPTATION_RECENT_TRADE_WINDOW = 8
+UNIVERSAL_ADAPTATION_COOLDOWN_MINUTES = 30
+UNIVERSAL_ADAPTATION_SUCCESS_WIN_RATE = 60.0
+UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE = 35.0
 LOSS_STREAK_PAUSE_AFTER = 2
 LOSS_STREAK_PAUSE_MINUTES = 20
 LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES = 30
@@ -15378,6 +15391,157 @@ def _sync_demo_bot_with_best_peer(bot_id: str, bot_config: Dict[str, Any]) -> Li
     return synced_fields
 
 
+def _recent_closed_trades(bot_config: Dict[str, Any], limit: int = UNIVERSAL_ADAPTATION_RECENT_TRADE_WINDOW) -> List[Dict[str, Any]]:
+    trade_history = bot_config.get('tradeHistory') or []
+    closed_trades = []
+    for trade in trade_history:
+        if not isinstance(trade, dict):
+            continue
+        status = str(trade.get('status') or '').lower()
+        close_marker = trade.get('exitTime') or trade.get('time_close')
+        if status == 'closed' or close_marker:
+            closed_trades.append(trade)
+
+    closed_trades.sort(key=_trade_history_timestamp_key)
+    if limit <= 0:
+        return closed_trades
+    return closed_trades[-limit:]
+
+
+def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, Any]) -> List[str]:
+    if not _coerce_bool(bot_config.get('autoAdaptationEnabled', True), True):
+        return []
+
+    now = datetime.now()
+    last_adaptation_raw = bot_config.get('lastAdaptationAt')
+    if last_adaptation_raw:
+        try:
+            last_adaptation_at = datetime.fromisoformat(str(last_adaptation_raw))
+            if (now - last_adaptation_at).total_seconds() < (UNIVERSAL_ADAPTATION_COOLDOWN_MINUTES * 60):
+                return []
+        except Exception:
+            pass
+
+    profile = _normalize_management_profile(bot_config.get('managementProfile'))
+    defaults = BOT_MANAGEMENT_PROFILES.get(profile, BOT_MANAGEMENT_PROFILES['beginner'])
+    changes: List[str] = []
+    reasons: List[str] = []
+
+    current_threshold = max(int(bot_config.get('signalThreshold') or defaults['signalThreshold']), ADAPTIVE_SIGNAL_THRESHOLD_MIN)
+    current_allowed_volatility = list(bot_config.get('allowedVolatility') or defaults['allowedVolatility'])
+    if not current_allowed_volatility:
+        current_allowed_volatility = list(defaults['allowedVolatility'])
+
+    current_drawdown_percent = float(bot_config.get('drawdownPausePercent') or defaults['drawdownPausePercent'])
+    current_drawdown_hours = float(bot_config.get('drawdownPauseHours') or defaults['drawdownPauseHours'])
+    drawdown_percent_min, drawdown_percent_max = BOT_RISK_LIMITS['drawdownPausePercent']
+    drawdown_hours_min, drawdown_hours_max = BOT_RISK_LIMITS['drawdownPauseHours']
+
+    open_positions = bot_config.get('open_positions') or {}
+    idle_cycles = int(bot_config.get('adaptiveSignalMissCount') or 0)
+    no_open_positions = not bool(open_positions)
+
+    if no_open_positions and idle_cycles >= max(2, ADAPTIVE_SCANNER_TRIGGER_MISSES + 2):
+        if not bot_config.get('intelligentScanner', False):
+            bot_config['intelligentScanner'] = True
+            changes.append('intelligentScanner=enabled')
+        lowered_threshold = max(ADAPTIVE_SIGNAL_THRESHOLD_MIN, current_threshold - 5)
+        if lowered_threshold != current_threshold:
+            bot_config['signalThreshold'] = lowered_threshold
+            current_threshold = lowered_threshold
+            changes.append(f'signalThreshold={lowered_threshold}')
+        reasons.append(f'idle reallocation after {idle_cycles} missed cycles')
+
+    recent_closed = _recent_closed_trades(bot_config)
+    if len(recent_closed) >= UNIVERSAL_ADAPTATION_MIN_SAMPLE_TRADES:
+        recent_profit = sum(float(trade.get('profit') or 0.0) for trade in recent_closed)
+        recent_wins = sum(1 for trade in recent_closed if float(trade.get('profit') or 0.0) > 0)
+        recent_win_rate = (recent_wins / len(recent_closed)) * 100.0
+        consecutive_losses = 0
+        for trade in reversed(recent_closed):
+            if float(trade.get('profit') or 0.0) < 0:
+                consecutive_losses += 1
+            else:
+                break
+
+        if recent_profit > 0 and recent_win_rate >= UNIVERSAL_ADAPTATION_SUCCESS_WIN_RATE:
+            target_threshold = max(ADAPTIVE_SIGNAL_THRESHOLD_MIN, current_threshold - 3)
+            if target_threshold != current_threshold:
+                bot_config['signalThreshold'] = target_threshold
+                current_threshold = target_threshold
+                changes.append(f'signalThreshold={target_threshold}')
+
+            if not bot_config.get('dynamicSizing', True):
+                bot_config['dynamicSizing'] = True
+                changes.append('dynamicSizing=enabled')
+
+            if profile != 'small_account' and 'High' not in current_allowed_volatility:
+                next_allowed = list(current_allowed_volatility)
+                next_allowed.append('High')
+                bot_config['allowedVolatility'] = next_allowed
+                current_allowed_volatility = next_allowed
+                changes.append('allowedVolatility+=High')
+
+            relaxed_drawdown_percent = min(drawdown_percent_max, current_drawdown_percent + 1.0)
+            if relaxed_drawdown_percent != current_drawdown_percent:
+                bot_config['drawdownPausePercent'] = relaxed_drawdown_percent
+                current_drawdown_percent = relaxed_drawdown_percent
+                changes.append(f'drawdownPausePercent={relaxed_drawdown_percent:.1f}')
+
+            shorter_drawdown_hours = max(drawdown_hours_min, current_drawdown_hours - 1.0)
+            if shorter_drawdown_hours != current_drawdown_hours:
+                bot_config['drawdownPauseHours'] = shorter_drawdown_hours
+                current_drawdown_hours = shorter_drawdown_hours
+                changes.append(f'drawdownPauseHours={shorter_drawdown_hours:.1f}')
+
+            reasons.append(
+                f'strong recent form ({recent_win_rate:.0f}% win rate, {recent_profit:.2f} profit over {len(recent_closed)} trades)'
+            )
+        elif recent_profit < 0 or recent_win_rate <= UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE or consecutive_losses >= 3:
+            target_threshold = min(85, current_threshold + 5)
+            if target_threshold != current_threshold:
+                bot_config['signalThreshold'] = target_threshold
+                current_threshold = target_threshold
+                changes.append(f'signalThreshold={target_threshold}')
+
+            safer_allowed = [
+                level for level in current_allowed_volatility if level in ['Very Low', 'Low', 'Medium']
+            ] or ['Very Low', 'Low', 'Medium']
+            if safer_allowed != current_allowed_volatility:
+                bot_config['allowedVolatility'] = safer_allowed
+                current_allowed_volatility = safer_allowed
+                changes.append('allowedVolatility=tightened')
+
+            tighter_drawdown_percent = max(drawdown_percent_min, current_drawdown_percent - 1.0)
+            if tighter_drawdown_percent != current_drawdown_percent:
+                bot_config['drawdownPausePercent'] = tighter_drawdown_percent
+                current_drawdown_percent = tighter_drawdown_percent
+                changes.append(f'drawdownPausePercent={tighter_drawdown_percent:.1f}')
+
+            longer_drawdown_hours = min(drawdown_hours_max, current_drawdown_hours + 1.0)
+            if longer_drawdown_hours != current_drawdown_hours:
+                bot_config['drawdownPauseHours'] = longer_drawdown_hours
+                current_drawdown_hours = longer_drawdown_hours
+                changes.append(f'drawdownPauseHours={longer_drawdown_hours:.1f}')
+
+            if not bot_config.get('intelligentScanner', False) and no_open_positions:
+                bot_config['intelligentScanner'] = True
+                changes.append('intelligentScanner=enabled')
+
+            reasons.append(
+                f'weak recent form ({recent_win_rate:.0f}% win rate, {recent_profit:.2f} profit over {len(recent_closed)} trades)'
+            )
+
+    if changes:
+        bot_config['lastAdaptationAt'] = now.isoformat()
+        bot_config['lastAdaptationReason'] = '; '.join(reasons)
+        logger.info(
+            f"🧠 Bot {bot_id}: Universal adaptation applied -> {', '.join(changes)} | {bot_config['lastAdaptationReason']}"
+        )
+
+    return changes
+
+
 def _reset_adaptive_signal_threshold(bot_config: Dict[str, Any]) -> bool:
     had_adaptive_state = any(
         [
@@ -15938,6 +16102,7 @@ def create_bot():
             trading_interval = sanitized_risk_config['tradingInterval']
             poll_interval = sanitized_risk_config['pollInterval']
             trading_enabled = data.get('enabled', True)
+            auto_adaptation_enabled = _coerce_bool(data.get('autoAdaptationEnabled', True), True)
             selected_preset = str(data.get('selectedPreset') or '').strip() or None
             preset_name = str(data.get('presetName') or '').strip() or None
             trade_amount = data.get('tradeAmount')  # Fixed amount in the broker account currency (overrides risk %)
@@ -16050,6 +16215,9 @@ def create_bot():
                 'enabled': trading_enabled,
                 'selectedPreset': selected_preset,
                 'presetName': preset_name,
+                'autoAdaptationEnabled': auto_adaptation_enabled,
+                'lastAdaptationAt': None,
+                'lastAdaptationReason': None,
                 'promotionReadyAt': None,
                 'promotionExpiredAt': None,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
@@ -16847,6 +17015,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                     logger.info(
                         f"🧩 Bot {bot_id}: Synced demo behavior profile from "
                         f"{bot_config.get('behaviorProfileSourceBotId')} ({', '.join(demo_profile_sync)})"
+                    )
+
+                universal_adaptation_changes = apply_universal_performance_adaptation(bot_id, bot_config)
+                if universal_adaptation_changes:
+                    logger.info(
+                        f"🧠 Bot {bot_id}: Universal performance adaptation updated "
+                        f"{', '.join(universal_adaptation_changes)}"
                     )
 
                 # ENHANCED LOGGING: Log signal evaluation for ALL symbols upfront
@@ -18804,6 +18979,9 @@ def bot_summary():
                 'signalThreshold': bot.get('effectiveSignalThreshold', bot.get('signalThreshold', 70)),
                 'managementMode': bot.get('managementMode', 'assisted'),
                 'managementProfile': bot.get('managementProfile', 'beginner'),
+                'autoAdaptationEnabled': _coerce_bool(bot.get('autoAdaptationEnabled', True), True),
+                'lastAdaptationAt': bot.get('lastAdaptationAt'),
+                'lastAdaptationReason': bot.get('lastAdaptationReason'),
                 'selectedPreset': bot.get('selectedPreset'),
                 'presetName': bot.get('presetName'),
                 'promotionStatus': promotion_state['status'],
