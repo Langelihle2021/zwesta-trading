@@ -14712,6 +14712,118 @@ def _extract_latest_trade_timestamp(trades: List[Dict[str, Any]]) -> Optional[da
     return latest_dt
 
 
+def _sync_demo_bot_with_best_peer(bot_id: str, bot_config: Dict[str, Any]) -> List[str]:
+    """Align a demo bot with the user's best-performing peer bot to avoid idle, over-restricted behavior."""
+    if not isinstance(bot_config, dict):
+        return []
+
+    mode = str(bot_config.get('mode') or 'demo').strip().lower()
+    if mode != 'demo':
+        return []
+
+    user_id = bot_config.get('user_id')
+    if not user_id:
+        return []
+
+    current_symbols = {
+        _normalize_symbol_base(symbol)
+        for symbol in (bot_config.get('symbols') or [])
+        if _normalize_symbol_base(symbol)
+    }
+    current_strategy = str(bot_config.get('strategy') or '').strip().lower()
+
+    best_peer = None
+    best_score = None
+    for peer_id, peer_bot in active_bots.items():
+        if peer_id == bot_id or not isinstance(peer_bot, dict):
+            continue
+        if peer_bot.get('user_id') != user_id:
+            continue
+
+        peer_symbols = {
+            _normalize_symbol_base(symbol)
+            for symbol in (peer_bot.get('symbols') or [])
+            if _normalize_symbol_base(symbol)
+        }
+        shared_symbols = len(current_symbols & peer_symbols)
+        peer_strategy = str(peer_bot.get('strategy') or '').strip().lower()
+        strategy_match = 1 if current_strategy and current_strategy == peer_strategy else 0
+        peer_profit = _safe_float(peer_bot.get('totalProfit'), 0.0)
+        peer_trades = int(peer_bot.get('totalTrades') or 0)
+        peer_win_rate = 0.0
+        if peer_trades > 0:
+            peer_win_rate = (float(peer_bot.get('winningTrades') or 0) / max(peer_trades, 1)) * 100.0
+
+        if shared_symbols == 0 and strategy_match == 0:
+            continue
+        if peer_trades <= 0:
+            continue
+
+        score = (shared_symbols, strategy_match, peer_profit, peer_win_rate, peer_trades)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_peer = peer_bot
+
+    if not best_peer:
+        return []
+
+    synced_fields: List[str] = []
+    sync_keys = (
+        'managementMode',
+        'managementProfile',
+        'signalThreshold',
+        'allowedVolatility',
+        'intelligentScanner',
+        'autoSwitch',
+        'dynamicSizing',
+        'tradingMode',
+        'tradingInterval',
+        'pollInterval',
+        'maxOpenPositions',
+        'maxOpenTrades',
+        'maxPositionsPerSymbol',
+    )
+    for key in sync_keys:
+        peer_value = best_peer.get(key)
+        if peer_value is None:
+            continue
+        if bot_config.get(key) != peer_value:
+            if isinstance(peer_value, list):
+                bot_config[key] = list(peer_value)
+            elif isinstance(peer_value, dict):
+                bot_config[key] = dict(peer_value)
+            else:
+                bot_config[key] = peer_value
+            synced_fields.append(key)
+
+    peer_protection = best_peer.get('profitProtection')
+    if isinstance(peer_protection, dict):
+        normalized_peer_protection = _normalize_profit_protection_config(peer_protection)
+        if bot_config.get('profitProtection') != normalized_peer_protection:
+            bot_config['profitProtection'] = normalized_peer_protection
+            synced_fields.append('profitProtection')
+
+    for transient_key, reset_value in (
+        ('managementState', 'normal'),
+        ('adaptiveSignalThresholdOffset', 0),
+        ('adaptiveSignalMissCount', 0),
+        ('adaptiveSignalThresholdReason', None),
+        ('effectiveSignalThreshold', None),
+        ('lossStreakPauseUntil', None),
+        ('consecutiveLosses', 0),
+        ('pauseReason', None),
+    ):
+        if bot_config.get(transient_key) != reset_value:
+            bot_config[transient_key] = reset_value
+            synced_fields.append(transient_key)
+
+    if synced_fields:
+        bot_config['behaviorProfileSourceBotId'] = best_peer.get('botId')
+        bot_config['behaviorProfileSyncedAt'] = datetime.now().isoformat()
+
+    return synced_fields
+
+
 def _reset_adaptive_signal_threshold(bot_config: Dict[str, Any]) -> bool:
     had_adaptive_state = any(
         [
@@ -16147,6 +16259,13 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         bot_config['status'] = 'ACTIVE'
                         bot_config['pauseReason'] = None
                 
+                demo_profile_sync = _sync_demo_bot_with_best_peer(bot_id, bot_config)
+                if demo_profile_sync:
+                    logger.info(
+                        f"🧩 Bot {bot_id}: Synced demo behavior profile from "
+                        f"{bot_config.get('behaviorProfileSourceBotId')} ({', '.join(demo_profile_sync)})"
+                    )
+
                 # ENHANCED LOGGING: Log signal evaluation for ALL symbols upfront
                 management_state = apply_assisted_management_overrides(bot_config)
                 base_signal_threshold = max(int(bot_config.get('signalThreshold', 70) or 70), ADAPTIVE_SIGNAL_THRESHOLD_MIN)
