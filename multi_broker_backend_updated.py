@@ -6894,10 +6894,25 @@ def get_account_balances():
                             cache_empty = False
 
                     # Diagnostics: Log cache status
+                    # Suppress repeated ZAR diagnostic warnings during polling - only show once per hour
+                    cache_diag_key = f"zar_cache_warning_{broker_name}_{account_num}"
+                    last_zar_warning = getattr(get_account_balances, '_last_warnings', {}).get(cache_diag_key, 0)
+                    now_unix = time.time()
+                    
                     if cache_empty:
-                        logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Returning disconnected account state without probing MT5 from balances endpoint.")
+                        # Only log warning if more than 1 hour has passed since last warning
+                        if now_unix - last_zar_warning > 3600:
+                            logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Returning disconnected account state without probing MT5 from balances endpoint.")
+                            if not hasattr(get_account_balances, '_last_warnings'):
+                                get_account_balances._last_warnings = {}
+                            get_account_balances._last_warnings[cache_diag_key] = now_unix
                     else:
-                        logger.info(f"[DIAGNOSTIC] Cached balance present for {broker_name} {account_num}.")
+                        # Show positive cache hit once per hour only
+                        if now_unix - last_zar_warning > 3600:
+                            logger.info(f"[DIAGNOSTIC] Cached balance present for {broker_name} {account_num}.")
+                            if not hasattr(get_account_balances, '_last_warnings'):
+                                get_account_balances._last_warnings = {}
+                            get_account_balances._last_warnings[cache_diag_key] = now_unix
                     if cache_empty:
                         logger.warning(f"[WARNING] No cached or live balance for {broker_name} {account_num}. Returning $0 and warning in API response.")
                         error_msg = "No cached or live balance available. Start a bot to update balance."
@@ -16148,6 +16163,29 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     else:
                                         logger.warning(f"Bot {bot_id}: MT5 not ready after {timeout_for_this_cycle}s - will retry next cycle")
                                         # STAGGER: Add random delay to prevent thundering herd
+                                
+                                # ==================== AUTO-PAUSE CHECK: MT5 AutoTrading ====================
+                                # If MT5 is ready but AutoTrading is disabled, pause bot with clear reason
+                                # This catches the case where MT5 terminal lost AutoTrading enable mid-session
+                                try:
+                                    import MetaTrader5 as mt5_check
+                                    term_info = mt5_check.terminal_info()
+                                    if term_info and not term_info.trade_allowed:
+                                        logger.error(f"❌ Bot {bot_id}: MT5 AutoTrading is DISABLED - pausing bot")
+                                        logger.error(f"   To resume: Enable AutoTrading in MT5, then restart this bot")
+                                        bot_config['status'] = 'paused'
+                                        bot_config['pauseReason'] = 'MT5 AutoTrading disabled - enable in terminal and restart'
+                                        bot_config['enabled'] = False
+                                        persist_bot_runtime_state(bot_id)
+                                        conn = get_db_connection()
+                                        cursor = conn.cursor()
+                                        cursor.execute('UPDATE user_bots SET status=?, enabled=0 WHERE bot_id=?', ('paused', bot_id))
+                                        conn.commit()
+                                        conn.close()
+                                        running_bots[bot_id] = False
+                                        return  # Exit trading loop
+                                except Exception as auto_pause_e:
+                                    logger.debug(f"Bot {bot_id}: AutoTrading check: {auto_pause_e}")
                                         stagger_delay = random.uniform(2, 12)
                                         actual_wait = trading_interval + stagger_delay
                                         logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
@@ -24242,6 +24280,29 @@ if __name__ == '__main__':
     logger.info("Starting Zwesta Multi-Broker Backend")
     logger.info(f"Mode: {ENVIRONMENT.upper()}")
     logger.info("Connections will be established when users provide broker credentials")
+    
+    # ==================== STARTUP PRECHECK: MT5 AutoTrading ====================
+    # Verify MT5 terminal has AutoTrading enabled BEFORE starting any bots
+    # This prevents bots from spinning up, connecting, seeing retcode 10027, and failing
+    try:
+        import MetaTrader5 as mt5_precheck
+        term_info = mt5_precheck.terminal_info()
+        if term_info:
+            if not term_info.trade_allowed:
+                logger.error("❌ [STARTUP] CRITICAL: MT5 AutoTrading is DISABLED")
+                logger.error("   Enable AutoTrading by:")
+                logger.error("   1. Open MT5 terminal(s)")
+                logger.error("   2. Click the AutoTrading button on toolbar (should be GREEN)")
+                logger.error("   3. Go to Tools > Options > Expert Advisors > Enable 'Allow algorithmic trading'")
+                logger.error("   4. Restart the backend")
+                logger.error("   Exiting now to prevent bot failures...")
+                sys.exit(1)
+            else:
+                logger.info("✅ [STARTUP] MT5 AutoTrading ENABLED - bots will be able to trade")
+        else:
+            logger.warning("⚠️  [STARTUP] Could not verify MT5 terminal - AutoTrading check skipped (MT5 may not be running yet)")
+    except Exception as e:
+        logger.warning(f"⚠️  [STARTUP] MT5 AutoTrading precheck failed (non-critical): {e}")
     
     # CRITICAL: Warm up MT5 connection on main thread BEFORE any bot threads start
     # This establishes the IPC pipe to the terminal; bot threads can then reuse it
