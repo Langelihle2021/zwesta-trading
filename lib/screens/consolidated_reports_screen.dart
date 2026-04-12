@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/environment_config.dart';
 import '../widgets/logo_widget.dart';
@@ -20,6 +21,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
   Map<String, dynamic> _reportData = {};
   bool _isLoading = false;
   String? _errorMessage;
+  String _selectedMode = 'DEMO';
 
   String _normalizeCurrency(dynamic value) {
     final currency = value?.toString().trim().toUpperCase();
@@ -54,7 +56,19 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadReports();
+    _initializeMode();
+  }
+
+  Future<void> _initializeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = (prefs.getString('trading_mode') ?? 'DEMO').toUpperCase();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedMode = mode;
+    });
+    await _loadReports();
   }
 
   Future<void> _loadReports() async {
@@ -64,14 +78,87 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
     });
 
     try {
-      final response = await http
-          .get(Uri.parse('$_apiUrl/api/reports/summary'))
-          .timeout(const Duration(seconds: 10));
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      await prefs.setString('trading_mode', _selectedMode);
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+      if (sessionToken == null || sessionToken.isEmpty) {
         setState(() {
-          _reportData = data;
+          _errorMessage = 'Session expired. Please login again.';
+        });
+        return;
+      }
+
+      final responses = await Future.wait([
+        http.get(
+          Uri.parse('$_apiUrl/api/account/detailed?mode=$_selectedMode'),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': sessionToken,
+          },
+        ),
+        http.get(
+          Uri.parse('$_apiUrl/api/trades/history?days=30'),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': sessionToken,
+          },
+        ),
+      ]).timeout(const Duration(seconds: 10));
+
+      final accountResponse = responses[0];
+      final tradesResponse = responses[1];
+
+      if (accountResponse.statusCode == 200 && tradesResponse.statusCode == 200) {
+        final accountData = jsonDecode(accountResponse.body) as Map<String, dynamic>;
+        final tradesData = jsonDecode(tradesResponse.body) as Map<String, dynamic>;
+        final account = accountData['account'] as Map<String, dynamic>? ?? {};
+        final trades = (tradesData['trades'] as List? ?? [])
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList();
+
+        final winningTrades = trades.where((trade) => ((trade['profit'] ?? 0) as num).toDouble() > 0).length;
+        final losingTrades = trades.where((trade) => ((trade['profit'] ?? 0) as num).toDouble() <= 0).length;
+        final totalProfit = trades.fold<double>(0, (sum, trade) {
+          final profit = ((trade['profit'] ?? 0) as num).toDouble();
+          return sum + (profit > 0 ? profit : 0);
+        });
+        final totalLoss = trades.fold<double>(0, (sum, trade) {
+          final profit = ((trade['profit'] ?? 0) as num).toDouble();
+          return sum + (profit < 0 ? profit.abs() : 0);
+        });
+        final netProfit = trades.fold<double>(0, (sum, trade) => sum + ((trade['profit'] ?? 0) as num).toDouble());
+        final largestWin = trades.fold<double>(0, (best, trade) {
+          final profit = ((trade['profit'] ?? 0) as num).toDouble();
+          return profit > best ? profit : best;
+        });
+        final largestLoss = trades.fold<double>(0, (worst, trade) {
+          final profit = ((trade['profit'] ?? 0) as num).toDouble();
+          final loss = profit < 0 ? profit.abs() : 0.0;
+          return loss > worst ? loss : worst;
+        });
+        final accountKey = '${_selectedMode} ${account['accountNumber'] ?? 'Account'}';
+
+        setState(() {
+          _reportData = {
+            'success': true,
+            'reports': {
+              accountKey: {
+                'broker': account['broker'] ?? 'Exness',
+                'accountNumber': account['accountNumber'] ?? 'N/A',
+                'currency': account['currency'] ?? 'USD',
+                'totalTrades': trades.length,
+                'winningTrades': winningTrades,
+                'losingTrades': losingTrades,
+                'winRate': trades.isEmpty ? 0.0 : (winningTrades / trades.length) * 100,
+                'totalProfit': totalProfit,
+                'totalLoss': totalLoss,
+                'netProfit': netProfit,
+                'largestWin': largestWin,
+                'largestLoss': largestLoss,
+              },
+            },
+          };
         });
       } else {
         setState(() {
@@ -142,6 +229,35 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Live'),
+                        selected: _selectedMode == 'LIVE',
+                        onSelected: (selected) {
+                          if (!selected) return;
+                          setState(() {
+                            _selectedMode = 'LIVE';
+                          });
+                          _loadReports();
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Demo'),
+                        selected: _selectedMode == 'DEMO',
+                        onSelected: (selected) {
+                          if (!selected) return;
+                          setState(() {
+                            _selectedMode = 'DEMO';
+                          });
+                          _loadReports();
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -204,7 +320,6 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
 
   Widget _buildSummaryCard(Map<String, dynamic> reports) {
     double totalTrades = 0;
-    double totalWins = 0;
     final totalProfitByCurrency = <String, double>{};
     var accountCount = 0;
     double totalWinRate = 0;
@@ -213,7 +328,6 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
       if (report is Map) {
         final currency = _normalizeCurrency(report['currency']);
         totalTrades += report['totalTrades']?.toDouble() ?? 0;
-        totalWins += report['winningTrades']?.toDouble() ?? 0;
         totalProfitByCurrency[currency] = (totalProfitByCurrency[currency] ?? 0.0) + ((report['netProfit'] ?? 0).toDouble());
         totalWinRate += report['winRate']?.toDouble() ?? 0;
         accountCount++;

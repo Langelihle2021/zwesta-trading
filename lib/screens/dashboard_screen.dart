@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/trade.dart';
 import '../providers/fallback_status_provider.dart';
 import '../services/auth_service.dart';
 import '../services/bot_service.dart';
@@ -206,12 +207,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: GoogleFonts.poppins(
-                    color: accent,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    style: GoogleFonts.poppins(
+                      color: accent,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -366,7 +371,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _fetchRealBots() async {
     try {
       final botService = context.read<BotService>();
-      await botService.fetchActiveBots(tradingMode: '', force: true);
+      await botService.fetchActiveBots(tradingMode: '', force: true, includeHistory: true);
       
       if (mounted) {
         setState(() {
@@ -1423,26 +1428,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                         if (_balanceMode == 'all') ...[
                           const SizedBox(height: 14),
-                          Row(
+                          Column(
                             children: [
-                              Expanded(
-                                child: _buildModeSummaryTile(
-                                  mode: 'live',
-                                  title: 'Live Balance',
-                                  value: _formatCurrencyBreakdown(_aggregateAccountBalances(liveAccounts)),
-                                  subtitle: '${liveAccounts.where((a) => a['connected'] == true).length} connected live account${liveAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
-                                  icon: Icons.trending_up,
-                                ),
+                              _buildModeSummaryTile(
+                                mode: 'live',
+                                title: 'Live Balance',
+                                value: _formatCurrencyBreakdown(_aggregateAccountBalances(liveAccounts)),
+                                subtitle: '${liveAccounts.where((a) => a['connected'] == true).length} connected live account${liveAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
+                                icon: Icons.trending_up,
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _buildModeSummaryTile(
-                                  mode: 'demo',
-                                  title: 'Demo Balance',
-                                  value: _formatCurrencyBreakdown(_aggregateAccountBalances(demoAccounts)),
-                                  subtitle: '${demoAccounts.where((a) => a['connected'] == true).length} connected demo account${demoAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
-                                  icon: Icons.science,
-                                ),
+                              const SizedBox(height: 10),
+                              _buildModeSummaryTile(
+                                mode: 'demo',
+                                title: 'Demo Balance',
+                                value: _formatCurrencyBreakdown(_aggregateAccountBalances(demoAccounts)),
+                                subtitle: '${demoAccounts.where((a) => a['connected'] == true).length} connected demo account${demoAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
+                                icon: Icons.science,
                               ),
                             ],
                           ),
@@ -1471,26 +1472,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
           const SizedBox(height: 14),
           if (_balanceMode == 'all') ...[
-            Row(
+            Column(
               children: [
-                Expanded(
-                  child: _buildModeSummaryTile(
-                    mode: 'live',
-                    title: 'Live Accounts',
-                    value: _formatCurrencyBreakdown(_aggregateAccountBalances(liveAccounts)),
-                    subtitle: '${liveAccounts.length} live account${liveAccounts.length == 1 ? '' : 's'} on dashboard',
-                    icon: Icons.account_balance,
-                  ),
+                _buildModeSummaryTile(
+                  mode: 'live',
+                  title: 'Live Accounts',
+                  value: _formatCurrencyBreakdown(_aggregateAccountBalances(liveAccounts)),
+                  subtitle: '${liveAccounts.length} live account${liveAccounts.length == 1 ? '' : 's'} on dashboard',
+                  icon: Icons.account_balance,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildModeSummaryTile(
-                    mode: 'demo',
-                    title: 'Demo Accounts',
-                    value: _formatCurrencyBreakdown(_aggregateAccountBalances(demoAccounts)),
-                    subtitle: '${demoAccounts.length} demo account${demoAccounts.length == 1 ? '' : 's'} on dashboard',
-                    icon: Icons.account_balance_wallet,
-                  ),
+                const SizedBox(height: 10),
+                _buildModeSummaryTile(
+                  mode: 'demo',
+                  title: 'Demo Accounts',
+                  value: _formatCurrencyBreakdown(_aggregateAccountBalances(demoAccounts)),
+                  subtitle: '${demoAccounts.length} demo account${demoAccounts.length == 1 ? '' : 's'} on dashboard',
+                  icon: Icons.account_balance_wallet,
                 ),
               ],
             ),
@@ -1603,7 +1600,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Row(
       children: [
-        Expanded(child: _buildStatPill(Icons.smart_toy, _balanceMode == 'all' ? 'L $liveActiveBots • D $demoActiveBots' : '$activeBots', 'Active Bots', const Color(0xFF7C4DFF))),
+        Expanded(child: _buildStatPill(Icons.smart_toy, _balanceMode == 'all' ? 'Live $liveActiveBots / Demo $demoActiveBots' : '$activeBots', 'Active Bots', const Color(0xFF7C4DFF), valueFontSize: _balanceMode == 'all' ? 12 : 20)),
         const SizedBox(width: 10),
         Expanded(child: _buildStatPill(Icons.swap_horiz, '$totalTrades', 'Trades', const Color(0xFF00E5FF))),
         const SizedBox(width: 10),
@@ -1619,7 +1616,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildStatPill(IconData icon, String value, String label, Color color) => _glassCard(
+  Widget _buildStatPill(IconData icon, String value, String label, Color color, {double valueFontSize = 20}) => _glassCard(
       child: Column(
         children: [
           Container(
@@ -1637,7 +1634,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             maxLines: 2,
             style: GoogleFonts.poppins(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: valueFontSize,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -2288,18 +2285,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── RECENT TRADES ──
   Widget _buildRecentTradesCard() {
-    final allTrades = <Map<String, dynamic>>[];
-    for (final bot in _realBotsList) {
-      final trades = bot['tradeHistory'] ?? [];
-      if (trades is List) {
-        allTrades.addAll(trades.cast<Map<String, dynamic>>());
-      }
-    }
-    allTrades.sort((a, b) {
-      final timeA = DateTime.tryParse(a['time']?.toString() ?? '') ?? DateTime.now();
-      final timeB = DateTime.tryParse(b['time']?.toString() ?? '') ?? DateTime.now();
-      return timeB.compareTo(timeA);
-    });
+    final tradingService = context.watch<TradingService>();
+    final accountCurrency = tradingService.accountCurrency;
+    final recentTrades = [...tradingService.trades]
+      ..sort((a, b) {
+        final timeA = a.closedAt ?? a.openedAt;
+        final timeB = b.closedAt ?? b.openedAt;
+        return timeB.compareTo(timeA);
+      });
 
     return _glassCard(
       child: Column(
@@ -2318,7 +2311,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          if (allTrades.isEmpty)
+          if (recentTrades.isEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(20),
@@ -2332,9 +2325,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             )
           else
-            ...allTrades.take(5).map((trade) {
-              final profit = double.tryParse(trade['profit']?.toString() ?? '0') ?? 0;
-              final direction = trade['direction']?.toString() ?? 'BUY';
+            ...recentTrades.take(5).map((trade) {
+              final profit = trade.profit ?? 0;
+              final direction = trade.type == TradeType.buy ? 'BUY' : 'SELL';
+              final tradeTime = trade.closedAt ?? trade.openedAt;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -2366,18 +2360,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${trade['symbol'] ?? 'EURUSD'}',
+                            trade.symbol,
                             style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
                           ),
                           Text(
-                            '$direction  |  ${trade['time']?.toString().split('.')[0] ?? 'N/A'}',
+                            '$direction  |  ${tradeTime.toLocal().toIso8601String().replaceFirst('T', ' ').split('.').first}',
                             style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10),
                           ),
                         ],
                       ),
                     ),
                     Text(
-                      '${profit >= 0 ? "+" : ""}\$${profit.toStringAsFixed(2)}',
+                      '${profit >= 0 ? "+" : ""}${_formatCurrencyAmount(profit, accountCurrency)}',
                       style: GoogleFonts.poppins(
                         color: profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                         fontWeight: FontWeight.w600,

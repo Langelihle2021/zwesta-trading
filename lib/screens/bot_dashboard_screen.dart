@@ -579,9 +579,15 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final avgTrade = double.tryParse(bot['avgProfitPerTrade']?.toString() ?? '0') ?? 0;
     final maxDrawdown = double.tryParse(bot['maxDrawdown']?.toString() ?? '0') ?? 0;
     final todaysProfit = double.tryParse(bot['dailyProfit']?.toString() ?? '0') ?? 0;
+    final openPositions = (bot['openPositionsPreview'] as List?) ?? (bot['openPositions'] as List?) ?? [];
+    final floatingProfit = double.tryParse(bot['floatingProfit']?.toString() ?? '0') ??
+      openPositions.fold<double>(0, (sum, position) => sum + (double.tryParse(position['profit']?.toString() ?? '0') ?? 0));
+    final currentProfit = double.tryParse(bot['currentProfit']?.toString() ?? '0') ?? profit;
     final accountBalance = double.tryParse(bot['accountBalance']?.toString() ?? '0') ?? 0;
     final accountEquity = double.tryParse(bot['accountEquity']?.toString() ?? '0') ?? 0;
-    final openPositions = (bot['openPositionsPreview'] as List?) ?? (bot['openPositions'] as List?) ?? [];
+    final capitalBasis = double.tryParse(bot['roiBasis']?.toString() ?? '0') ??
+      double.tryParse(bot['totalInvestment']?.toString() ?? '0') ??
+      accountBalance;
     final openPositionsCount = int.tryParse(bot['openPositionsCount']?.toString() ?? '${openPositions.length}') ?? openPositions.length;
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
@@ -727,8 +733,18 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               Text('Running for ', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
               Text(runtime, style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
               const Spacer(),
-              Text("Today's Profit ", style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
-              Text(_formatAmount(currencyProvider, todaysProfit, currencyCode: displayCurrency), style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('Open P/L ', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+              Text(_formatAmount(currencyProvider, floatingProfit, currencyCode: displayCurrency), style: GoogleFonts.poppins(color: floatingProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80), fontWeight: FontWeight.bold, fontSize: 13)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Text('Today closed ', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+              Text(_formatAmount(currencyProvider, todaysProfit, currencyCode: displayCurrency), style: GoogleFonts.poppins(color: todaysProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80), fontWeight: FontWeight.w600, fontSize: 12)),
+              const Spacer(),
+              Text('Current P/L ', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+              Text(_formatAmount(currencyProvider, currentProfit, currencyCode: displayCurrency), style: GoogleFonts.poppins(color: currentProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80), fontWeight: FontWeight.w700, fontSize: 12)),
             ],
           ),
           const SizedBox(height: 10),
@@ -736,7 +752,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             children: [
               _botStat('Trades', '$totalTrades', const Color(0xFF00E5FF)),
               _botStat('Win Rate', '${winRate.toStringAsFixed(1)}%', const Color(0xFF69F0AE)),
-              _botStat('Profit', _formatAmount(currencyProvider, profit, currencyCode: displayCurrency), profit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)),
+              _botStat('Profit', _formatAmount(currencyProvider, currentProfit, currencyCode: displayCurrency), currentProfit >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)),
             ],
           ),
           const SizedBox(height: 8),
@@ -780,6 +796,29 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       ),
                     ],
                   ),
+                  if (capitalBasis > 0) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.savings_outlined, color: Color(0xFFFFA726), size: 16),
+                            const SizedBox(width: 8),
+                            Text('Capital', style: GoogleFonts.poppins(color: Colors.white60, fontSize: 12)),
+                          ],
+                        ),
+                        Flexible(
+                          child: Text(
+                            _formatAmount(currencyProvider, capitalBasis, currencyCode: displayCurrency),
+                            style: GoogleFonts.poppins(color: const Color(0xFFFFA726), fontWeight: FontWeight.w600, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   if (accountEquity > 0 && accountEquity != accountBalance) ...[
                     const SizedBox(height: 4),
                     Row(
@@ -1119,7 +1158,47 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                 color: const Color(0xFF1A1F3A),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 onSelected: (value) async {
-                  if (value == 'delete') {
+                  if (value == 'edit') {
+                    final isEnabled = bot['enabled'] == true;
+                    if (isEnabled) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Stop the bot before reconfiguring it.'),
+                          backgroundColor: Colors.orange,
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                      return;
+                    }
+                    final updated = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => BotConfigurationScreen(botId: botId),
+                      ),
+                    );
+                    if (updated == true && mounted) {
+                      await context.read<BotService>().fetchActiveBots(
+                        tradingMode: _tradingMode,
+                        force: true,
+                      );
+                    }
+                  } else if (value == 'clone') {
+                    final cloned = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => BotConfigurationScreen(
+                          cloneFromBotId: botId,
+                        ),
+                      ),
+                    );
+                    if (cloned == true && mounted) {
+                      await context.read<BotService>().fetchActiveBots(
+                        tradingMode: _tradingMode,
+                        force: true,
+                      );
+                    }
+                  } else if (value == 'delete') {
                     final confirmed = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
@@ -1166,6 +1245,26 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                   }
                 },
                 itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.edit_outlined, color: Color(0xFF00E5FF), size: 18),
+                        const SizedBox(width: 8),
+                        Text('Reconfigure Bot', style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'clone',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.copy_all_outlined, color: Color(0xFF69F0AE), size: 18),
+                        const SizedBox(width: 8),
+                        Text('Clone Bot', style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 13)),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
                     value: 'delete',
                     child: Row(

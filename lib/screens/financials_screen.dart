@@ -1,10 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/account.dart';
 import '../models/financial_statement.dart';
 import '../services/financial_service.dart';
 import '../services/trading_service.dart';
+import '../utils/environment_config.dart';
 import '../utils/constants.dart';
 import '../widgets/logo_widget.dart';
 
@@ -21,6 +26,10 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
   late DateTime startDate;
   late DateTime endDate;
   FinancialStatement? selectedStatement;
+  String _selectedMode = 'DEMO';
+  Account? _selectedAccount;
+  bool _loadingAccount = false;
+  String? _accountWarning;
 
   String _formatCurrency(FinancialStatement stmt, double amount) {
     return FinancialMetrics.formatCurrency(amount, stmt.currency);
@@ -31,20 +40,110 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
     super.initState();
     endDate = DateTime.now();
     startDate = DateTime(endDate.year, endDate.month - 1, endDate.day);
+    _selectedAccount = widget.account;
+    _initializeMode();
+  }
+
+  Future<void> _initializeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = (prefs.getString('trading_mode') ?? 'DEMO').toUpperCase();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedMode = mode;
+    });
+    await _loadAccountForMode(mode);
+  }
+
+  Future<void> _loadAccountForMode(String mode) async {
+    setState(() {
+      _loadingAccount = true;
+      _accountWarning = null;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      await prefs.setString('trading_mode', mode);
+
+      if (sessionToken == null || sessionToken.isEmpty) {
+        setState(() {
+          _accountWarning = 'Session expired. Please login again.';
+          _loadingAccount = false;
+        });
+        return;
+      }
+
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/account/detailed?mode=$mode'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final account = data['account'] as Map<String, dynamic>?;
+        if (account != null) {
+          final updatedAccount = Account(
+            id: data['credential_id']?.toString() ?? mode,
+            accountNumber: account['accountNumber']?.toString() ?? 'N/A',
+            balance: ((account['balance'] ?? 0) as num).toDouble(),
+            usedMargin: ((account['margin'] ?? 0) as num).toDouble(),
+            availableMargin: ((account['marginFree'] ?? 0) as num).toDouble(),
+            profit: ((account['profit'] ?? 0) as num).toDouble(),
+            currency: account['currency']?.toString() ?? widget.account.currency,
+            status: account['connected'] == false ? 'inactive' : 'active',
+            createdAt: DateTime.now(),
+            leverage: account['leverage'] != null ? '1:${account['leverage']}' : widget.account.leverage,
+            broker: account['broker']?.toString() ?? widget.account.broker,
+            server: account['server']?.toString(),
+          );
+
+          if (mounted) {
+            setState(() {
+              _selectedAccount = updatedAccount;
+              _accountWarning = account['warning']?.toString();
+            });
+          }
+        }
+      }
+
+      if (mounted) {
+        final tradingService = context.read<TradingService>();
+        await tradingService.fetchAccounts();
+        await tradingService.fetchTrades();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _accountWarning = 'Could not refresh $mode financial data: $e';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingAccount = false;
+        });
+      }
+    }
   }
 
   void _generateFinancialStatement() async {
     final tradingService = context.read<TradingService>();
     final financialService = context.read<FinancialService>();
+    final selectedAccount = _selectedAccount ?? widget.account;
 
     try {
       final trades = tradingService.trades;
       final statement = await financialService.generateFinancialStatement(
-        widget.account,
+        selectedAccount,
         trades,
         startDate,
         endDate,
-        initialCapital: 10000,
+        initialCapital: selectedAccount.balance,
       );
 
       setState(() {
@@ -89,6 +188,67 @@ class _FinancialsScreenState extends State<FinancialsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                ChoiceChip(
+                  label: const Text('Live'),
+                  selected: _selectedMode == 'LIVE',
+                  onSelected: (selected) {
+                    if (!selected) return;
+                    setState(() => _selectedMode = 'LIVE');
+                    _loadAccountForMode('LIVE');
+                  },
+                ),
+                ChoiceChip(
+                  label: const Text('Demo'),
+                  selected: _selectedMode == 'DEMO',
+                  onSelected: (selected) {
+                    if (!selected) return;
+                    setState(() => _selectedMode = 'DEMO');
+                    _loadAccountForMode('DEMO');
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${_selectedMode == 'LIVE' ? 'Live' : 'Demo'} account basis: ${(_selectedAccount ?? widget.account).accountNumber}',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Balance basis: ${FinancialMetrics.formatCurrency((_selectedAccount ?? widget.account).balance, (_selectedAccount ?? widget.account).currency)}',
+                    style: TextStyle(color: Colors.grey[400]),
+                  ),
+                  if (_loadingAccount)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: LinearProgressIndicator(),
+                    ),
+                  if (_accountWarning != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _accountWarning!,
+                        style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
             // Date Range Selection
             _buildDateRangeSection(),
             const SizedBox(height: 24),

@@ -18,13 +18,25 @@ import 'consolidated_reports_screen.dart';
 import 'dashboard_screen.dart';
 
 class BotConfigurationScreen extends StatefulWidget {
-  const BotConfigurationScreen({Key? key}) : super(key: key);
+  const BotConfigurationScreen({Key? key, this.botId, this.cloneFromBotId})
+      : super(key: key);
+
+  final String? botId;
+  final String? cloneFromBotId;
 
   @override
   State<BotConfigurationScreen> createState() => _BotConfigurationScreenState();
 }
 
 class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
+  bool get _isEditMode => widget.botId != null && widget.botId!.trim().isNotEmpty;
+  bool get _isCloneMode =>
+      !_isEditMode &&
+      widget.cloneFromBotId != null &&
+      widget.cloneFromBotId!.trim().isNotEmpty;
+  String get _configSourceBotId =>
+      _isEditMode ? widget.botId!.trim() : widget.cloneFromBotId!.trim();
+
   // Volatility filter toggle
   bool _volatilityFilterEnabled = true;
   // Intelligent scanner: auto-scan all markets & reallocate to best opportunities
@@ -420,6 +432,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   List<String> _selectedSymbols = [];
   bool _isCreating = false;
   bool _isLoadingData = true;
+  bool _isLoadingExistingBot = false;
   String? _successMessage;
   String? _errorMessage;
 
@@ -1090,7 +1103,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   void initState() {
     super.initState();
     _botIdController = TextEditingController(
-      text: 'bot_${DateTime.now().millisecondsSinceEpoch}',
+      text: _isEditMode
+          ? widget.botId!.trim()
+          : 'bot_${DateTime.now().millisecondsSinceEpoch}',
     );
     _investmentAmountController = TextEditingController();
 
@@ -1100,7 +1115,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
     _initializeScreen();
     _commissionService.fetchCommissions();
-    _loadRiskSettings(); // Load automation risk settings from API
   }
 
   Future<void> _initializeScreen() async {
@@ -1108,7 +1122,138 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     if (!mounted) {
       return;
     }
-    _fetchTradingData();
+    if (_isEditMode || _isCloneMode) {
+      await _loadExistingBotConfig(preserveBotId: _isEditMode);
+      if (!mounted) {
+        return;
+      }
+    } else {
+      await _loadRiskSettings();
+      if (!mounted) {
+        return;
+      }
+    }
+    await _fetchTradingData();
+  }
+
+  String _buildClonedBotId(String sourceBotId) {
+    final sanitized = sourceBotId
+        .trim()
+        .replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
+    return '${sanitized}_copy_${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  Future<void> _loadExistingBotConfig({required bool preserveBotId}) async {
+    setState(() {
+      _isLoadingExistingBot = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      if (sessionToken == null || sessionToken.isEmpty) {
+        throw Exception('Session expired. Please login again.');
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/config/$_configSourceBotId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Session-Token': sessionToken,
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+
+      final data = jsonDecode(response.body);
+      if (response.statusCode != 200 || data['success'] != true) {
+        throw Exception(data['error'] ?? 'Failed to load bot configuration');
+      }
+
+      final config = Map<String, dynamic>.from(data['config'] ?? const {});
+      final credentialId = (config['credentialId'] ?? '').toString().trim();
+      if (credentialId.isNotEmpty) {
+        for (final credential in _brokerService.credentials) {
+          if (credential.credentialId == credentialId) {
+            _brokerService.setActiveCredential(credential);
+            break;
+          }
+        }
+      }
+
+      final symbols = (config['symbols'] as List?)
+              ?.map((item) => item.toString())
+              .where((item) => item.trim().isNotEmpty)
+              .toList() ??
+          <String>[];
+      final allowedVolatility = (config['allowedVolatility'] as List?)
+              ?.map((item) => item.toString())
+              .where((item) => item.trim().isNotEmpty)
+              .toList() ??
+          _allowedVolatility;
+      final profitProtection = Map<String, dynamic>.from(
+        config['profitProtection'] as Map? ?? const {},
+      );
+      final tradeAmount = config['tradeAmount'];
+      final riskPercent = (config['riskPercent'] as num?)?.toDouble() ??
+          ((config['riskPerTrade'] as num?)?.toDouble() ?? _riskPercent * 10) / 10.0;
+
+      setState(() {
+        _botIdController.text = preserveBotId
+            ? (config['botId'] ?? widget.botId).toString()
+            : _buildClonedBotId(
+                (config['botId'] ?? widget.cloneFromBotId).toString(),
+              );
+        _selectedStrategy = (config['strategy'] ?? _selectedStrategy).toString();
+        _selectedSymbols = symbols;
+        _riskPercent = riskPercent;
+        _maxOpenTrades = (config['maxOpenTrades'] as num?)?.toInt() ??
+            (config['maxOpenPositions'] as num?)?.toInt() ??
+            _maxOpenTrades;
+        _maxDrawdownPercent =
+            (config['maxDrawdownPercent'] as num?)?.toDouble() ??
+                (config['drawdownPausePercent'] as num?)?.toDouble() ??
+                _maxDrawdownPercent;
+        _managementProfile =
+            (config['managementProfile'] ?? _managementProfile).toString();
+        _allowedVolatility = allowedVolatility;
+        _intelligentScanner = config['intelligentScanner'] == true;
+        _enableProfitProtection =
+            (profitProtection['enabled'] ?? _enableProfitProtection) == true;
+        _profitProtectionActivationPercent =
+            (profitProtection['activationPercent'] as num?)?.toDouble() ??
+                _profitProtectionActivationPercent;
+        _profitProtectionActivationMinProfit =
+            (profitProtection['activationMinProfit'] as num?)?.toDouble() ??
+                _profitProtectionActivationMinProfit;
+        _profitProtectionRetracePercent =
+            (profitProtection['retraceClosePercent'] as num?)?.toDouble() ??
+                _profitProtectionRetracePercent;
+        _profitProtectionSwitchOnReversal =
+            (profitProtection['switchOnReversal'] ??
+                    _profitProtectionSwitchOnReversal) ==
+                true;
+        _investmentAmountController.text = tradeAmount == null
+            ? ''
+            : ((tradeAmount as num).toDouble() ==
+                    (tradeAmount as num).toDouble().roundToDouble())
+                ? (tradeAmount as num).toDouble().toStringAsFixed(0)
+                : (tradeAmount as num).toDouble().toStringAsFixed(2);
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = _isCloneMode
+            ? 'Failed to load bot to clone: $e'
+            : 'Failed to load existing bot: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingExistingBot = false;
+        });
+      }
+    }
   }
 
   Future<void> _fetchTradingData() async {
@@ -1273,7 +1418,61 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     super.dispose();
   }
 
-  Future<void> _createAndStartBot() async {
+  Map<String, dynamic> _buildBotPayload(BrokerCredential credential) {
+    final internalRiskPerTrade =
+        (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
+    final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
+    final signalThreshold = _recommendedSignalThreshold();
+    final tradingMode = _recommendedTradingMode();
+    final tradingInterval = _recommendedTradingInterval();
+    final pollInterval = _recommendedPollInterval();
+    final autoScanner = _autoScannerEnabled();
+    final accountCurrency = credential.accountCurrency.toUpperCase();
+
+    return {
+      'botId': _botIdController.text.trim(),
+      'credentialId': credential.credentialId,
+      'symbols': _selectedSymbols,
+      'strategy': _selectedStrategy,
+      'riskPercent': _riskPercent,
+      'riskPerTrade': internalRiskPerTrade,
+      'maxOpenTrades': _maxOpenTrades,
+      'maxOpenPositions': _maxOpenTrades,
+      'maxPositionsPerSymbol': maxPositionsPerSymbol,
+      'maxDrawdownPercent': _maxDrawdownPercent,
+      'drawdownPausePercent': _maxDrawdownPercent,
+      'signalThreshold': signalThreshold,
+      'tradingMode': tradingMode,
+      'tradingInterval': tradingInterval,
+      'pollInterval': pollInterval,
+      if (_investmentAmountController.text.isNotEmpty)
+        'tradeAmount': double.tryParse(_investmentAmountController.text),
+      'displayCurrency': accountCurrency,
+      'allowedVolatility': _allowedVolatility,
+      'autoSwitch': true,
+      'dynamicSizing': true,
+      'managementProfile': _managementProfile,
+      'intelligentManagement': {
+        'enabled': true,
+        'profile': _managementProfile,
+        'experienceLevel': _managementProfile,
+        'autoSwitch': true,
+        'dynamicSizing': true,
+      },
+      'enabled': !_isEditMode,
+      'volatilityFilterEnabled': _volatilityFilterEnabled,
+      'intelligentScanner': autoScanner,
+      'profitProtection': {
+        'enabled': _enableProfitProtection,
+        'activationPercent': _profitProtectionActivationPercent,
+        'activationMinProfit': _profitProtectionActivationMinProfit,
+        'retraceClosePercent': _profitProtectionRetracePercent,
+        'switchOnReversal': _profitProtectionSwitchOnReversal,
+      },
+    };
+  }
+
+  Future<void> _createAndStartBot({bool restartAfterSave = false}) async {
     // STEP 1: Check if broker is integrated
     if (!_brokerService.hasCredentials) {
       _showError('Please setup broker integration first!');
@@ -1349,15 +1548,6 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       print('   Broker: ${credential.broker}');
       print('   Account: ${credential.accountNumber}');
 
-      final internalRiskPerTrade =
-          (_riskPercent * 10).clamp(5.0, 30.0).toDouble();
-      final maxPositionsPerSymbol = _recommendedMaxPositionsPerSymbol();
-      final signalThreshold = _recommendedSignalThreshold();
-      final tradingMode = _recommendedTradingMode();
-      final tradingInterval = _recommendedTradingInterval();
-      final pollInterval = _recommendedPollInterval();
-      final autoScanner = _autoScannerEnabled();
-      final accountCurrency = credential.accountCurrency.toUpperCase();
       final fixedAmountWarning = _fixedTradeAmountWarningData(context);
       if (fixedAmountWarning != null) {
         final shouldContinue = await _confirmLowFixedTradeAmount(context, fixedAmountWarning);
@@ -1369,49 +1559,71 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         }
       }
 
-      // STEP 2: Create bot with credential_id
-      final botPayload = {
-        'botId': _botIdController.text,
-        'credentialId':
-            credential.credentialId, // ✅ Safe null-checked credential reference
-        'symbols': _selectedSymbols,
-        'strategy': _selectedStrategy,
-        'riskPercent': _riskPercent, // ✅ NEW: Automated risk %
-        'riskPerTrade': internalRiskPerTrade,
-        'maxOpenTrades': _maxOpenTrades, // ✅ NEW: Max open trades
-        'maxOpenPositions': _maxOpenTrades,
-        'maxPositionsPerSymbol': maxPositionsPerSymbol,
-        'maxDrawdownPercent': _maxDrawdownPercent, // ✅ NEW: Max drawdown %
-        'drawdownPausePercent': _maxDrawdownPercent,
-        'signalThreshold': signalThreshold,
-        'tradingMode': tradingMode,
-        'tradingInterval': tradingInterval,
-        'pollInterval': pollInterval,
-        if (_investmentAmountController.text.isNotEmpty)
-          'tradeAmount': double.tryParse(_investmentAmountController.text),
-        'displayCurrency': accountCurrency,
-        'allowedVolatility': _allowedVolatility,
-        'autoSwitch': true,
-        'dynamicSizing': true,
-        'managementProfile': _managementProfile,
-        'intelligentManagement': {
-          'enabled': true,
-          'profile': _managementProfile,
-          'experienceLevel': _managementProfile,
-          'autoSwitch': true,
-          'dynamicSizing': true,
-        },
-        'enabled': true,
-        'volatilityFilterEnabled': _volatilityFilterEnabled,
-        'intelligentScanner': autoScanner,
-        'profitProtection': {
-          'enabled': _enableProfitProtection,
-          'activationPercent': _profitProtectionActivationPercent,
-          'activationMinProfit': _profitProtectionActivationMinProfit,
-          'retraceClosePercent': _profitProtectionRetracePercent,
-          'switchOnReversal': _profitProtectionSwitchOnReversal,
-        },
-      };
+      final botPayload = _buildBotPayload(credential);
+
+      if (_isEditMode) {
+        final updateResponse = await http
+            .put(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/config/${widget.botId}'),
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Session-Token': sessionToken,
+              },
+              body: jsonEncode(botPayload),
+            )
+            .timeout(const Duration(seconds: 30));
+
+        final updateData = jsonDecode(updateResponse.body);
+        if (updateResponse.statusCode != 200 || updateData['success'] != true) {
+          throw Exception(updateData['error'] ??
+              'Failed to update bot: ${updateResponse.statusCode}');
+        }
+
+        if (restartAfterSave) {
+          final restartResponse = await http
+              .post(
+                Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/start'),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Session-Token': sessionToken,
+                },
+                body: jsonEncode({
+                  'botId': widget.botId,
+                  'user_id': null,
+                }),
+              )
+              .timeout(const Duration(seconds: 30));
+
+          final restartData = jsonDecode(restartResponse.body);
+          if (restartResponse.statusCode != 200 || restartData['success'] != true) {
+            throw Exception(restartData['error'] ??
+                'Bot settings saved, but restart failed: ${restartResponse.statusCode}');
+          }
+        }
+
+        final botService = Provider.of<BotService>(context, listen: false);
+        final currentTradingMode = await _currentTradingMode();
+        await botService.fetchActiveBots(
+          tradingMode: currentTradingMode,
+          force: true,
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(restartAfterSave
+                ? 'Bot updated and restarted successfully.'
+                : (updateData['message'] ?? 'Bot updated successfully.')),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        Navigator.of(context).pop(true);
+        return;
+      }
 
       final createResponse = await http
           .post(
@@ -2115,9 +2327,15 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                         Expanded(
                           child: TextField(
                             controller: _botIdController,
+                            enabled: !_isEditMode,
                             decoration: InputDecoration(
                               labelText: 'Bot ID',
-                              hintText: 'bot_trend_1',
+                              hintText: (_isEditMode || _isCloneMode) ? null : 'bot_trend_1',
+                              helperText: _isEditMode
+                                  ? 'Bot ID stays fixed when reconfiguring an existing bot.'
+                                  : (_isCloneMode
+                                      ? 'This is a cloned setup. Change the bot ID if you want a custom copy name.'
+                                      : null),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                               ),
@@ -3019,8 +3237,38 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
             Center(
               child: Column(
                 children: [
+                  if (_isEditMode) ...[
+                    OutlinedButton.icon(
+                      onPressed: (_isCreating || _isLoadingExistingBot)
+                          ? null
+                          : () => _createAndStartBot(restartAfterSave: true),
+                      icon: _isCreating
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh),
+                      label: Text(
+                        _isCreating
+                            ? 'Saving & Restarting...'
+                            : 'Save & Restart Bot',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF00E5FF),
+                        side: const BorderSide(color: Color(0xFF00E5FF)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 14,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   ElevatedButton.icon(
-                    onPressed: _isCreating ? null : _createAndStartBot,
+                    onPressed: (_isCreating || _isLoadingExistingBot)
+                        ? null
+                        : _createAndStartBot,
                     icon: _isCreating
                         ? const SizedBox(
                             width: 20,
@@ -3029,7 +3277,11 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                           )
                         : const Icon(Icons.add_circle),
                     label: Text(
-                        _isCreating ? 'Creating & Starting Bot...' : 'Create & Start Bot'),
+                        _isCreating
+                            ? (_isEditMode ? 'Saving Bot Changes...' : 'Creating & Starting Bot...')
+                            : (_isEditMode
+                                ? 'Save Bot Changes'
+                                : (_isCloneMode ? 'Create Cloned Bot' : 'Create & Start Bot'))),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       padding: const EdgeInsets.symmetric(

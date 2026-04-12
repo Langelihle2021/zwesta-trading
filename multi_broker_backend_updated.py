@@ -10687,6 +10687,177 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     }
 
 
+def _trade_history_timestamp_key(trade: Dict[str, Any]) -> float:
+    raw_ts = trade.get('timestamp')
+    if isinstance(raw_ts, (int, float)):
+        return float(raw_ts)
+    if raw_ts is not None:
+        try:
+            return float(raw_ts)
+        except Exception:
+            pass
+
+    for field in ('exitTime', 'time_close', 'time', 'entryTime', 'time_open'):
+        raw_value = trade.get(field)
+        if not raw_value:
+            continue
+        try:
+            return datetime.fromisoformat(str(raw_value)).timestamp() * 1000.0
+        except Exception:
+            continue
+
+    return 0.0
+
+
+def _rebuild_bot_profit_tracking(bot_state: Dict[str, Any]) -> None:
+    trade_history = bot_state.get('tradeHistory') or []
+    closed_trades = []
+    for trade in trade_history:
+        if not isinstance(trade, dict):
+            continue
+        status = str(trade.get('status') or '').lower()
+        close_marker = trade.get('exitTime') or trade.get('time_close')
+        if status == 'closed' or close_marker:
+            closed_trades.append(trade)
+
+    closed_trades.sort(key=_trade_history_timestamp_key)
+
+    total_profit = 0.0
+    winning_trades = 0
+    total_losses = 0.0
+    total_investment = 0.0
+    peak_profit = 0.0
+    max_drawdown = 0.0
+    daily_profits: Dict[str, float] = {}
+    profit_history = []
+
+    for trade in closed_trades:
+        profit = float(trade.get('profit') or 0.0)
+        total_profit += profit
+        if profit > 0:
+            winning_trades += 1
+        elif profit < 0:
+            total_losses += abs(profit)
+
+        try:
+            total_investment += float(trade.get('volume') or 0.0) * float(trade.get('entryPrice') or 0.0)
+        except Exception:
+            pass
+
+        peak_profit = max(peak_profit, total_profit)
+        max_drawdown = max(max_drawdown, peak_profit - total_profit)
+
+        close_time = trade.get('exitTime') or trade.get('time_close') or trade.get('time') or trade.get('entryTime')
+        if close_time:
+            try:
+                close_dt = datetime.fromisoformat(str(close_time))
+                day_key = close_dt.strftime('%Y-%m-%d')
+                daily_profits[day_key] = round(daily_profits.get(day_key, 0.0) + profit, 2)
+            except Exception:
+                pass
+
+        profit_history.append({
+            'timestamp': int(_trade_history_timestamp_key(trade)),
+            'profit': round(total_profit, 2),
+            'trades': len(profit_history) + 1,
+        })
+
+    today_key = datetime.now().strftime('%Y-%m-%d')
+    bot_state['totalTrades'] = max(int(bot_state.get('totalTrades', 0) or 0), len(trade_history), len(closed_trades))
+    bot_state['winningTrades'] = winning_trades
+    bot_state['totalProfit'] = round(total_profit, 2)
+    bot_state['totalLosses'] = round(total_losses, 2)
+    if total_investment > 0:
+        bot_state['totalInvestment'] = round(total_investment, 2)
+    bot_state['peakProfit'] = round(peak_profit, 2)
+    bot_state['maxDrawdown'] = round(max_drawdown, 2)
+    bot_state['profitHistory'] = profit_history[-500:]
+    bot_state['dailyProfits'] = daily_profits
+    bot_state['dailyProfit'] = float(daily_profits.get(today_key, 0.0) or 0.0)
+    bot_state['profit'] = round(total_profit, 2)
+
+
+def _merge_bot_trade_history_from_db(bot_state: Dict[str, Any], bot_id: str) -> None:
+    existing_history = bot_state.get('tradeHistory') or []
+    merged_by_ticket: Dict[str, Dict[str, Any]] = {}
+    ordered_without_ticket = []
+
+    for trade in existing_history:
+        if not isinstance(trade, dict):
+            continue
+        ticket = str(trade.get('ticket') or '').strip()
+        if ticket:
+            merged_by_ticket[ticket] = trade
+        else:
+            ordered_without_ticket.append(trade)
+
+    tconn = None
+    try:
+        tconn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
+        tconn.row_factory = sqlite3.Row
+        tcursor = tconn.cursor()
+        tcursor.execute(
+            '''
+            SELECT ticket, symbol, order_type, volume, price, profit, time_open, time_close, status, trade_data, created_at, updated_at
+            FROM trades
+            WHERE bot_id = ?
+            ORDER BY COALESCE(time_close, time_open, created_at, updated_at) ASC
+            ''',
+            (bot_id,)
+        )
+        restored_count = 0
+        for trow in tcursor.fetchall():
+            trade: Dict[str, Any] = {}
+            if trow['trade_data']:
+                try:
+                    loaded = json.loads(trow['trade_data'])
+                    if isinstance(loaded, dict):
+                        trade = loaded
+                except Exception:
+                    trade = {}
+
+            trade = {
+                'ticket': trow['ticket'],
+                'symbol': trow['symbol'],
+                'type': trade.get('type') or trow['order_type'],
+                'volume': trade.get('volume') if trade.get('volume') is not None else trow['volume'],
+                'entryPrice': trade.get('entryPrice') if trade.get('entryPrice') is not None else trow['price'],
+                'currentPrice': trade.get('currentPrice') if trade.get('currentPrice') is not None else trow['price'],
+                'profit': trade.get('profit') if trade.get('profit') is not None else trow['profit'],
+                'entryTime': trade.get('entryTime') or trow['time_open'],
+                'exitTime': trade.get('exitTime') or trow['time_close'],
+                'time': trade.get('time') or trow['time_close'] or trow['time_open'] or trow['created_at'],
+                'status': trade.get('status') or trow['status'] or ('closed' if trow['time_close'] else 'open'),
+                'timestamp': trade.get('timestamp') or int((_trade_history_timestamp_key(trade) or 0) or 0),
+                'isWinning': trade.get('isWinning') if trade.get('isWinning') is not None else float(trow['profit'] or 0.0) > 0,
+                'botId': trade.get('botId') or bot_id,
+                'broker': trade.get('broker') or bot_state.get('broker_type') or bot_state.get('brokerName'),
+                **trade,
+            }
+
+            ticket = str(trade.get('ticket') or '').strip()
+            if ticket:
+                existing = merged_by_ticket.get(ticket)
+                merged_by_ticket[ticket] = {**(existing or {}), **trade}
+                restored_count += 1
+            else:
+                ordered_without_ticket.append(trade)
+
+        merged_history = list(merged_by_ticket.values()) + ordered_without_ticket
+        merged_history.sort(key=_trade_history_timestamp_key)
+        bot_state['tradeHistory'] = merged_history[-500:]
+        if restored_count:
+            logger.info(f"📊 Synced {restored_count} DB trade records into runtime history for bot {bot_id}")
+    except Exception as e:
+        logger.warning(f"Could not merge trades from DB for bot {bot_id}: {e}")
+    finally:
+        if tconn:
+            try:
+                tconn.close()
+            except Exception:
+                pass
+
+
 def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     bot_state = _default_bot_runtime_state(row)
     runtime_state_raw = row['runtime_state']
@@ -10756,27 +10927,7 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     restored_symbols = bot_state.get('symbols') or (row['symbols'].split(',') if row['symbols'] else ['EURUSDm'])
     bot_state['symbols'] = validate_and_correct_symbols(restored_symbols, broker_name)
     bot_state['tradeHistory'] = bot_state.get('tradeHistory') or []
-    # If tradeHistory is empty after runtime restore, load from trades DB table
-    if not bot_state['tradeHistory']:
-        try:
-            tconn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
-            tconn.row_factory = sqlite3.Row
-            tcursor = tconn.cursor()
-            tcursor.execute(
-                'SELECT trade_data FROM trades WHERE bot_id = ? AND trade_data IS NOT NULL ORDER BY timestamp ASC',
-                (row['bot_id'],)
-            )
-            for trow in tcursor.fetchall():
-                try:
-                    trade = json.loads(trow['trade_data'])
-                    bot_state['tradeHistory'].append(trade)
-                except Exception:
-                    pass
-            tconn.close()
-            if bot_state['tradeHistory']:
-                logger.info(f"📊 Restored {len(bot_state['tradeHistory'])} trades from DB for bot {row['bot_id']}")
-        except Exception as e:
-            logger.warning(f"Could not load trades from DB for bot {row['bot_id']}: {e}")
+    _merge_bot_trade_history_from_db(bot_state, row['bot_id'])
     # ✅ Always resync totalTrades from DB count — covers both: tradeHistory loaded now
     # AND the case where tradeHistory was already in persisted runtime_state but totalTrades=0
     try:
@@ -10792,6 +10943,7 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         logger.warning(f"Could not resync totalTrades for bot {row['bot_id']}: {e}")
     bot_state['profitHistory'] = bot_state.get('profitHistory') or []
     bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
+    _rebuild_bot_profit_tracking(bot_state)
     # Restore open_positions from DB if not already in runtime_state
     if not bot_state.get('open_positions'):
         bot_state['open_positions'] = {}
@@ -10818,11 +10970,6 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
                 logger.info(f"📂 Restored {len(bot_state['open_positions'])} open positions from DB for bot {row['bot_id']}")
         except Exception as e:
             logger.warning(f"Could not restore open positions for bot {row['bot_id']}: {e}")
-    # Clear today's P&L on restore — stale/sample-trade values from before a
-    # restart would otherwise immediately trigger daily-loss limits.  Real
-    # intra-day P&L will be recalculated from new trades placed after restart.
-    today_key = datetime.now().strftime('%Y-%m-%d')
-    bot_state['dailyProfits'].pop(today_key, None)
     bot_state['strategyHistory'] = bot_state.get('strategyHistory') or []
     bot_state['displayCurrency'] = str(bot_state.get('displayCurrency') or 'USD').upper()
     bot_state['profit'] = bot_state.get('totalProfit', 0.0) or 0.0
@@ -10840,11 +10987,11 @@ def _extract_persistable_bot_state(bot_config: Dict[str, Any]) -> Dict[str, Any]
 
 _persist_last_time: dict = {}
 
-def persist_bot_runtime_state(bot_id: str):
+def persist_bot_runtime_state(bot_id: str, force: bool = False):
     """Persist bot runtime metrics so they can be restored after a VPS restart."""
     global _persist_last_time
     _now = time.time()
-    if _now - _persist_last_time.get(bot_id, 0) < 30:
+    if not force and _now - _persist_last_time.get(bot_id, 0) < 30:
         return  # Debounce: max 1 DB write per bot per 30 seconds
     _persist_last_time[bot_id] = _now
 
@@ -11358,15 +11505,21 @@ def scan_all_markets_now():
 
 
 @app.route('/api/bot/config/<bot_id>', methods=['GET'])
+@require_session
 def get_bot_config(bot_id):
     """Get complete bot configuration and status"""
     try:
+        user_id = request.user_id
         if bot_id not in active_bots:
             return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
         
         bot = active_bots[bot_id]
+        if bot.get('user_id') != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+
         bot_mode = (bot.get('mode') or 'demo').lower()
         display_currency = _resolve_display_currency_for_mode(bot_mode, bot.get('displayCurrency', 'USD'))
+        risk_per_trade = _safe_float(bot.get('riskPerTrade'), 20.0)
         
         # Calculate runtime
         created = datetime.fromisoformat(bot['createdAt'])
@@ -11378,16 +11531,37 @@ def get_bot_config(bot_id):
             'success': True,
             'config': {
                 'botId': bot.get('botId'),
+                'name': bot.get('name'),
                 'accountId': bot.get('accountId'),
+                'credentialId': bot.get('credentialId'),
+                'brokerName': bot.get('brokerName') or bot.get('broker_type'),
+                'mode': bot_mode.upper(),
                 'strategy': bot.get('strategy'),
                 'symbols': bot.get('symbols'),
                 'autoSwitch': bot.get('autoSwitch', True),
                 'dynamicSizing': bot.get('dynamicSizing', True),
                 'basePositionSize': bot.get('basePositionSize', 1.0),
-                'riskPerTrade': bot.get('riskPerTrade'),
+                'riskPerTrade': risk_per_trade,
+                'riskPercent': round(risk_per_trade / 10.0, 2),
                 'maxDailyLoss': bot.get('maxDailyLoss'),
+                'maxOpenTrades': bot.get('maxOpenPositions', 5),
+                'maxOpenPositions': bot.get('maxOpenPositions', 5),
+                'maxPositionsPerSymbol': bot.get('maxPositionsPerSymbol', 1),
+                'maxDrawdownPercent': bot.get('drawdownPausePercent', 5.0),
+                'drawdownPausePercent': bot.get('drawdownPausePercent', 5.0),
+                'drawdownPauseHours': bot.get('drawdownPauseHours', 6.0),
+                'signalThreshold': bot.get('signalThreshold', 70),
+                'allowedVolatility': bot.get('allowedVolatility', ['Very Low', 'Low', 'Medium', 'High']),
+                'managementMode': bot.get('managementMode', 'assisted'),
+                'managementProfile': bot.get('managementProfile', 'beginner'),
+                'tradingMode': bot.get('tradingMode', 'interval'),
+                'tradingInterval': bot.get('tradingInterval', 300),
+                'pollInterval': bot.get('pollInterval', 15),
                 'displayCurrency': display_currency,
                 'enabled': bot.get('enabled'),
+                'tradeAmount': bot.get('tradeAmount'),
+                'intelligentScanner': bool(bot.get('intelligentScanner', False)),
+                'profitProtection': _normalize_profit_protection_config(bot.get('profitProtection')),
                 'volatilityLevel': bot.get('volatilityLevel'),
             },
             'status': {
@@ -11410,6 +11584,256 @@ def get_bot_config(bot_id):
     except Exception as e:
         logger.error(f"Error getting bot config: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bot/config/<bot_id>', methods=['PUT', 'PATCH'])
+@require_session
+def update_bot_config(bot_id):
+    """Update a stopped bot so it can be reused with a new configuration."""
+    conn = None
+    try:
+        user_id = request.user_id
+        data = request.json or {}
+
+        if bot_id not in active_bots:
+            return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+
+        bot = active_bots[bot_id]
+        if bot.get('user_id') != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+
+        bot_thread = bot_threads.get(bot_id)
+        if bot.get('enabled', False) or running_bots.get(bot_id, False) or (bot_thread and bot_thread.is_alive()):
+            return jsonify({
+                'success': False,
+                'error': 'Stop the bot before changing its configuration. Reconfiguration is only allowed while the bot is inactive.'
+            }), 409
+
+        credential_id = data.get('credentialId') or bot.get('credentialId')
+        if not credential_id:
+            return jsonify({'success': False, 'error': 'credentialId required'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        db_bot = cursor.fetchone()
+        if not db_bot or db_bot['user_id'] != user_id:
+            return jsonify({'success': False, 'error': 'Unauthorized: Bot does not belong to this user'}), 403
+
+        cursor.execute('''
+            SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, is_active,
+                   account_currency, cached_balance, cached_margin_free
+            FROM broker_credentials
+            WHERE credential_id = ? AND user_id = ?
+        ''', (credential_id, user_id))
+        credential_row = cursor.fetchone()
+        if not credential_row:
+            return jsonify({'success': False, 'error': f'Broker credential {credential_id} not found or does not belong to this user'}), 404
+        if not credential_row['is_active']:
+            return jsonify({'success': False, 'error': 'This broker credential has been deactivated. Please use an active credential.'}), 400
+
+        credential_data = dict(credential_row)
+        broker_name = credential_data['broker_name']
+        account_number = credential_data['account_number']
+        is_live = bool(credential_data['is_live'])
+        mode = 'live' if is_live else 'demo'
+        cached_balance = _safe_float(credential_data.get('cached_balance'))
+        cached_margin_free = _safe_float(credential_data.get('cached_margin_free'))
+
+        requested_mode = data.get('mode') or data.get('botMode')
+        if requested_mode is not None:
+            requested_mode = str(requested_mode).strip().lower()
+        elif 'is_live' in data:
+            requested_mode = 'live' if bool(data.get('is_live')) else 'demo'
+
+        if requested_mode and requested_mode not in ['demo', 'live']:
+            return jsonify({'success': False, 'error': 'mode must be either "demo" or "live"'}), 400
+        if requested_mode and requested_mode != mode:
+            return jsonify({
+                'success': False,
+                'error': f'Credential mode mismatch: credential is {mode} but request mode is {requested_mode}. Use the correct credentialId for demo or live accounts.'
+            }), 400
+
+        if canonicalize_broker_name(broker_name) == 'Binance':
+            binance_conn = BinanceConnection(credentials={
+                'api_key': credential_data.get('api_key'),
+                'api_secret': credential_data.get('password'),
+                'account_number': account_number,
+                'server': credential_data.get('server') or 'spot',
+                'is_live': is_live,
+            })
+            if not binance_conn.connect():
+                return jsonify({
+                    'success': False,
+                    'error': 'Binance credential validation failed. Please re-check API key/secret and account mode.'
+                }), 400
+            binance_conn.disconnect()
+
+        raw_symbols = data.get('symbols') or data.get('symbol') or bot.get('symbols')
+        if isinstance(raw_symbols, str):
+            raw_symbols = [raw_symbols]
+        if not raw_symbols:
+            raw_symbols = ['EURUSDm']
+        symbols = validate_and_correct_symbols(raw_symbols, broker_name)
+
+        account_currency = str(credential_data.get('account_currency') or 'USD').upper()
+        live_balance_basis = max(cached_balance, cached_margin_free)
+        effective_data = dict(data)
+        effective_data.setdefault('strategy', bot.get('strategy', 'Trend Following'))
+        effective_data.setdefault('riskPerTrade', bot.get('riskPerTrade'))
+        effective_data.setdefault('maxDailyLoss', bot.get('maxDailyLoss'))
+        effective_data.setdefault('drawdownPausePercent', bot.get('drawdownPausePercent'))
+        effective_data.setdefault('drawdownPauseHours', bot.get('drawdownPauseHours'))
+        effective_data.setdefault('maxOpenPositions', bot.get('maxOpenPositions'))
+        effective_data.setdefault('maxPositionsPerSymbol', bot.get('maxPositionsPerSymbol'))
+        effective_data.setdefault('signalThreshold', bot.get('signalThreshold'))
+        effective_data.setdefault('allowedVolatility', bot.get('allowedVolatility'))
+        effective_data.setdefault('autoSwitch', bot.get('autoSwitch', True))
+        effective_data.setdefault('dynamicSizing', bot.get('dynamicSizing', True))
+        effective_data.setdefault('managementProfile', bot.get('managementProfile', 'beginner'))
+        effective_data.setdefault('tradingMode', bot.get('tradingMode', 'interval'))
+        effective_data.setdefault('tradingInterval', bot.get('tradingInterval', 300))
+        effective_data.setdefault('pollInterval', bot.get('pollInterval', 15))
+        effective_data.setdefault('intelligentScanner', bot.get('intelligentScanner', False))
+        effective_data.setdefault('profitProtection', bot.get('profitProtection'))
+        effective_data.setdefault('basePositionSize', bot.get('basePositionSize', 1.0))
+
+        effective_data, symbols, guard_warnings, small_account_guard = enforce_small_live_account_guard(
+            effective_data,
+            symbols,
+            broker_name,
+            bool(is_live),
+            cached_balance,
+            cached_margin_free,
+            account_currency,
+        )
+        effective_data, capital_safety_warnings, capital_safety_band = enforce_live_capital_safety_net(
+            effective_data,
+            bool(is_live),
+            live_balance_basis,
+            account_currency,
+        )
+        sanitized_risk_config = sanitize_bot_risk_config(effective_data, account_currency)
+        if guard_warnings:
+            sanitized_risk_config['warnings'] = guard_warnings + sanitized_risk_config.get('warnings', [])
+        if capital_safety_warnings:
+            sanitized_risk_config['warnings'] = capital_safety_warnings + sanitized_risk_config.get('warnings', [])
+
+        trade_amount = effective_data.get('tradeAmount')
+        if trade_amount is not None:
+            try:
+                trade_amount = float(trade_amount)
+                if trade_amount <= 0:
+                    trade_amount = None
+            except (ValueError, TypeError):
+                trade_amount = None
+
+        if trade_amount is not None:
+            balance_basis = max(_safe_float(cached_balance), _safe_float(cached_margin_free))
+            scanner_enabled = bool(effective_data.get('intelligentScanner', False))
+            if balance_basis > 0:
+                balance_basis_zar = _estimate_balance_in_zar(balance_basis, account_currency)
+                cap_ratio = _get_fixed_trade_amount_cap_ratio(balance_basis_zar, scanner_enabled, bool(is_live))
+                capped_trade_amount = round(max(1.0, balance_basis * cap_ratio), 2)
+                if trade_amount > capped_trade_amount:
+                    trade_amount = capped_trade_amount
+                    sanitized_risk_config.setdefault('warnings', []).append(
+                        f"tradeAmount capped to {capped_trade_amount:.2f} {account_currency} "
+                        f"({cap_ratio * 100:.2f}% of live balance) for risk safety"
+                    )
+
+        account_id = f"{broker_name}_{account_number}"
+        updated_at = datetime.now().isoformat()
+        strategy = effective_data.get('strategy', bot.get('strategy', 'Trend Following'))
+        bot_name = data.get('name') or bot.get('name') or strategy
+
+        cursor.execute('''
+            UPDATE user_bots
+            SET name = ?,
+                strategy = ?,
+                enabled = 0,
+                broker_account_id = ?,
+                symbols = ?,
+                is_live = ?,
+                updated_at = ?
+            WHERE bot_id = ? AND user_id = ?
+        ''', (
+            bot_name,
+            strategy,
+            account_id,
+            ','.join(symbols),
+            1 if is_live else 0,
+            updated_at,
+            bot_id,
+            user_id,
+        ))
+        cursor.execute('DELETE FROM bot_credentials WHERE bot_id = ? AND user_id = ?', (bot_id, user_id))
+        cursor.execute('''
+            INSERT INTO bot_credentials (bot_id, credential_id, user_id, created_at)
+            VALUES (?, ?, ?, ?)
+        ''', (bot_id, credential_id, user_id, updated_at))
+
+        bot.update({
+            'name': bot_name,
+            'accountId': account_id,
+            'brokerName': broker_name,
+            'broker_type': broker_name,
+            'mode': mode,
+            'credentialId': credential_id,
+            'symbols': symbols,
+            'strategy': strategy,
+            'riskPerTrade': sanitized_risk_config['riskPerTrade'],
+            'maxDailyLoss': sanitized_risk_config['maxDailyLoss'],
+            'profitLock': sanitized_risk_config['profitLock'],
+            'drawdownPausePercent': sanitized_risk_config['drawdownPausePercent'],
+            'drawdownPauseHours': sanitized_risk_config['drawdownPauseHours'],
+            'signalThreshold': sanitized_risk_config['signalThreshold'],
+            'allowedVolatility': sanitized_risk_config['allowedVolatility'],
+            'autoSwitch': sanitized_risk_config['autoSwitch'],
+            'dynamicSizing': sanitized_risk_config['dynamicSizing'],
+            'managementMode': sanitized_risk_config['managementMode'],
+            'managementProfile': sanitized_risk_config['managementProfile'],
+            'tradingMode': sanitized_risk_config['tradingMode'],
+            'tradingInterval': sanitized_risk_config['tradingInterval'],
+            'pollInterval': sanitized_risk_config['pollInterval'],
+            'managementState': 'normal',
+            'smallAccountGuard': small_account_guard,
+            'capitalSafetyBand': capital_safety_band,
+            'displayCurrency': sanitized_risk_config['displayCurrency'],
+            'enabled': False,
+            'tradeAmount': trade_amount,
+            'intelligentScanner': bool(effective_data.get('intelligentScanner', False)),
+            'profitProtection': _normalize_profit_protection_config(effective_data.get('profitProtection')),
+            'maxOpenPositions': sanitized_risk_config['maxOpenPositions'],
+            'maxPositionsPerSymbol': sanitized_risk_config['maxPositionsPerSymbol'],
+            'basePositionSize': effective_data.get('basePositionSize', bot.get('basePositionSize', 1.0)),
+            'updatedAt': updated_at,
+        })
+        bot.pop('broker_conn', None)
+
+        persist_bot_runtime_state(bot_id, force=True)
+        conn.commit()
+
+        return jsonify({
+            'success': True,
+            'botId': bot_id,
+            'message': f'Bot {bot_id} configuration updated. Start the bot again when you are ready.',
+            'warnings': sanitized_risk_config.get('warnings', []),
+        }), 200
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.error(f"Error updating bot config for {bot_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 # ==================== LIVE MARKET DATA MANAGEMENT ====================
@@ -17080,6 +17504,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 bot_config['dailyProfits'][today] += real_profit
                                 bot_config['dailyProfit'] = bot_config['dailyProfits'][today]
                                 bot_config['profit'] = bot_config['totalProfit']
+                                persist_bot_runtime_state(bot_id, force=True)
                                 
                                 # Commission distribution on real profit
                                 if real_profit > 0:

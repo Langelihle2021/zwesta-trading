@@ -26,6 +26,7 @@ class BotAnalyticsScreen extends StatefulWidget {
 class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   Timer? _refreshTimer;
   late Map<String, dynamic> _botData;
+  List<Map<String, dynamic>> _fallbackTradeHistory = [];
 
   // IG state
   bool _isIG = false;
@@ -51,6 +52,39 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
 
     if (_isIG) {
       _loadIGData();
+    }
+  }
+
+  Future<void> _loadTradeHistoryFallback() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      final botId = _botData['botId'];
+      if (sessionToken == null || sessionToken.isEmpty || botId == null) {
+        return;
+      }
+
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/bot/$botId/trades-detailed?limit=30'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final trades = (data['trades'] as List? ?? [])
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList();
+        if (mounted) {
+          setState(() {
+            _fallbackTradeHistory = trades;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading fallback trade history: $e');
     }
   }
 
@@ -131,6 +165,14 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
             setState(() {
               _botData = bot;
             });
+            final tradeHistory = bot['tradeHistory'] as List?;
+            if (tradeHistory == null || tradeHistory.isEmpty) {
+              await _loadTradeHistoryFallback();
+            } else if (_fallbackTradeHistory.isNotEmpty && mounted) {
+              setState(() {
+                _fallbackTradeHistory = [];
+              });
+            }
           }
         }
       } else if (response.statusCode == 401 || response.statusCode == 403) {
@@ -148,22 +190,71 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     super.dispose();
   }
 
+  double _toDouble(dynamic value, [double fallback = 0]) {
+    if (value == null) {
+      return fallback;
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    return double.tryParse(value.toString()) ?? fallback;
+  }
+
+  Map<String, double> _resolvedDailyProfitSeries() {
+    final resolved = <String, double>{};
+
+    final dailyProfits = _botData['dailyProfits'];
+    if (dailyProfits is Map) {
+      for (final entry in dailyProfits.entries) {
+        final dateKey = entry.key.toString();
+        if (dateKey.isEmpty) {
+          continue;
+        }
+        resolved[dateKey] = _toDouble(entry.value);
+      }
+    }
+
+    if (resolved.isEmpty) {
+      for (final trade in _tradeHistoryRecords()) {
+        final timeRaw = trade['time'] ?? trade['closeTime'] ?? trade['time_close'] ?? trade['openedAt'];
+        final parsed = DateTime.tryParse(timeRaw?.toString() ?? '');
+        if (parsed == null) {
+          continue;
+        }
+        final dateKey = parsed.toIso8601String().split('T').first;
+        resolved[dateKey] = (resolved[dateKey] ?? 0) + _toDouble(trade['profit']);
+      }
+    }
+
+    if (resolved.isEmpty) {
+      final currentProfit = _toDouble(
+        _botData['currentProfit'] ?? _botData['profit'] ?? _botData['totalProfit'],
+      );
+      final today = DateTime.now().toIso8601String().split('T').first;
+      resolved[today] = currentProfit;
+    }
+
+    return resolved;
+  }
+
   List<Map<String, dynamic>> _getProfitChartData() {
-    final dailyProfits = _botData['dailyProfits'] as Map?;
-    if (dailyProfits == null || dailyProfits.isEmpty) {
+    final dailyProfits = _resolvedDailyProfitSeries();
+    if (dailyProfits.isEmpty) {
       return [];
     }
-    return dailyProfits.entries
+    final entries = dailyProfits.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return entries
         .map((e) => {
               'date': e.key,
-              'profit': (e.value as num).toDouble(),
+              'profit': e.value,
             })
         .toList();
   }
 
   List<Map<String, dynamic>> _getTradesChartData() {
-    final tradeHistory = _botData['tradeHistory'] as List?;
-    if (tradeHistory == null || tradeHistory.isEmpty) {
+    final tradeHistory = (_botData['tradeHistory'] as List?) ?? _fallbackTradeHistory;
+    if (tradeHistory.isEmpty) {
       return [];
     }
     final trades = List.from(tradeHistory)
@@ -175,8 +266,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     return trades
         .map((t) => {
               'symbol': t['symbol'] ?? 'N/A',
-              'profit': (t['profit'] as num).toDouble(),
-              'isWinning': (t['profit'] as num) > 0,
+            'profit': _toDouble(t['profit']),
+            'isWinning': _toDouble(t['profit']) > 0,
             })
         .toList();
   }
@@ -190,6 +281,11 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     return _normalizeCurrencyCode(
       _botData['displayCurrency'] ?? _botData['accountCurrency'] ?? _botData['currency'],
     );
+  }
+
+  List<Map<String, dynamic>> _tradeHistoryRecords() {
+    final history = (_botData['tradeHistory'] as List?) ?? _fallbackTradeHistory;
+    return history.map((entry) => Map<String, dynamic>.from(entry as Map)).toList();
   }
 
   String _symbolForCode(String currencyCode) {
@@ -327,8 +423,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
               const SizedBox(height: 24),
 
               // Daily Profit Distribution
-              if (_botData['dailyProfits'] != null &&
-                  (_botData['dailyProfits'] as Map).isNotEmpty)
+              if (_resolvedDailyProfitSeries().isNotEmpty)
                 _buildDailyProfitsSection(),
 
               // IG Controls & Data (only for IG bots)
@@ -980,8 +1075,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Widget _buildDailyProfitsSection() {
-    final dailyProfits = _botData['dailyProfits'] as Map?;
-    if (dailyProfits == null || dailyProfits.isEmpty) {
+    final dailyProfits = _resolvedDailyProfitSeries();
+    if (dailyProfits.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -996,7 +1091,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     // Find min/max for scaling
     double minProfit = 0, maxProfit = 0;
     for (final entry in last7) {
-      final profit = double.tryParse(entry.value.toString()) ?? 0;
+      final profit = entry.value;
       if (profit < minProfit) {
         minProfit = profit;
       }
@@ -1036,7 +1131,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: last7.map((entry) {
-                    final profit = double.tryParse(entry.value.toString()) ?? 0;
+                    final profit = entry.value;
                     final height = (maxProfit != minProfit
                         ? ((profit - minProfit) / (maxProfit - minProfit)) * 180
                         : 90) as double;
@@ -1754,8 +1849,8 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   }
 
   Widget _buildTradeHistorySection() {
-    final tradeHistory = _botData['tradeHistory'] as List?;
-    if (tradeHistory == null || tradeHistory.isEmpty) {
+    final tradeHistory = _tradeHistoryRecords();
+    if (tradeHistory.isEmpty) {
       final totalTrades = (_botData['totalTrades'] as num?)?.toInt() ?? 0;
       return Container(
         padding: const EdgeInsets.all(16),

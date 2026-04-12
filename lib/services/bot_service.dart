@@ -120,12 +120,16 @@ class BotService extends ChangeNotifier {
   }
 
   /// Fetch active bots from backend
-  Future<void> fetchActiveBots({String? tradingMode, bool force = false}) async {
+  Future<void> fetchActiveBots({String? tradingMode, bool force = false, bool includeHistory = false}) async {
     if (_inFlightFetch != null && !force) {
       return _inFlightFetch!;
     }
 
-    final future = _fetchActiveBotsInternal(tradingMode: tradingMode, force: force);
+    final future = _fetchActiveBotsInternal(
+      tradingMode: tradingMode,
+      force: force,
+      includeHistory: includeHistory,
+    );
     _inFlightFetch = future;
     try {
       await future;
@@ -136,7 +140,7 @@ class BotService extends ChangeNotifier {
     }
   }
 
-  Future<void> _fetchActiveBotsInternal({String? tradingMode, bool force = false}) async {
+  Future<void> _fetchActiveBotsInternal({String? tradingMode, bool force = false, bool includeHistory = false}) async {
     final prefs = await _getPrefs();
     final mode = tradingMode ?? prefs.getString('trading_mode') ?? 'DEMO';
     final now = DateTime.now();
@@ -169,6 +173,9 @@ class BotService extends ChangeNotifier {
       }
 
       var url = '$_apiUrl/api/bot/summary?mode=$mode';
+      if (includeHistory) {
+        url += '&include_history=true';
+      }
       if (userId != null && userId.isNotEmpty) {
         url += '&user_id=$userId';
       }

@@ -75,12 +75,16 @@ class CommissionService extends ChangeNotifier {
   String? _errorMessage;
   String? _apiUrl;
   Map<String, dynamic>? _summary;
+  String _displayCurrency = 'USD';
+  String _displayMode = 'DEMO';
 
   List<Commission> get commissions => _commissions;
   CommissionStats? get stats => _stats;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   Map<String, dynamic>? get summary => _summary;
+  String get displayCurrency => _displayCurrency;
+  String get displayMode => _displayMode;
   List<Map<String, dynamic>> get topEarningBots =>
       (_summary?['top_earning_bots'] as List?)?.cast<Map<String, dynamic>>() ?? [];
   double get last30DaysEarned =>
@@ -104,6 +108,7 @@ class CommissionService extends ChangeNotifier {
       }
 
       print('💰 Fetching commission data...');
+      await _loadDisplayCurrency(sessionToken);
 
       final response = await http.get(
         Uri.parse('$_apiUrl/api/user/commissions'),
@@ -225,6 +230,33 @@ class CommissionService extends ChangeNotifier {
       }
     } catch (e) {
       print('⚠️ Error fetching commission summary: $e');
+    }
+  }
+
+  Future<void> _loadDisplayCurrency(String sessionToken) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mode = (prefs.getString('trading_mode') ?? 'DEMO').toUpperCase();
+      _displayMode = mode;
+
+      final response = await http.get(
+        Uri.parse('$_apiUrl/api/account/detailed?mode=$mode'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final account = data['account'] as Map<String, dynamic>?;
+        final currency = account?['currency']?.toString().trim().toUpperCase();
+        if (currency != null && currency.isNotEmpty) {
+          _displayCurrency = currency;
+        }
+      }
+    } catch (e) {
+      print('⚠️ Error loading commission display currency: $e');
     }
   }
 

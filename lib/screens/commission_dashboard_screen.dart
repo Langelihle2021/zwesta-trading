@@ -16,6 +16,24 @@ class CommissionDashboardScreen extends StatefulWidget {
 }
 
 class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
+  String _currencySymbol(String currencyCode) {
+    switch (currencyCode.toUpperCase()) {
+      case 'ZAR':
+        return 'R';
+      case 'GBP':
+        return '£';
+      case 'EUR':
+        return '€';
+      case 'USD':
+      default:
+        return r'$';
+    }
+  }
+
+  String _formatAmount(double amount, String currencyCode) {
+    return '${_currencySymbol(currencyCode)}${amount.toStringAsFixed(2)}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +84,8 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
           }
 
           final stats = service.stats;
+          final displayCurrency = service.displayCurrency;
+          final modeText = service.displayMode == 'LIVE' ? 'Live' : 'Demo';
 
           return RefreshIndicator(
             onRefresh: () => service.fetchCommissions(),
@@ -82,7 +102,7 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
                     border: Border.all(color: Colors.white.withOpacity(0.08)),
                   ),
                   child: Text(
-                    'Commission tracking, reports, and wallet access are now linked directly on mobile.',
+                    'Commission tracking, reports, and wallet access are now linked directly on mobile. $modeText commissions are shown in your active account currency.',
                     style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
                   ),
                 ),
@@ -90,17 +110,17 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
                 if (stats != null) ...[
                   Row(
                     children: [
-                      _statCard('Total Earned', '\$${stats.totalEarned.toStringAsFixed(2)}', const Color(0xFF69F0AE), Icons.attach_money),
+                      _statCard('Total Earned', _formatAmount(stats.totalEarned, displayCurrency), const Color(0xFF69F0AE), Icons.attach_money),
                       const SizedBox(width: 12),
-                      _statCard('Pending', '\$${stats.totalPending.toStringAsFixed(2)}', const Color(0xFFFFD600), Icons.hourglass_empty),
+                      _statCard('Pending', _formatAmount(stats.totalPending, displayCurrency), const Color(0xFFFFD600), Icons.hourglass_empty),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      _statCard('Withdrawn', '\$${stats.totalWithdrawn.toStringAsFixed(2)}', const Color(0xFF00E5FF), Icons.account_balance_wallet),
+                      _statCard('Withdrawn', _formatAmount(stats.totalWithdrawn, displayCurrency), const Color(0xFF00E5FF), Icons.account_balance_wallet),
                       const SizedBox(width: 12),
-                      _statCard('Last 30 Days', '\$${service.last30DaysEarned.toStringAsFixed(2)}', const Color(0xFFFF6E40), Icons.calendar_today),
+                      _statCard('Last 30 Days', _formatAmount(service.last30DaysEarned, displayCurrency), const Color(0xFFFF6E40), Icons.calendar_today),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -202,7 +222,7 @@ class _CommissionDashboardScreenState extends State<CommissionDashboardScreen> {
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text(
-                              '\$${c.amount.toStringAsFixed(2)}',
+                              _formatAmount(c.amount, displayCurrency),
                               style: GoogleFonts.poppins(color: const Color(0xFF69F0AE), fontSize: 14, fontWeight: FontWeight.bold),
                             ),
                             Container(
