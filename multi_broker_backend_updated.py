@@ -13728,52 +13728,52 @@ SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'EURUSDm', 'USDCHFm', 'USDCADm'
 DEFAULT_PROFIT_PROTECTION_CONFIG = {
     'enabled': True,
     'activationPercent': 5.0,
-    'activationMinProfit': 1.0,   # Arms at R1+ profit (was 5.0 — too high for small ZAR accounts)
+    'activationMinProfit': 5.0,
     'minLockedProfit': 0.0,
     'retraceClosePercent': 35.0,
     'switchOnReversal': True,
     'adaptiveByVolatility': True,
     'breakEvenLockEnabled': True,
-    'breakEvenBufferProfit': 0.5,
+    'breakEvenBufferProfit': 1.5,
     'breakEvenActivationShare': 0.5,
     'protectedSymbolCooldownMinutes': 5.0,
-    'zeroLossLockEnabled': True,   # Close any position that was ever positive but falls back to 0 or negative
+    'zeroLossLockEnabled': False,  # Disabled: letting trades run to natural SL/TP is safer than early breakeven exit
 }
 
 PROFIT_PROTECTION_VOLATILITY_PROFILES = {
     'very_low': {
-        'activationMinProfit': 0.5,    # was 5.0
-        'minLockedProfit': 0.3,
+        'activationMinProfit': 5.0,
+        'minLockedProfit': 3.0,
         'retraceClosePercent': 18.0,
-        'breakEvenBufferProfit': 0.3,
+        'breakEvenBufferProfit': 1.0,
         'breakEvenActivationShare': 0.4,
     },
     'low': {
-        'activationMinProfit': 1.0,    # was 5.0
-        'minLockedProfit': 0.5,
+        'activationMinProfit': 5.0,
+        'minLockedProfit': 4.0,
         'retraceClosePercent': 22.0,
-        'breakEvenBufferProfit': 0.5,
+        'breakEvenBufferProfit': 1.5,
         'breakEvenActivationShare': 0.45,
     },
     'medium': {
-        'activationMinProfit': 1.5,    # was 7.0
-        'minLockedProfit': 0.8,
+        'activationMinProfit': 7.0,
+        'minLockedProfit': 5.0,
         'retraceClosePercent': 25.0,
-        'breakEvenBufferProfit': 0.8,
+        'breakEvenBufferProfit': 2.5,
         'breakEvenActivationShare': 0.5,
     },
     'high': {
-        'activationMinProfit': 2.0,    # was 10.0
-        'minLockedProfit': 1.0,
-        'retraceClosePercent': 25.0,   # tightened from 30.0 for faster lock-in
-        'breakEvenBufferProfit': 1.0,
+        'activationMinProfit': 10.0,
+        'minLockedProfit': 7.0,
+        'retraceClosePercent': 30.0,
+        'breakEvenBufferProfit': 4.0,
         'breakEvenActivationShare': 0.55,
     },
-    'very_high': {                     # BTC/ETH — was requiring R15 to arm; now R3
-        'activationMinProfit': 3.0,    # was 15.0
-        'minLockedProfit': 1.5,
-        'retraceClosePercent': 20.0,   # tightened from 35.0 — lock in profit faster on volatile assets
-        'breakEvenBufferProfit': 1.5,
+    'very_high': {
+        'activationMinProfit': 15.0,
+        'minLockedProfit': 10.0,
+        'retraceClosePercent': 35.0,
+        'breakEvenBufferProfit': 7.5,
         'breakEvenActivationShare': 0.6,
     },
 }
@@ -14963,7 +14963,7 @@ def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[
     signal_threshold = _clamp_int_value(
         'signalThreshold',
         data.get('signalThreshold', profile_defaults['signalThreshold']),
-        20,
+        45,
         90,
         profile_defaults['signalThreshold'],
         warnings,
