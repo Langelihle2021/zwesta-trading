@@ -10347,6 +10347,7 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
             return True
 
     # 1. SCAN all symbols for opportunities
+    allow_adaptive_raw_fallback = _coerce_bool(bot_config.get('allowAdaptiveRawFallback', False), False)
     opportunities = scan_all_opportunities(
         strategy_func,
         account_id,
@@ -10356,7 +10357,7 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         symbol_universe=symbol_universe,
         fallback_slack=fallback_slack,
         bot_config=bot_config,
-        allow_raw_signal_fallback=force_scan,
+        allow_raw_signal_fallback=force_scan and allow_adaptive_raw_fallback,
     )
 
     tradeable_opportunities = [opp for opp in opportunities if _is_symbol_tradeable_now(opp.get('symbol', ''))]
@@ -13630,12 +13631,12 @@ BOT_RISK_LIMITS = {
 ADAPTIVE_SIGNAL_THRESHOLD_STEP = 5
 ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP = 10
 ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 70
-ADAPTIVE_SIGNAL_THRESHOLD_MIN = 10
+ADAPTIVE_SIGNAL_THRESHOLD_MIN = 45
 ADAPTIVE_SCANNER_TRIGGER_MISSES = 1
 ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 25
-ADAPTIVE_FORCED_SCANNER_IDLE_CYCLES = 2
-ADAPTIVE_FORCED_SCANNER_THRESHOLD_REDUCTION = 15
-ADAPTIVE_FALLBACK_MIN_STRENGTH = 40
+ADAPTIVE_FORCED_SCANNER_IDLE_CYCLES = 999
+ADAPTIVE_FORCED_SCANNER_THRESHOLD_REDUCTION = 0
+ADAPTIVE_FALLBACK_MIN_STRENGTH = 60
 LOSS_STREAK_PAUSE_AFTER = 2
 LOSS_STREAK_PAUSE_MINUTES = 20
 LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES = 30
@@ -16305,11 +16306,20 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             )
                             continue
                         
+                        signal_info = trade_params.get('signal', {})
+                        signal_strength = _safe_float(signal_info.get('strength'), 0.0)
+                        required_strength = scanner_threshold if adaptive_scanner_active else signal_threshold
+                        if signal_strength < required_strength:
+                            logger.info(
+                                f"⏭️ Bot {bot_id}: Skipping {symbol} - strength={signal_strength:.0f}/100 "
+                                f"below required threshold={required_strength}/100"
+                            )
+                            continue
+
                         adjusted_volume = fixed_trade_volume if fixed_trade_volume is not None else trade_params['volume'] * position_size
                         order_type = trade_params['type']
-                        
+
                         # Log signal details
-                        signal_info = trade_params.get('signal', {})
                         logger.info(f"🎯 Bot {bot_id}: {signal_info.get('signal', 'UNKNOWN')} setup on {symbol} -> executing {order_type}")
                         logger.info(f"   Signal Strength: {signal_info.get('strength', 0):.0f}/100 | Reason: {signal_info.get('entry_reason', 'N/A')}")
                         
