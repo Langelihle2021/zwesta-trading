@@ -571,6 +571,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   Widget _buildUnifiedBotCard(Map<String, dynamic> bot, CurrencyProvider currencyProvider) {
     final botId = bot['botId'] ?? 'Unknown';
     final isEnabled = bot['enabled'] == true || bot['status'] == 'Active';
+    final botMode = (bot['mode'] ?? '').toString().trim().toLowerCase();
+    final isDemoBot = botMode == 'demo' || (botMode.isEmpty && bot['is_live'] != true);
     final status = (bot['status'] ?? (isEnabled ? 'Active' : 'Inactive')).toString().toUpperCase();
     final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
     final totalTrades = int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0;
@@ -583,6 +585,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final floatingProfit = double.tryParse(bot['floatingProfit']?.toString() ?? '0') ??
       openPositions.fold<double>(0, (sum, position) => sum + (double.tryParse(position['profit']?.toString() ?? '0') ?? 0));
     final currentProfit = double.tryParse(bot['currentProfit']?.toString() ?? '0') ?? profit;
+    final isPromotionEligible = isDemoBot && totalTrades >= 3 && currentProfit > 0;
     final accountBalance = double.tryParse(bot['accountBalance']?.toString() ?? '0') ?? 0;
     final accountEquity = double.tryParse(bot['accountEquity']?.toString() ?? '0') ?? 0;
     final capitalBasis = double.tryParse(bot['roiBasis']?.toString() ?? '0') ??
@@ -1198,6 +1201,36 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                         force: true,
                       );
                     }
+                  } else if (value == 'promote') {
+                    if (!isPromotionEligible) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Promotion to live requires a profitable demo bot with at least 3 completed trades.'),
+                          backgroundColor: Colors.orange,
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                      return;
+                    }
+                    final promoted = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => BotConfigurationScreen(
+                          cloneFromBotId: botId,
+                          promoteToLive: true,
+                        ),
+                      ),
+                    );
+                    if (promoted == true && mounted) {
+                      _onModeChanged('LIVE');
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Live bot created from demo settings.'),
+                          backgroundColor: Color(0xFF00C853),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
                   } else if (value == 'delete') {
                     final confirmed = await showDialog<bool>(
                       context: context,
@@ -1265,6 +1298,30 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                       ],
                     ),
                   ),
+                  if (isDemoBot)
+                    PopupMenuItem(
+                      value: 'promote',
+                      enabled: isPromotionEligible,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.trending_up_outlined,
+                            color: isPromotionEligible ? const Color(0xFFFFB74D) : Colors.white38,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isPromotionEligible
+                                ? 'Promote To Live'
+                                : 'Promote To Live (needs profit + 3 trades)',
+                            style: GoogleFonts.poppins(
+                              color: isPromotionEligible ? const Color(0xFFFFB74D) : Colors.white38,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   PopupMenuItem(
                     value: 'delete',
                     child: Row(

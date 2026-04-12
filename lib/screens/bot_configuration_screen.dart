@@ -18,11 +18,17 @@ import 'consolidated_reports_screen.dart';
 import 'dashboard_screen.dart';
 
 class BotConfigurationScreen extends StatefulWidget {
-  const BotConfigurationScreen({Key? key, this.botId, this.cloneFromBotId})
+  const BotConfigurationScreen({
+    Key? key,
+    this.botId,
+    this.cloneFromBotId,
+    this.promoteToLive = false,
+  })
       : super(key: key);
 
   final String? botId;
   final String? cloneFromBotId;
+  final bool promoteToLive;
 
   @override
   State<BotConfigurationScreen> createState() => _BotConfigurationScreenState();
@@ -1127,8 +1133,18 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       if (!mounted) {
         return;
       }
+      if (_isCloneMode && widget.promoteToLive) {
+        await _alignActiveCredentialWithTradingMode(desiredMode: 'LIVE');
+        if (!mounted) {
+          return;
+        }
+      }
     } else {
       await _loadRiskSettings();
+      if (!mounted) {
+        return;
+      }
+      await _alignActiveCredentialWithTradingMode();
       if (!mounted) {
         return;
       }
@@ -1136,11 +1152,30 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     await _fetchTradingData();
   }
 
+  Future<void> _alignActiveCredentialWithTradingMode({String? desiredMode}) async {
+    final tradingMode =
+        (desiredMode ?? await _currentTradingMode()).trim().toUpperCase();
+    final expectsLive = tradingMode == 'LIVE';
+    final activeCredential = _brokerService.activeCredential;
+
+    if (activeCredential != null && activeCredential.isLive == expectsLive) {
+      return;
+    }
+
+    for (final credential in _brokerService.credentials) {
+      if (credential.isLive == expectsLive) {
+        _brokerService.setActiveCredential(credential);
+        return;
+      }
+    }
+  }
+
   String _buildClonedBotId(String sourceBotId) {
     final sanitized = sourceBotId
         .trim()
         .replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-    return '${sanitized}_copy_${DateTime.now().millisecondsSinceEpoch}';
+    final suffix = widget.promoteToLive ? 'live' : 'copy';
+    return '${sanitized}_${suffix}_${DateTime.now().millisecondsSinceEpoch}';
   }
 
   Future<void> _loadExistingBotConfig({required bool preserveBotId}) async {
@@ -1432,6 +1467,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     return {
       'botId': _botIdController.text.trim(),
       'credentialId': credential.credentialId,
+      'mode': credential.isLive ? 'live' : 'demo',
       'symbols': _selectedSymbols,
       'strategy': _selectedStrategy,
       'riskPercent': _riskPercent,
@@ -1534,6 +1570,12 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
       if (sessionToken == null) {
         throw Exception('Session expired. Please login again.');
+      }
+
+      if (!_isEditMode && (!_isCloneMode || widget.promoteToLive)) {
+        await _alignActiveCredentialWithTradingMode(
+          desiredMode: widget.promoteToLive ? 'LIVE' : null,
+        );
       }
 
       // 🔴 FIX: Null-safe credential verification
@@ -2334,7 +2376,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                               helperText: _isEditMode
                                   ? 'Bot ID stays fixed when reconfiguring an existing bot.'
                                   : (_isCloneMode
-                                      ? 'This is a cloned setup. Change the bot ID if you want a custom copy name.'
+                                    ? (widget.promoteToLive
+                                      ? 'This live bot is prefilled from your demo bot settings. Change the bot ID if you want a custom live name.'
+                                      : 'This is a cloned setup. Change the bot ID if you want a custom copy name.')
                                       : null),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -3281,7 +3325,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                             ? (_isEditMode ? 'Saving Bot Changes...' : 'Creating & Starting Bot...')
                             : (_isEditMode
                                 ? 'Save Bot Changes'
-                                : (_isCloneMode ? 'Create Cloned Bot' : 'Create & Start Bot'))),
+                          : (_isCloneMode
+                            ? (widget.promoteToLive ? 'Promote To Live Bot' : 'Create Cloned Bot')
+                            : 'Create & Start Bot'))),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       padding: const EdgeInsets.symmetric(

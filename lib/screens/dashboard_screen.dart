@@ -168,6 +168,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return totals;
   }
 
+  String _preferredProfitCurrency([String? mode]) {
+    final selectedBots = _filteredBots(mode);
+    if (selectedBots.isNotEmpty) {
+      return _botCurrency(selectedBots.first);
+    }
+
+    final selectedAccounts = _filteredBrokerAccounts(mode);
+    if (selectedAccounts.isNotEmpty) {
+      return _accountCurrency(selectedAccounts.first);
+    }
+
+    if (mode != null && mode != 'all') {
+      return _preferredProfitCurrency();
+    }
+
+    return 'USD';
+  }
+
   Widget _buildModeSummaryTile({
     required String mode,
     required String title,
@@ -234,7 +252,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String _formatCurrencyBreakdown(Map<String, double> totals, {int decimals = 2}) {
     if (totals.isEmpty) {
-      return _formatCurrencyAmount(0, 'USD', decimals: decimals);
+      return _formatCurrencyAmount(0, _preferredProfitCurrency(), decimals: decimals);
     }
     final entries = totals.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
@@ -1765,8 +1783,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── PORTFOLIO DISTRIBUTION PIE CHART ──
   Widget _buildPortfolioPieChart() {
+    final selectedBots = _filteredBots();
     final symbolProfits = <String, double>{};
-    for (final bot in _realBotsList) {
+    for (final bot in selectedBots) {
       final symbols = bot['symbol']?.toString() ?? 'EURUSD';
       final profit = (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0).abs();
       if (profit > 0) {
@@ -1997,11 +2016,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── PROFIT TREND LINE CHART ──
   Widget _buildProfitLineChart() {
+    final selectedBots = _filteredBots();
+    final currency = _preferredProfitCurrency();
     // Gather profit per bot as data points
     final profitPoints = <FlSpot>[];
     double cumulative = 0;
-    for (var i = 0; i < _realBotsList.length; i++) {
-      final profit = double.tryParse(_realBotsList[i]['profit']?.toString() ?? '0') ?? 0;
+    for (var i = 0; i < selectedBots.length; i++) {
+      final profit = double.tryParse(selectedBots[i]['profit']?.toString() ?? '0') ?? 0;
       cumulative += profit;
       profitPoints.add(FlSpot(i.toDouble(), cumulative));
     }
@@ -2034,7 +2055,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           Text(
-            'Across ${_realBotsList.length} bot(s)',
+            'Across ${selectedBots.length} bot(s)',
             style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
           ),
           const SizedBox(height: 20),
@@ -2057,7 +2078,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       getTitlesWidget: (value, meta) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: Text(
-                          '\$${value.toStringAsFixed(0)}',
+                          _formatCurrencyAmount(value, currency, decimals: 0),
                           style: GoogleFonts.poppins(color: Colors.white38, fontSize: 9),
                         ),
                       ),
@@ -2068,8 +2089,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
                         final idx = value.toInt();
-                        if (idx >= 0 && idx < _realBotsList.length) {
-                          final botId = (_realBotsList[idx]['botId'] ?? '').toString();
+                        if (idx >= 0 && idx < selectedBots.length) {
+                          final botId = (selectedBots[idx]['botId'] ?? '').toString();
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
@@ -2121,7 +2142,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
                     getTooltipItems: (touchedSpots) => touchedSpots.map((spot) => LineTooltipItem(
-                          '\$${spot.y.toStringAsFixed(2)}',
+                          _formatCurrencyAmount(spot.y, currency),
                           GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 12,
@@ -2184,8 +2205,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── TOP PAIRS ──
   Widget _buildTopPairsCard() {
+    final selectedBots = _filteredBots();
+    final currency = _preferredProfitCurrency();
     final symbolProfits = <String, double>{};
-    for (final bot in _realBotsList) {
+    for (final bot in selectedBots) {
       final symbols = bot['symbol'] ?? 'EURUSD';
       final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
       symbolProfits[symbols] = (symbolProfits[symbols] ?? 0) + profit;
@@ -2267,7 +2290,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      '\$${pair.value.toStringAsFixed(2)}',
+                      _formatCurrencyAmount(pair.value, currency),
                       style: GoogleFonts.poppins(
                         color: pair.value >= 0 ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                         fontWeight: FontWeight.w600,
