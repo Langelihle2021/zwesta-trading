@@ -121,6 +121,106 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     return '$symbol$absoluteAmount';
   }
 
+  String _formatProfileLabel(String? profile) {
+    switch ((profile ?? '').trim().toLowerCase()) {
+      case 'beginner':
+        return 'Beginner';
+      case 'balanced':
+        return 'Balanced';
+      case 'advanced':
+        return 'Advanced';
+      case 'fast_growth':
+        return 'Fast Growth';
+      case 'small_account':
+        return 'Small Account';
+      default:
+        final value = (profile ?? '').trim();
+        if (value.isEmpty) {
+          return 'Balanced';
+        }
+        return value
+            .split('_')
+            .where((part) => part.isNotEmpty)
+            .map((part) => part[0].toUpperCase() + part.substring(1))
+            .join(' ');
+    }
+  }
+
+  Widget _buildMetaChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.32)),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPromotionChip(Map<String, dynamic> bot) {
+    final status = (bot['promotionStatus'] ?? '').toString().trim().toLowerCase();
+    final remainingMinutes = int.tryParse(bot['promotionTimeRemainingMinutes']?.toString() ?? '');
+
+    if (status.isEmpty || status == 'not_applicable') {
+      return const SizedBox.shrink();
+    }
+
+    late final Color color;
+    late final String label;
+    switch (status) {
+      case 'ready':
+        color = const Color(0xFF69F0AE);
+        label = 'Ready For Live';
+        break;
+      case 'expired':
+        color = Colors.white54;
+        label = 'Promotion Expired';
+        break;
+      default:
+        color = const Color(0xFFFFB74D);
+        if (remainingMinutes != null && remainingMinutes > 0) {
+          final hours = remainingMinutes ~/ 60;
+          final minutes = remainingMinutes % 60;
+          final timeText = hours > 0 ? '${hours}h ${minutes}m left' : '${minutes}m left';
+          label = 'Evaluating • $timeText';
+        } else {
+          label = 'Evaluating';
+        }
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle, color: color, size: 9),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatBotAggregate(CurrencyProvider currencyProvider, List<Map<String, dynamic>> bots, String field, {int decimals = 2}) {
     final totals = <String, double>{};
     for (final bot in bots) {
@@ -141,8 +241,26 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   Widget build(BuildContext context) {
     final content = Consumer2<BotService, CurrencyProvider>(
       builder: (context, botService, currencyProvider, _) {
-        // Bots are already filtered by trading mode from the backend
-        final allBots = List<Map<String, dynamic>>.from(botService.activeBots);
+        final expectedMode = _tradingMode.trim().toUpperCase();
+        final allBots = List<Map<String, dynamic>>.from(botService.activeBots).where((bot) {
+          final botMode = (bot['mode'] ?? '').toString().trim().toUpperCase();
+          if (expectedMode != 'LIVE' && expectedMode != 'DEMO') {
+            return true;
+          }
+          if (botMode.isNotEmpty) {
+            return botMode == expectedMode;
+          }
+          final inferredLive = bot['is_live'] == true;
+          return expectedMode == 'LIVE' ? inferredLive : !inferredLive;
+        }).where((bot) {
+          final promotionStatus = (bot['promotionStatus'] ?? '').toString().trim().toLowerCase();
+          final botMode = (bot['mode'] ?? '').toString().trim().toUpperCase();
+          final isDemoBot = botMode == 'DEMO' || (botMode.isEmpty && bot['is_live'] != true);
+          if (!isDemoBot) {
+            return true;
+          }
+          return promotionStatus != 'expired';
+        }).toList();
 
         // Apply search + status filter
         final bots = allBots.where((bot) {
@@ -585,7 +703,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final floatingProfit = double.tryParse(bot['floatingProfit']?.toString() ?? '0') ??
       openPositions.fold<double>(0, (sum, position) => sum + (double.tryParse(position['profit']?.toString() ?? '0') ?? 0));
     final currentProfit = double.tryParse(bot['currentProfit']?.toString() ?? '0') ?? profit;
-    final isPromotionEligible = isDemoBot && totalTrades >= 3 && currentProfit > 0;
+    final promotionStatus = (bot['promotionStatus'] ?? '').toString().trim().toLowerCase();
+    final isPromotionEligible = isDemoBot && (bot['promotionEligible'] == true || promotionStatus == 'ready');
     final accountBalance = double.tryParse(bot['accountBalance']?.toString() ?? '0') ?? 0;
     final accountEquity = double.tryParse(bot['accountEquity']?.toString() ?? '0') ?? 0;
     final capitalBasis = double.tryParse(bot['roiBasis']?.toString() ?? '0') ??
@@ -596,6 +715,10 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final strategy = bot['strategy'] ?? 'Auto';
     final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
     final displayCurrency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+    final tradeAmount = double.tryParse(bot['tradeAmount']?.toString() ?? '0') ?? 0;
+    final presetName = (bot['presetName'] ?? '').toString().trim();
+    final profileLabel = _formatProfileLabel(bot['managementProfile']?.toString());
+    final accountModeLabel = isDemoBot ? 'DEMO' : 'LIVE';
     final symbolStr = symbols is List ? symbols.join(', ') : symbols.toString();
     final runtime = bot['runtimeFormatted'] ?? '--';
     final drawdownPauseUntilText = bot['drawdownPauseUntil']?.toString();
@@ -729,6 +852,24 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
               border: Border.all(color: Colors.white.withOpacity(0.1)),
             ),
             child: Text(symbolStr, style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildMetaChip(accountModeLabel, isDemoBot ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)),
+              _buildMetaChip('Profile: $profileLabel', const Color(0xFF00E5FF)),
+              if (presetName.isNotEmpty)
+                _buildMetaChip('Preset: $presetName', const Color(0xFFFFA726)),
+              if (tradeAmount > 0)
+                _buildMetaChip(
+                  'Fixed: ${_formatAmount(currencyProvider, tradeAmount, decimals: tradeAmount == tradeAmount.roundToDouble() ? 0 : 2, currencyCode: displayCurrency)}',
+                  const Color(0xFFAB47BC),
+                ),
+              if (isDemoBot && promotionStatus != 'not_applicable')
+                _buildPromotionChip(bot),
+            ],
           ),
           const SizedBox(height: 10),
           Row(
@@ -1203,9 +1344,12 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     }
                   } else if (value == 'promote') {
                     if (!isPromotionEligible) {
+                      final promotionMessage = promotionStatus == 'expired'
+                          ? 'This demo bot did not qualify for live promotion within the evaluation window.'
+                          : 'Promotion to live requires a demo bot that passes the live test window with profit and at least 3 completed trades.';
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Promotion to live requires a profitable demo bot with at least 3 completed trades.'),
+                        SnackBar(
+                          content: Text(promotionMessage),
                           backgroundColor: Colors.orange,
                           duration: Duration(seconds: 3),
                         ),
@@ -1313,7 +1457,9 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                           Text(
                             isPromotionEligible
                                 ? 'Promote To Live'
-                                : 'Promote To Live (needs profit + 3 trades)',
+                                : promotionStatus == 'expired'
+                                    ? 'Promotion Expired'
+                                    : 'Promote To Live (evaluating)',
                             style: GoogleFonts.poppins(
                               color: isPromotionEligible ? const Color(0xFFFFB74D) : Colors.white38,
                               fontSize: 13,

@@ -10626,9 +10626,17 @@ PERSISTED_BOT_STATE_FIELDS = {
     'totalInvestment', 'profitHistory', 'tradeHistory', 'dailyProfits', 'dailyProfit',
     'maxDrawdown', 'peakProfit', 'strategyHistory', 'lastStrategySwitch', 'volatilityLevel',
     'profit', 'drawdownPauseUntil', 'accountBalance', 'accountEquity', 'tradeAmount',
+    'selectedPreset', 'presetName',
+    'promotionReadyAt', 'promotionExpiredAt',
     'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode',
     'profitProtection', 'symbolReentryCooldowns'
 }
+
+DEMO_PROMOTION_MIN_TRADES = 3
+DEMO_PROMOTION_MIN_PROFIT = 0.0
+DEMO_PROMOTION_EVALUATION_HOURS = 6.0
+DEMO_PROMOTION_CLEANUP_RETENTION_HOURS = 3.0
+DEMO_PROMOTION_CLEANUP_INTERVAL_SECONDS = 1800
 
 
 def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
@@ -10680,10 +10688,78 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'accountEquity': 0.0,
         'open_positions': {},
         'tradeAmount': None,
+        'selectedPreset': None,
+        'presetName': None,
+        'promotionReadyAt': None,
+        'promotionExpiredAt': None,
         'intelligentScanner': False,
         'lastScanResults': None,
         'profitProtection': dict(DEFAULT_PROFIT_PROTECTION_CONFIG),
         'symbolReentryCooldowns': {},
+    }
+
+
+def _get_demo_promotion_state(bot_config: Dict[str, Any], current_profit: float, total_trades: int) -> Dict[str, Any]:
+    bot_mode = str(bot_config.get('mode') or 'demo').strip().lower()
+    if bot_mode != 'demo':
+        return {
+            'status': 'not_applicable',
+            'eligible': False,
+            'readyAt': None,
+            'expiredAt': None,
+            'windowHours': DEMO_PROMOTION_EVALUATION_HOURS,
+            'timeRemainingMinutes': None,
+            'label': None,
+        }
+
+    created_at_text = bot_config.get('createdAt') or datetime.now().isoformat()
+    try:
+        created_at = datetime.fromisoformat(str(created_at_text))
+    except Exception:
+        created_at = datetime.now()
+
+    ready_at = bot_config.get('promotionReadyAt')
+    expired_at = bot_config.get('promotionExpiredAt')
+    now = datetime.now()
+    expires_at = created_at + timedelta(hours=DEMO_PROMOTION_EVALUATION_HOURS)
+    eligible_now = total_trades >= DEMO_PROMOTION_MIN_TRADES and current_profit > DEMO_PROMOTION_MIN_PROFIT
+    state_changed = False
+
+    if ready_at:
+        status = 'ready'
+        label = 'Ready For Live'
+    elif expired_at:
+        status = 'expired'
+        label = 'Promotion Expired'
+    elif eligible_now:
+        ready_at = now.isoformat()
+        bot_config['promotionReadyAt'] = ready_at
+        state_changed = True
+        status = 'ready'
+        label = 'Ready For Live'
+    elif now >= expires_at:
+        expired_at = now.isoformat()
+        bot_config['promotionExpiredAt'] = expired_at
+        state_changed = True
+        status = 'expired'
+        label = 'Promotion Expired'
+    else:
+        status = 'evaluating'
+        label = 'Live Test Running'
+
+    time_remaining_minutes = None
+    if status == 'evaluating':
+        time_remaining_minutes = max(0, int((expires_at - now).total_seconds() // 60))
+
+    return {
+        'status': status,
+        'eligible': status == 'ready',
+        'readyAt': ready_at,
+        'expiredAt': expired_at,
+        'windowHours': DEMO_PROMOTION_EVALUATION_HOURS,
+        'timeRemainingMinutes': time_remaining_minutes,
+        'label': label,
+        'stateChanged': state_changed,
     }
 
 
@@ -11560,6 +11636,8 @@ def get_bot_config(bot_id):
                 'displayCurrency': display_currency,
                 'enabled': bot.get('enabled'),
                 'tradeAmount': bot.get('tradeAmount'),
+                'selectedPreset': bot.get('selectedPreset'),
+                'presetName': bot.get('presetName'),
                 'intelligentScanner': bool(bot.get('intelligentScanner', False)),
                 'profitProtection': _normalize_profit_protection_config(bot.get('profitProtection')),
                 'volatilityLevel': bot.get('volatilityLevel'),
@@ -15860,6 +15938,8 @@ def create_bot():
             trading_interval = sanitized_risk_config['tradingInterval']
             poll_interval = sanitized_risk_config['pollInterval']
             trading_enabled = data.get('enabled', True)
+            selected_preset = str(data.get('selectedPreset') or '').strip() or None
+            preset_name = str(data.get('presetName') or '').strip() or None
             trade_amount = data.get('tradeAmount')  # Fixed amount in the broker account currency (overrides risk %)
             if trade_amount is not None:
                 try:
@@ -15968,6 +16048,10 @@ def create_bot():
                 'capitalSafetyBand': capital_safety_band,
                 'displayCurrency': display_currency,
                 'enabled': trading_enabled,
+                'selectedPreset': selected_preset,
+                'presetName': preset_name,
+                'promotionReadyAt': None,
+                'promotionExpiredAt': None,
                 'tradeAmount': trade_amount,  # Fixed dollar amount per trade (None = use risk %)
                 'intelligentScanner': bool(effective_data.get('intelligentScanner', False)),  # Auto-scan all symbols & reallocate
                 'profitProtection': _normalize_profit_protection_config(data.get('profitProtection')),
@@ -18635,6 +18719,9 @@ def bot_summary():
             bot_mode_value = (bot.get('mode') or 'demo')
             bot_is_live = str(bot_mode_value).lower() == 'live'
             display_currency = _resolve_display_currency_for_mode(bot_mode_value, bot.get('displayCurrency', 'USD'))
+            promotion_state = _get_demo_promotion_state(bot, current_profit, total_trades)
+            if promotion_state.get('stateChanged'):
+                persist_bot_runtime_state(bot.get('botId', ''))
 
             open_positions_preview = []
             for pos in open_positions[:5]:
@@ -18717,6 +18804,15 @@ def bot_summary():
                 'signalThreshold': bot.get('effectiveSignalThreshold', bot.get('signalThreshold', 70)),
                 'managementMode': bot.get('managementMode', 'assisted'),
                 'managementProfile': bot.get('managementProfile', 'beginner'),
+                'selectedPreset': bot.get('selectedPreset'),
+                'presetName': bot.get('presetName'),
+                'promotionStatus': promotion_state['status'],
+                'promotionEligible': promotion_state['eligible'],
+                'promotionReadyAt': promotion_state['readyAt'],
+                'promotionExpiredAt': promotion_state['expiredAt'],
+                'promotionWindowHours': promotion_state['windowHours'],
+                'promotionTimeRemainingMinutes': promotion_state['timeRemainingMinutes'],
+                'promotionLabel': promotion_state['label'],
                 'managementState': bot.get('managementState', 'normal'),
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
@@ -18725,6 +18821,7 @@ def bot_summary():
                 'is_live': bot_is_live,
                 'accountBalance': round(bot.get('accountBalance', 0), 2),
                 'accountEquity': round(bot.get('accountEquity', 0), 2),
+                'tradeAmount': bot.get('tradeAmount'),
                 'openPositionsCount': len(open_positions),
                 'openPositionsPreview': open_positions_preview,
                 'activeSymbolCooldowns': active_symbol_cooldowns,
@@ -19856,57 +19953,124 @@ def delete_bot(bot_id):
             # NO TOKEN PROVIDED: Allow deletion for backward compatibility
             logger.warning(f"⚠️  Bot {resolved_bot_id} deleted WITHOUT 2-step confirmation (legacy request from user {user_id})")
             logger.warning(f"   Recommendation: Update client to use /api/bot/{resolved_bot_id}/request-deletion + token for safety")
-        
-        # Log deletion with all stats
-        final_stats = (bot_config or {}).copy()
-        logger.critical(f"🗑️ BOT PERMANENTLY DELETED: {resolved_bot_id} by user {user_id}")
-        logger.critical(f"   Final Stats: {json.dumps({'totalTrades': final_stats.get('totalTrades'), 'totalProfit': final_stats.get('totalProfit')}, indent=2)}")
-        if confirmation_token:
-            logger.critical(f"   Deletion confirmed with token: {confirmation_token[:8]}...")
-        else:
-            logger.critical(f"   Deletion confirmed: legacy request (no token)")
-
-        # Stop bot runtime before deleting records.
-        if worker_pool_manager and worker_pool_manager.enabled:
-            worker_pool_manager.stop_bot(resolved_bot_id)
-
-        if bot_config:
-            stop_bot_runtime(resolved_bot_id, bot_config)
-
-        bot_stop_flags[resolved_bot_id] = True
-        running_bots.pop(resolved_bot_id, None)
-        thread = bot_threads.get(resolved_bot_id)
-        if thread and thread.is_alive():
-            thread.join(timeout=30)
-        bot_threads.pop(resolved_bot_id, None)
-        bot_stop_flags.pop(resolved_bot_id, None)
-        
-        # Delete from database
-        cursor.execute('DELETE FROM user_bots WHERE bot_id = ?', (resolved_bot_id,))
-        cursor.execute('DELETE FROM bot_credentials WHERE bot_id = ?', (resolved_bot_id,))
-        cursor.execute('DELETE FROM bot_deletion_tokens WHERE bot_id = ?', (resolved_bot_id,))
-        cursor.execute('DELETE FROM bot_activation_pins WHERE bot_id = ?', (resolved_bot_id,))
-        conn.commit()
-
-        # Remove from active_bots
-        active_bots.pop(resolved_bot_id, None)
-        
         conn.close()
+
+        deletion_result = _delete_bot_internal(resolved_bot_id, user_id, reason='manual delete')
         
         return jsonify({
             'success': True,
             'message': f'Bot {resolved_bot_id} permanently deleted',
-            'deleted_stats': {
-                'totalTrades': final_stats.get('totalTrades', 0),
-                'winningTrades': final_stats.get('winningTrades', 0),
-                'totalProfit': final_stats.get('totalProfit', 0),
-            },
+            'deleted_stats': deletion_result['deleted_stats'],
             'remainingBots': len(active_bots)
         }), 200
     
     except Exception as e:
         logger.error(f"Error deleting bot: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _delete_bot_internal(bot_id: str, user_id: str, reason: str = 'manual delete') -> Dict[str, Any]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        bot_config = active_bots.get(bot_id)
+
+        cursor.execute('SELECT user_id FROM user_bots WHERE bot_id = ?', (bot_id,))
+        db_bot = cursor.fetchone()
+        if not db_bot:
+            raise ValueError(f'Bot {bot_id} not found')
+        if db_bot['user_id'] != user_id:
+            raise PermissionError('Unauthorized: Bot does not belong to this user')
+
+        final_stats = (bot_config or {}).copy()
+        logger.critical(f"🗑️ BOT PERMANENTLY DELETED: {bot_id} by user {user_id} ({reason})")
+        logger.critical(f"   Final Stats: {json.dumps({'totalTrades': final_stats.get('totalTrades'), 'totalProfit': final_stats.get('totalProfit')}, indent=2)}")
+
+        if worker_pool_manager and worker_pool_manager.enabled:
+            worker_pool_manager.stop_bot(bot_id)
+
+        if bot_config:
+            stop_bot_runtime(bot_id, bot_config)
+
+        bot_stop_flags[bot_id] = True
+        running_bots.pop(bot_id, None)
+        thread = bot_threads.get(bot_id)
+        if thread and thread.is_alive():
+            thread.join(timeout=30)
+        bot_threads.pop(bot_id, None)
+        bot_stop_flags.pop(bot_id, None)
+
+        cursor.execute('DELETE FROM user_bots WHERE bot_id = ?', (bot_id,))
+        cursor.execute('DELETE FROM bot_credentials WHERE bot_id = ?', (bot_id,))
+        cursor.execute('DELETE FROM bot_deletion_tokens WHERE bot_id = ?', (bot_id,))
+        cursor.execute('DELETE FROM bot_activation_pins WHERE bot_id = ?', (bot_id,))
+        conn.commit()
+
+        active_bots.pop(bot_id, None)
+
+        return {
+            'botId': bot_id,
+            'deleted_stats': {
+                'totalTrades': final_stats.get('totalTrades', 0),
+                'winningTrades': final_stats.get('winningTrades', 0),
+                'totalProfit': final_stats.get('totalProfit', 0),
+            },
+        }
+    finally:
+        conn.close()
+
+
+def cleanup_expired_demo_bots_worker():
+    """Background task that permanently removes expired demo bots after the retention window."""
+    while True:
+        try:
+            now = datetime.now()
+            cutoff = now - timedelta(hours=DEMO_PROMOTION_CLEANUP_RETENTION_HOURS)
+            cleaned_count = 0
+
+            for bot_id, bot in list(active_bots.items()):
+                if str(bot.get('mode') or 'demo').strip().lower() != 'demo':
+                    continue
+
+                total_profit = float(bot.get('totalProfit', 0) or 0)
+                open_positions = list(bot.get('open_positions', {}).values())
+                floating_profit = sum(float(position.get('profit') or 0) for position in open_positions)
+                current_profit = total_profit + floating_profit
+                total_trades = int(bot.get('totalTrades', 0) or 0)
+
+                promotion_state = _get_demo_promotion_state(bot, current_profit, total_trades)
+                if promotion_state.get('stateChanged'):
+                    persist_bot_runtime_state(bot_id)
+
+                expired_at_raw = promotion_state.get('expiredAt')
+                if not expired_at_raw:
+                    continue
+
+                try:
+                    expired_at = datetime.fromisoformat(str(expired_at_raw))
+                except Exception:
+                    continue
+
+                if expired_at > cutoff:
+                    continue
+
+                user_id = bot.get('user_id')
+                if not user_id:
+                    continue
+
+                logger.info(
+                    f"🧹 Auto-cleaning expired demo bot {bot_id} after "
+                    f"{DEMO_PROMOTION_CLEANUP_RETENTION_HOURS:.0f}h retention"
+                )
+                _delete_bot_internal(bot_id, user_id, reason='expired demo cleanup')
+                cleaned_count += 1
+
+            if cleaned_count > 0:
+                logger.info(f"🧹 Expired demo bot cleanup removed {cleaned_count} bot(s)")
+        except Exception as e:
+            logger.error(f"Expired demo bot cleanup worker error: {e}")
+
+        time.sleep(DEMO_PROMOTION_CLEANUP_INTERVAL_SECONDS)
 
 
 # ==================== BOT MONITORING SYSTEM ====================
@@ -24855,6 +25019,13 @@ if __name__ == '__main__':
     monitoring_thread = threading.Thread(target=auto_withdrawal_monitor, daemon=True)
     monitoring_thread.start()
     logger.info("Auto-withdrawal monitoring thread started")
+
+    cleanup_thread = threading.Thread(target=cleanup_expired_demo_bots_worker, daemon=True)
+    cleanup_thread.start()
+    logger.info(
+        f"Expired demo bot cleanup worker started "
+        f"(retention={DEMO_PROMOTION_CLEANUP_RETENTION_HOURS:.0f}h, interval={DEMO_PROMOTION_CLEANUP_INTERVAL_SECONDS}s)"
+    )
     
     try:
         # SSL/TLS Configuration

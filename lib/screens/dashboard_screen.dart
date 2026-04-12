@@ -388,13 +388,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Fetch all bots so dashboard can separate live/demo locally.
   Future<void> _fetchRealBots() async {
     try {
-      final botService = context.read<BotService>();
-      await botService.fetchActiveBots(tradingMode: '', force: true, includeHistory: true);
-      
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      final userId = prefs.getString('user_id');
+      if (sessionToken == null || sessionToken.isEmpty) {
+        throw Exception('Session token missing. Please login again.');
+      }
+
+      var url = '${EnvironmentConfig.apiUrl}/api/bot/summary?mode=&include_history=true';
+      if (userId != null && userId.isNotEmpty) {
+        url += '&user_id=$userId';
+      }
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        throw Exception('API returned ${response.statusCode}');
+      }
+
+      final data = jsonDecode(response.body);
+      if (data['success'] != true) {
+        throw Exception(data['error'] ?? 'Failed to load bots');
+      }
+
       if (mounted) {
         setState(() {
-          _realBotsList = List<Map<String, dynamic>>.from(botService.activeBots);
-          
+          _realBotsList = List<Map<String, dynamic>>.from(data['bots'] ?? []);
           print('✅ Loaded ${_realBotsList.length} bots from backend');
         });
       }

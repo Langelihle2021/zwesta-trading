@@ -436,6 +436,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
   String _selectedStrategy = 'Trend Following';
   List<String> _selectedSymbols = [];
+  String _selectedTraditionalVolatilityFilter = 'All';
   bool _isCreating = false;
   bool _isLoadingData = true;
   bool _isLoadingExistingBot = false;
@@ -710,6 +711,147 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
     }
   }
 
+  String _normalizeSymbolBase(String symbol) {
+    var normalized = symbol.trim().toUpperCase().replaceAll('/', '').replaceAll('_', '');
+    if (normalized.endsWith('M') && normalized.length > 1) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    return normalized;
+  }
+
+  List<String> _remapSelectedSymbolsToAvailable(List<String> availableSymbols) {
+    if (_selectedSymbols.isEmpty || availableSymbols.isEmpty) {
+      return List<String>.from(_selectedSymbols);
+    }
+
+    final normalizedToAvailable = <String, String>{};
+    for (final availableSymbol in availableSymbols) {
+      normalizedToAvailable.putIfAbsent(
+        _normalizeSymbolBase(availableSymbol),
+        () => availableSymbol,
+      );
+    }
+
+    final remapped = <String>[];
+    for (final selectedSymbol in _selectedSymbols) {
+      final normalized = _normalizeSymbolBase(selectedSymbol);
+      final mapped = normalizedToAvailable[normalized];
+      if (mapped != null && !remapped.contains(mapped)) {
+        remapped.add(mapped);
+      }
+    }
+    return remapped;
+  }
+
+  bool _isSymbolSelected(String symbolCode) {
+    final normalized = _normalizeSymbolBase(symbolCode);
+    return _selectedSymbols.any((symbol) => _normalizeSymbolBase(symbol) == normalized);
+  }
+
+  String _traditionalVolatilityBucket(String symbol) {
+    final normalized = _normalizeSymbolBase(symbol);
+
+    const highVolatility = {
+      'BTCUSD',
+      'ETHUSD',
+      'USOIL',
+      'UKOIL',
+      'XAUUSD',
+      'USTEC',
+      'US30',
+      'TSLA',
+      'NVDA',
+      'META',
+      'AMD',
+      'GBPJPY',
+      'EURJPY',
+    };
+
+    const stableSymbols = {
+      'EURUSD',
+      'USDCHF',
+      'USDCAD',
+      'EURGBP',
+      'USDJPY',
+      'JPM',
+      'BAC',
+      'WFC',
+    };
+
+    if (highVolatility.contains(normalized)) {
+      return 'High Volatility';
+    }
+    if (stableSymbols.contains(normalized)) {
+      return 'Stable';
+    }
+    return 'Moderate';
+  }
+
+  Color _traditionalVolatilityColor(String bucket) {
+    switch (bucket) {
+      case 'High Volatility':
+        return Colors.deepOrangeAccent;
+      case 'Stable':
+        return Colors.lightBlueAccent;
+      default:
+        return Colors.amberAccent;
+    }
+  }
+
+  int _traditionalVolatilityRank(String bucket) {
+    switch (bucket) {
+      case 'Stable':
+        return 0;
+      case 'Moderate':
+        return 1;
+      case 'High Volatility':
+        return 2;
+      default:
+        return 3;
+    }
+  }
+
+  List<Map<String, String>> get _filteredTradingSymbols {
+    final visibleSymbols = List<Map<String, String>>.from(tradingSymbols);
+    visibleSymbols.sort((left, right) {
+      final leftBucket = _traditionalVolatilityBucket(left['symbol']!);
+      final rightBucket = _traditionalVolatilityBucket(right['symbol']!);
+      final bucketComparison =
+          _traditionalVolatilityRank(leftBucket).compareTo(_traditionalVolatilityRank(rightBucket));
+      if (bucketComparison != 0) {
+        return bucketComparison;
+      }
+
+      final leftName = left['name'] ?? left['symbol'] ?? '';
+      final rightName = right['name'] ?? right['symbol'] ?? '';
+      return leftName.compareTo(rightName);
+    });
+
+    if (_selectedTraditionalVolatilityFilter == 'All') {
+      return visibleSymbols;
+    }
+
+    return visibleSymbols.where((symbol) {
+      final symbolCode = symbol['symbol'];
+      if (symbolCode == null) {
+        return false;
+      }
+      return _traditionalVolatilityBucket(symbolCode) ==
+          _selectedTraditionalVolatilityFilter;
+    }).toList();
+  }
+
+  int get _hiddenSelectedSymbolCount {
+    if (_selectedTraditionalVolatilityFilter == 'All') {
+      return 0;
+    }
+
+    return _selectedSymbols.where((symbolCode) {
+      return _traditionalVolatilityBucket(symbolCode) !=
+          _selectedTraditionalVolatilityFilter;
+    }).length;
+  }
+
   double _usdToAccountCurrencyRate(String currencyCode) {
     switch (currencyCode.toUpperCase()) {
       case 'ZAR':
@@ -975,6 +1117,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   void _applyManagementProfile(String profile) {
     setState(() {
       _managementProfile = profile;
+      if (_selectedPreset != null && profile != 'small_account') {
+        _selectedPreset = null;
+      }
       if (profile == 'beginner') {
         if (_maxOpenTrades > 2) _maxOpenTrades = 2;
         if (_riskPercent > 2.0) _riskPercent = 2.0;
@@ -1240,6 +1385,9 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
             : _buildClonedBotId(
                 (config['botId'] ?? widget.cloneFromBotId).toString(),
               );
+        _selectedPreset = (config['selectedPreset'] ?? '').toString().trim().isEmpty
+            ? null
+            : (config['selectedPreset'] ?? '').toString().trim();
         _selectedStrategy = (config['strategy'] ?? _selectedStrategy).toString();
         _selectedSymbols = symbols;
         _riskPercent = riskPercent;
@@ -1296,10 +1444,12 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       setState(() {
         commodityMarketData = {};
         tradingSymbols = List<Map<String, String>>.from(_binanceSymbols);
-        _selectedSymbols = _selectedSymbols
-            .where((symbol) =>
-                _binanceSymbols.any((item) => item['symbol'] == symbol))
-            .toList();
+        _selectedSymbols = _remapSelectedSymbolsToAvailable(
+          _binanceSymbols
+              .map((item) => item['symbol'])
+              .whereType<String>()
+              .toList(),
+        );
         // Auto-select recommended Binance pairs if none selected
         if (_selectedSymbols.isEmpty) {
           _selectedSymbols = _rankedBinancePairs
@@ -1336,10 +1486,12 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           // Get commodities list for symbol selection (nested by category)
           final commoditiesList = data['commodities'] as Map? ?? {};
           tradingSymbols = _buildSymbolsFromApiData(commoditiesList);
-          _selectedSymbols = _selectedSymbols
-              .where((symbol) =>
-                  tradingSymbols.any((item) => item['symbol'] == symbol))
-              .toList();
+          _selectedSymbols = _remapSelectedSymbolsToAvailable(
+            tradingSymbols
+                .map((item) => item['symbol'])
+                .whereType<String>()
+                .toList(),
+          );
           _isLoadingData = false;
         });
       }
@@ -1484,6 +1636,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       if (_investmentAmountController.text.isNotEmpty)
         'tradeAmount': double.tryParse(_investmentAmountController.text),
       'displayCurrency': accountCurrency,
+      if (_selectedPreset != null && _selectedPreset!.trim().isNotEmpty)
+        'selectedPreset': _selectedPreset,
+      if (_selectedPreset != null && _selectedPreset!.trim().isNotEmpty)
+        'presetName': _smallAccountPresets[_selectedPreset!]?['name'],
       'allowedVolatility': _allowedVolatility,
       'autoSwitch': true,
       'dynamicSizing': true,
@@ -1712,7 +1868,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
           )
           .timeout(const Duration(seconds: 30));
 
-      if (startResponse.statusCode != 200) {
+      final startSucceeded = startResponse.statusCode == 200;
+      if (!startSucceeded) {
         final startError = jsonDecode(startResponse.body);
         print('⚠️ Bot created but failed to start: ${startError['error']}');
         // Don't throw - bot is created, just warn about start failure
@@ -1721,7 +1878,8 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
               'Bot ID: $createdBotId\n'
               '${_isBinanceBroker ? 'Pairs' : 'Symbols'}: ${_selectedSymbols.join(', ')}\n\n'
               '⚠️ Bot was created but failed to start automatically. '
-              'Please start it manually from your bot list.';
+              'Reason: ${startError['error'] ?? 'Unknown startup failure'}\n'
+              'Please start it manually from your bot list after fixing the issue.';
         });
       } else {
         final startData = jsonDecode(startResponse.body);
@@ -1742,19 +1900,21 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         force: true,
       );
 
-      // Show success snackbar immediately
+      // Show creation result immediately
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Bot created. It will appear in your list.'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(startSucceeded
+                ? '✅ Bot created and started. It will appear in your bot list.'
+                : '⚠️ Bot created, but automatic start failed. Check the warning on this screen.'),
+            backgroundColor: startSucceeded ? Colors.green : Colors.orange,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
 
-      // Navigate to dashboard immediately after refresh
-      if (mounted) {
+      // Only navigate away when the bot actually started.
+      if (mounted && startSucceeded) {
         Navigator.of(context).popUntil((route) => route.isFirst);
         Navigator.of(context).push(
           MaterialPageRoute(builder: (context) => const DashboardScreen()),
@@ -2435,6 +2595,45 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                       _buildBinanceSetupInsights(),
                     ],
                     const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          'All',
+                          'Stable',
+                          'Moderate',
+                          'High Volatility',
+                        ].map((bucket) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(bucket),
+                              selected:
+                                  _selectedTraditionalVolatilityFilter == bucket,
+                              onSelected: (_) {
+                                setState(() {
+                                  _selectedTraditionalVolatilityFilter = bucket;
+                                });
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Showing ${_filteredTradingSymbols.length} of ${tradingSymbols.length} symbols, ordered from stable to high volatility.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                    ),
+                    if (_hiddenSelectedSymbolCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '$_hiddenSelectedSymbolCount selected symbol(s) are outside this filter and remain selected.',
+                          style: TextStyle(fontSize: 11, color: Colors.orange[300]),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
                     Container(
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey),
@@ -2449,11 +2648,13 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                             : SizedBox(
                                 height: 350,
                                 child: ListView.builder(
-                                  itemCount: tradingSymbols.length,
+                                  itemCount: _filteredTradingSymbols.length,
                                   itemBuilder: (context, index) {
-                                    final symbol = tradingSymbols[index];
+                                    final symbol = _filteredTradingSymbols[index];
                                     final symbolCode = symbol['symbol']!;
                                     final isBinanceSymbol = _isBinanceBroker;
+                                    final traditionalBucket = _traditionalVolatilityBucket(symbolCode);
+                                    final traditionalBucketColor = _traditionalVolatilityColor(traditionalBucket);
 
                                     // Get market data for this symbol directly (API now uses correct keys)
                                     final marketData =
@@ -2502,15 +2703,19 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                             : Colors.red.withOpacity(0.05),
                                       ),
                                       child: CheckboxListTile(
-                                        value: _selectedSymbols
-                                            .contains(symbolCode),
+                                        value: _isSymbolSelected(symbolCode),
                                         onChanged: (value) {
                                           setState(() {
                                             if (value ?? false) {
-                                              _selectedSymbols.add(symbolCode);
+                                              if (!_isSymbolSelected(symbolCode)) {
+                                                _selectedSymbols.add(symbolCode);
+                                              }
                                             } else {
-                                              _selectedSymbols
-                                                  .remove(symbolCode);
+                                              _selectedSymbols.removeWhere(
+                                                (selected) =>
+                                                    _normalizeSymbolBase(selected) ==
+                                                    _normalizeSymbolBase(symbolCode),
+                                              );
                                             }
                                           });
                                         },
@@ -2569,6 +2774,28 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                                     symbol['category']!,
                                                     style: const TextStyle(
                                                         fontSize: 11),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: traditionalBucketColor.withOpacity(0.18),
+                                                      borderRadius: BorderRadius.circular(3),
+                                                      border: Border.all(
+                                                        color: traditionalBucketColor.withOpacity(0.4),
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      traditionalBucket,
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        color: traditionalBucketColor,
+                                                        fontWeight: FontWeight.w700,
+                                                      ),
+                                                    ),
                                                   ),
                                                   const SizedBox(width: 8),
                                                   Text(
