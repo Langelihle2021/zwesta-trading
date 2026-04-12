@@ -16186,25 +16186,20 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         return  # Exit trading loop
                                 except Exception as auto_pause_e:
                                     logger.debug(f"Bot {bot_id}: AutoTrading check: {auto_pause_e}")
-                                        stagger_delay = random.uniform(2, 12)
-                                        actual_wait = trading_interval + stagger_delay
-                                        logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
-                                        time.sleep(actual_wait)
-                                        continue
-                                
-                                # ==================== WAIT FOR CRITICAL SYMBOLS ====================
-                                # For bots trading ETHUSDm or BTCUSDm, ensure they're fully loaded
-                                # These symbols require special initialization and fail fast if unavailable
-                                symbols_list = bot_config.get('symbols', ['EURUSDm'])
-                                if trade_cycle == 1:  # Only on first cycle to avoid repeated delays
-                                    if not mt5_conn.wait_for_critical_symbols(symbols_list, timeout_seconds=15):
-                                        logger.warning(f"Bot {bot_id}: Critical symbols not ready yet, will retry next cycle")
-                                        # Rather than fail immediately, retry in next cycle
-                                        # Critical symbols usually load within 30-60 seconds total after MT5 connects
-                                        time.sleep(trading_interval)
-                                        continue
-                                # ==================== END CRITICAL SYMBOL CHECK ====================
-                                
+                            
+                            # ==================== WAIT FOR CRITICAL SYMBOLS ====================
+                            # For bots trading ETHUSDm or BTCUSDm, ensure they're fully loaded
+                            # These symbols require special initialization and fail fast if unavailable
+                            symbols_list = bot_config.get('symbols', ['EURUSDm'])
+                            if trade_cycle == 1:  # Only on first cycle to avoid repeated delays
+                                if not mt5_conn.wait_for_critical_symbols(symbols_list, timeout_seconds=15):
+                                    logger.warning(f"Bot {bot_id}: Critical symbols not ready yet, will retry next cycle")
+                                    # Rather than fail immediately, retry in next cycle
+                                    # Critical symbols usually load within 30-60 seconds total after MT5 connects
+                                    time.sleep(trading_interval)
+                                    continue
+                            # ==================== END CRITICAL SYMBOL CHECK ====================
+                            
                         active_conn = mt5_conn
                         
                     except Exception as e:
