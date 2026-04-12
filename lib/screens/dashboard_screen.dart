@@ -105,6 +105,128 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return totals;
   }
 
+  String _normalizedModeValue(dynamic value, {bool defaultLive = false}) {
+    final normalized = value?.toString().trim().toLowerCase() ?? '';
+    if (normalized == 'live' || normalized == 'real') return 'live';
+    if (normalized == 'demo' || normalized == 'trial') return 'demo';
+    return defaultLive ? 'live' : 'demo';
+  }
+
+  String _accountMode(Map<String, dynamic> account) {
+    return _normalizedModeValue(
+      account['mode'],
+      defaultLive: account['is_live'] == true,
+    );
+  }
+
+  String _botMode(Map<String, dynamic> bot) {
+    return _normalizedModeValue(
+      bot['mode'],
+      defaultLive: bot['is_live'] == true,
+    );
+  }
+
+  String _modeLabel(String mode) => mode == 'live' ? 'Live' : 'Demo';
+
+  Color _modeAccent(String mode) {
+    return mode == 'live'
+        ? const Color(0xFFFFB74D)
+        : const Color(0xFF64B5F6);
+  }
+
+  List<Map<String, dynamic>> _filteredBrokerAccounts([String? mode]) {
+    final selectedMode = mode ?? _balanceMode;
+    return _brokerAccounts
+        .where((account) => selectedMode == 'all' || _accountMode(account) == selectedMode)
+        .cast<Map<String, dynamic>>()
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _filteredBots([String? mode]) {
+    final selectedMode = mode ?? _balanceMode;
+    return _realBotsList
+        .where((bot) => selectedMode == 'all' || _botMode(Map<String, dynamic>.from(bot)) == selectedMode)
+        .cast<Map<String, dynamic>>()
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _activeBotsFor([String? mode]) {
+    return _filteredBots(mode)
+        .where((bot) => bot['enabled'] == true || bot['status'] == 'Active')
+        .cast<Map<String, dynamic>>()
+        .toList();
+  }
+
+  Map<String, double> _aggregateBotValuesFor(String field, {String? mode}) {
+    final totals = <String, double>{};
+    for (final bot in _filteredBots(mode)) {
+      final currency = _botCurrency(bot);
+      final amount = double.tryParse(bot[field]?.toString() ?? '0') ?? 0.0;
+      totals[currency] = (totals[currency] ?? 0.0) + amount;
+    }
+    return totals;
+  }
+
+  Widget _buildModeSummaryTile({
+    required String mode,
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final accent = _modeAccent(mode);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withOpacity(0.22)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: accent, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: GoogleFonts.poppins(
+                    color: accent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatCurrencyBreakdown(Map<String, double> totals, {int decimals = 2}) {
     if (totals.isEmpty) {
       return _formatCurrencyAmount(0, 'USD', decimals: decimals);
@@ -240,14 +362,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// Fetch real bots from BotService (already filtered by mode on backend)
+  /// Fetch all bots so dashboard can separate live/demo locally.
   Future<void> _fetchRealBots() async {
     try {
       final botService = context.read<BotService>();
-      final tradingMode = await _currentTradingMode();
-      
-      // Fetch bots from backend via BotService (mode filter applied server-side)
-      await botService.fetchActiveBots(tradingMode: tradingMode, force: true);
+      await botService.fetchActiveBots(tradingMode: '', force: true);
       
       if (mounted) {
         setState(() {
@@ -343,14 +462,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Build the connected broker account card showing balance and withdrawals
   Widget _buildConnectedBrokerCard() {
-    final connectedAccounts = _brokerAccounts
-        .where((account) {
-          if (account['connected'] != true) return false;
-          if (_balanceMode == 'all') return true;
-          final mode = (account['mode'] ?? '').toString().toLowerCase();
-          if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
-          return mode == 'demo' || mode == 'trial';
-        })
+    final connectedAccounts = _filteredBrokerAccounts()
+        .where((account) => account['connected'] == true)
         .cast<Map<String, dynamic>>()
         .toList();
 
@@ -367,6 +480,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final balance = (connected['balance'] as num?)?.toDouble() ?? 0.0;
           final equity = (connected['equity'] as num?)?.toDouble() ?? 0.0;
           final currency = connected['currency'] ?? 'USD';
+          final mode = _accountMode(connected);
           final key = '${broker}_$accountNum';
           final balanceChange = _balanceChanges[key] ?? 0.0;
           final isIncreasing = balanceChange >= 0;
@@ -421,6 +535,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _modeAccent(mode).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          _modeLabel(mode),
+                          style: GoogleFonts.poppins(
+                            color: _modeAccent(mode),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -581,7 +710,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Build recent bots card showing active trading bots
   Widget _buildRecentBotsCard() {
-    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true || bot['status'] == 'Active').toList();
+    final activeBots = _activeBotsFor();
+    final liveActiveBots = _activeBotsFor('live');
+    final demoActiveBots = _activeBotsFor('demo');
     if (activeBots.isEmpty) {
       return _glassCard(
         child: Column(
@@ -606,16 +737,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               Text('Active Bots',
                   style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
-              Text('${activeBots.length} active',
+              Text(_balanceMode == 'all' ? '${liveActiveBots.length} live • ${demoActiveBots.length} demo' : '${activeBots.length} active',
                   style: GoogleFonts.poppins(color: const Color(0xFF00E5FF), fontSize: 13, fontWeight: FontWeight.w500)),
             ],
           ),
           const SizedBox(height: 14),
+          if (_balanceMode == 'all') ...[
+            Row(
+              children: [
+                Expanded(
+                  child: _buildModeSummaryTile(
+                    mode: 'live',
+                    title: 'Live Bots',
+                    value: '${liveActiveBots.length}',
+                    subtitle: 'active in live trading',
+                    icon: Icons.bolt,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildModeSummaryTile(
+                    mode: 'demo',
+                    title: 'Demo Bots',
+                    value: '${demoActiveBots.length}',
+                    subtitle: 'active in demo trading',
+                    icon: Icons.smart_toy,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
           ...activeBots.take(5).map((bot) {
             final botId = bot['botId']?.toString() ?? 'Unknown Bot';
             final strategy = bot['strategy']?.toString() ?? 'Unknown';
-            final profit = double.tryParse(bot['totalProfit']?.toString() ?? '0') ?? 0;
+            final profit = double.tryParse(bot['currentProfit']?.toString() ?? bot['totalProfit']?.toString() ?? '0') ?? 0;
             final isProfitable = profit > 0;
+            final botMode = _botMode(bot);
+            final botCurrency = _botCurrency(bot);
             
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
@@ -649,13 +808,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(botId, style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: _modeAccent(botMode).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      _modeLabel(botMode),
+                                      style: GoogleFonts.poppins(
+                                        color: _modeAccent(botMode),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               Text(strategy, style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
                             ],
                           ),
                         ),
                         Text(
-                          '\$${profit.toStringAsFixed(2)}',
+                          '${_currencySymbol(botCurrency)}${profit.toStringAsFixed(2)}',
                           style: GoogleFonts.poppins(
                             color: isProfitable ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80),
                             fontSize: 13,
@@ -1197,12 +1378,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // ── Total Portfolio Balance ──
               Builder(
                 builder: (context) {
-                  final filtered = _brokerAccounts.where((a) {
-                    if (_balanceMode == 'all') return true;
-                    final mode = (a['mode'] ?? '').toString().toLowerCase();
-                    if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
-                    return mode == 'demo' || mode == 'trial';
-                  }).toList();
+                  final filtered = _filteredBrokerAccounts();
+                  final liveAccounts = _filteredBrokerAccounts('live');
+                  final demoAccounts = _filteredBrokerAccounts('demo');
                   final filteredTotals = _aggregateAccountBalances(filtered);
                   final connectedCount = filtered.where((a) => a['connected'] == true).length;
 
@@ -1243,6 +1421,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
                             ),
                           ),
+                        if (_balanceMode == 'all') ...[
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildModeSummaryTile(
+                                  mode: 'live',
+                                  title: 'Live Balance',
+                                  value: _formatCurrencyBreakdown(_aggregateAccountBalances(liveAccounts)),
+                                  subtitle: '${liveAccounts.where((a) => a['connected'] == true).length} connected live account${liveAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
+                                  icon: Icons.trending_up,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _buildModeSummaryTile(
+                                  mode: 'demo',
+                                  title: 'Demo Balance',
+                                  value: _formatCurrencyBreakdown(_aggregateAccountBalances(demoAccounts)),
+                                  subtitle: '${demoAccounts.where((a) => a['connected'] == true).length} connected demo account${demoAccounts.where((a) => a['connected'] == true).length == 1 ? '' : 's'}',
+                                  icon: Icons.science,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   );
@@ -1256,20 +1460,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── BROKER ACCOUNTS CARD ──
   Widget _buildBrokerAccountsCard() {
-    // Filter accounts by balance mode (All / Live / Demo)
-    final shownAccounts = _brokerAccounts
-        .where((account) {
-          if (_balanceMode == 'all') return true;
-          final mode = (account['mode'] ?? '').toString().toLowerCase();
-          if (_balanceMode == 'live') return mode == 'live' || mode == 'real';
-          return mode == 'demo' || mode == 'trial';
-        })
-        .cast<Map<String, dynamic>>()
-        .toList();
-    
-    final shownTotal = shownAccounts.fold<double>(
-      0, (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
-    );
+    final shownAccounts = _filteredBrokerAccounts();
+    final liveAccounts = _filteredBrokerAccounts('live');
+    final demoAccounts = _filteredBrokerAccounts('demo');
 
     return _glassCard(
       child: Column(
@@ -1277,14 +1470,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           Text('Broker Accounts', style: GoogleFonts.poppins(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
           const SizedBox(height: 14),
+          if (_balanceMode == 'all') ...[
+            Row(
+              children: [
+                Expanded(
+                  child: _buildModeSummaryTile(
+                    mode: 'live',
+                    title: 'Live Accounts',
+                    value: _formatCurrencyBreakdown(_aggregateAccountBalances(liveAccounts)),
+                    subtitle: '${liveAccounts.length} live account${liveAccounts.length == 1 ? '' : 's'} on dashboard',
+                    icon: Icons.account_balance,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildModeSummaryTile(
+                    mode: 'demo',
+                    title: 'Demo Accounts',
+                    value: _formatCurrencyBreakdown(_aggregateAccountBalances(demoAccounts)),
+                    subtitle: '${demoAccounts.length} demo account${demoAccounts.length == 1 ? '' : 's'} on dashboard',
+                    icon: Icons.account_balance_wallet,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
           ...shownAccounts.map((account) {
             final broker = account['broker']?.toString() ?? 'Unknown';
             final accountNum = account['accountNumber']?.toString() ?? '';
             final balance = (account['balance'] as num?)?.toDouble() ?? 0;
             final equity = (account['equity'] as num?)?.toDouble() ?? 0;
-            final mode = account['mode']?.toString() ?? '';
+            final mode = _accountMode(account);
             final connected = account['connected'] == true;
             final error = account['error']?.toString();
+            final warning = account['warning']?.toString();
             final acctCurrency = (account['currency'] as String? ?? 'USD').toUpperCase();
             final acctSymbol = acctCurrency == 'ZAR' ? 'R' : (acctCurrency == 'GBP' ? '£' : r'$');
 
@@ -1316,12 +1536,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('$broker  ($mode)',
-                          style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text('$broker',
+                                style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _modeAccent(mode).withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                _modeLabel(mode),
+                                style: GoogleFonts.poppins(
+                                  color: _modeAccent(mode),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         Text('Account: $accountNum',
                           style: GoogleFonts.poppins(color: Colors.white38, fontSize: 10)),
                         if (!connected && balance == 0 && error != null)
                           Text(error, style: GoogleFonts.poppins(color: const Color(0xFFFF8A80), fontSize: 10)),
+                        if (warning != null)
+                          Text(warning, style: GoogleFonts.poppins(color: const Color(0xFFFFB74D), fontSize: 10)),
                       ],
                     ),
                   ),
@@ -1347,16 +1591,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── QUICK STATS ROW ──
   Widget _buildQuickStatsRow() {
-    final activeBots = _realBotsList.where((bot) => bot['enabled'] == true || bot['status'] == 'Active').length;
-    final totalTrades = _realBotsList.fold<int>(
+    final selectedBots = _filteredBots();
+    final activeBots = _activeBotsFor().length;
+    final liveActiveBots = _activeBotsFor('live').length;
+    final demoActiveBots = _activeBotsFor('demo').length;
+    final totalTrades = selectedBots.fold<int>(
       0, (sum, bot) => sum + (int.tryParse(bot['totalTrades']?.toString() ?? '0') ?? 0),
     );
-    final totalProfitByCurrency = _aggregateBotValues('profit');
+    final totalProfitByCurrency = _aggregateBotValuesFor('profit');
     final totalProfit = totalProfitByCurrency.values.fold<double>(0, (sum, value) => sum + value);
 
     return Row(
       children: [
-        Expanded(child: _buildStatPill(Icons.smart_toy, '$activeBots', 'Active Bots', const Color(0xFF7C4DFF))),
+        Expanded(child: _buildStatPill(Icons.smart_toy, _balanceMode == 'all' ? 'L $liveActiveBots • D $demoActiveBots' : '$activeBots', 'Active Bots', const Color(0xFF7C4DFF))),
         const SizedBox(width: 10),
         Expanded(child: _buildStatPill(Icons.swap_horiz, '$totalTrades', 'Trades', const Color(0xFF00E5FF))),
         const SizedBox(width: 10),
@@ -1405,11 +1652,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ── PROFIT OVERVIEW ──
   Widget _buildProfitOverviewCard() {
-    final totalProfitByCurrency = _aggregateBotValues('profit');
+    final selectedBots = _filteredBots();
+    final totalProfitByCurrency = _aggregateBotValuesFor('profit');
+    final liveProfitByCurrency = _aggregateBotValuesFor('profit', mode: 'live');
+    final demoProfitByCurrency = _aggregateBotValuesFor('profit', mode: 'demo');
     final totalProfit = totalProfitByCurrency.values.fold<double>(0, (sum, value) => sum + value);
-    final winningBots = _realBotsList.where((bot) => (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0) > 0).length;
-    final totalBots = _realBotsList.length;
+    final winningBots = selectedBots.where((bot) => (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0) > 0).length;
+    final totalBots = selectedBots.length;
     final winRate = totalBots > 0 ? (winningBots / totalBots * 100) : 0.0;
+    final liveWinningBots = _filteredBots('live').where((bot) => (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0) > 0).length;
+    final demoWinningBots = _filteredBots('demo').where((bot) => (double.tryParse(bot['profit']?.toString() ?? '0') ?? 0) > 0).length;
+    final liveBotsCount = _filteredBots('live').length;
+    final demoBotsCount = _filteredBots('demo').length;
 
     return _glassCard(
       child: Column(
@@ -1454,6 +1708,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Text('Total Net Return',
                 style: GoogleFonts.poppins(color: Colors.white38, fontSize: 12)),
           ),
+          if (_balanceMode == 'all') ...[
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildModeSummaryTile(
+                    mode: 'live',
+                    title: 'Live Profit',
+                    value: _formatCurrencyBreakdown(liveProfitByCurrency),
+                    subtitle: '${liveWinningBots}/${liveBotsCount} profitable live bots',
+                    icon: Icons.show_chart,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildModeSummaryTile(
+                    mode: 'demo',
+                    title: 'Demo Profit',
+                    value: _formatCurrencyBreakdown(demoProfitByCurrency),
+                    subtitle: '${demoWinningBots}/${demoBotsCount} profitable demo bots',
+                    icon: Icons.insights,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
           // Win Rate Bar
           ClipRRect(
