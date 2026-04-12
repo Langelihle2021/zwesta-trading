@@ -9717,28 +9717,12 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
             if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
         ]
 
-        # On weekends, prioritize symbols that are often tradable (e.g., crypto CFDs)
-        now_utc = datetime.utcnow()
-        weekend_mode = now_utc.weekday() >= 5
-        if now_utc.weekday() >= 5:
-            weekend_symbols = [
-                symbol for symbol in broker_symbol_universe
-                if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS
-            ]
-            if weekend_symbols:
-                allowed_symbols = weekend_symbols + [s for s in allowed_symbols if s not in weekend_symbols]
-
         if normalized_configured:
             configured_safe = [
                 symbol for symbol in normalized_configured
-                if _normalize_symbol_base(symbol) in (SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS | SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS)
+                if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
             ]
             if configured_safe:
-                if weekend_mode:
-                    configured_safe = sorted(
-                        configured_safe,
-                        key=lambda symbol: 0 if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS else 1,
-                    )
                 if not allow_cross_market:
                     return configured_safe
                 return configured_safe + [symbol for symbol in allowed_symbols if symbol not in configured_safe]
@@ -11476,6 +11460,24 @@ def should_trade_today(bot_config, symbol):
     drawdown_pause_hours = bot_config.get('drawdownPauseHours', 6.0) or 6.0
     today = datetime.now().strftime('%Y-%m-%d')
     now = datetime.now()
+
+    # Hard block: tiny live accounts should not open new BTC/ETH positions.
+    mode_value = str(bot_config.get('mode') or bot_config.get('botMode') or 'demo').strip().lower()
+    is_live = mode_value == 'live' or bool(bot_config.get('is_live'))
+    symbol_base = _normalize_symbol_base(symbol)
+    if is_live and symbol_base in SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS:
+        account_currency = str(bot_config.get('displayCurrency') or 'USD').strip().upper()
+        small_account_threshold = _get_small_live_account_threshold(account_currency)
+        balance_basis = max(
+            _safe_float(bot_config.get('accountEquity'), 0.0),
+            _safe_float(bot_config.get('accountBalance'), 0.0),
+        )
+        if 0 < balance_basis <= small_account_threshold:
+            logger.warning(
+                f"[RISK] Bot {bot_config.get('botId')} skipping {symbol}: "
+                f"small live balance {balance_basis:.2f} {account_currency} cannot safely trade {symbol_base}"
+            )
+            return False
 
     # Loss-streak pause guard: temporarily halt entries after repeated losses.
     loss_pause_until_raw = bot_config.get('lossStreakPauseUntil')
@@ -14617,10 +14619,6 @@ def enforce_small_live_account_guard(
     defaults = BOT_MANAGEMENT_PROFILES['small_account']
     guarded_data = dict(data)
     allowed_base_symbols = set(SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS)
-    weekend_mode = datetime.utcnow().weekday() >= 5
-    if weekend_mode:
-        allowed_base_symbols |= SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS
-
     filtered_symbols = [symbol for symbol in symbols if _normalize_symbol_base(symbol) in allowed_base_symbols]
     warnings = [f"Small live account guard applied for {currency} balance {balance:.2f}"]
     derived_trade_amount = derive_small_account_trade_amount(balance, currency)
@@ -14630,15 +14628,8 @@ def enforce_small_live_account_guard(
             warnings.append('Removed high-margin symbols that do not fit the small live account profile')
     else:
         fallback_symbols = SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS
-        if weekend_mode:
-            weekend_defaults = validate_and_correct_symbols(['BTCUSDm', 'ETHUSDm'], broker_name)
-            if weekend_defaults:
-                fallback_symbols = weekend_defaults
         filtered_symbols = validate_and_correct_symbols(fallback_symbols, broker_name)
-        if weekend_mode:
-            warnings.append('Replaced requested symbols with weekend-tradable crypto symbols for the small live account profile')
-        else:
-            warnings.append('Replaced requested symbols with low-margin forex symbols for the small live account profile')
+        warnings.append('Replaced requested symbols with low-margin forex symbols for the small live account profile')
 
     intelligent_management = guarded_data.get('intelligentManagement')
     if not isinstance(intelligent_management, dict):
