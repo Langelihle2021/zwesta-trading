@@ -417,6 +417,59 @@ class BotService extends ChangeNotifier {
     }
   }
 
+  /// Close a specific open position for a bot.
+  Future<bool> closeBotPosition(String botId, String ticket) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final prefs = await _getPrefs();
+      final sessionToken = prefs.getString('auth_token');
+
+      if (sessionToken == null || sessionToken.isEmpty) {
+        _errorMessage = 'Session expired. Please login again.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      final response = await http.post(
+        Uri.parse('$_apiUrl/api/bot/$botId/positions/$ticket/close'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          debugPrint('Position closed: bot=$botId ticket=$ticket');
+          await fetchActiveBots(force: true);
+          return true;
+        }
+        _errorMessage = data['error']?.toString() ?? 'Failed to close position';
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        _errorMessage = 'Session expired. Please login again.';
+      } else {
+        try {
+          _errorMessage = jsonDecode(response.body)['error']?.toString() ?? 'Failed to close position';
+        } catch (_) {
+          _errorMessage = 'Failed to close position';
+        }
+      }
+      return false;
+    } catch (e) {
+      _errorMessage = 'Error closing position: $e';
+      debugPrint('Position close error: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> saveBot(Bot bot) async {
     try {
       final prefs = await SharedPreferences.getInstance();

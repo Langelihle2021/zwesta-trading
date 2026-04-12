@@ -822,6 +822,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
             ),
             const SizedBox(height: 6),
             ...openPositions.take(5).map((pos) {
+              final posTicket = (pos['ticket'] ?? pos['position'] ?? pos['positionId'])?.toString() ?? '';
               final posSymbol = pos['symbol']?.toString() ?? '';
               final posType = pos['type']?.toString() ?? '';
               final posVolume = double.tryParse(pos['volume']?.toString() ?? '0') ?? 0;
@@ -898,6 +899,62 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                               fontWeight: FontWeight.w700,
                             ),
                             overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        if (posTicket.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(6),
+                            onTap: () async {
+                              final shouldClose = await showDialog<bool>(
+                                context: context,
+                                builder: (dialogContext) => AlertDialog(
+                                  backgroundColor: const Color(0xFF0A0E21),
+                                  title: Text(
+                                    'Close Position?',
+                                    style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w700),
+                                  ),
+                                  content: Text(
+                                    '$posSymbol (${isBuy ? 'BUY' : 'SELL'}) ticket $posTicket will be closed now.',
+                                    style: GoogleFonts.poppins(color: Colors.white70),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dialogContext, false),
+                                      child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dialogContext, true),
+                                      child: Text('Close', style: GoogleFonts.poppins(color: Colors.redAccent)),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (shouldClose != true) return;
+                              final botService = context.read<BotService>();
+                              final closed = await botService.closeBotPosition(botId.toString(), posTicket);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(closed ? 'Position closed' : (botService.errorMessage ?? 'Failed to close position')),
+                                  backgroundColor: closed ? Colors.green : Colors.red,
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                              if (closed) {
+                                setState(() {});
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.redAccent.withOpacity(0.45)),
+                              ),
+                              child: const Icon(Icons.close, color: Colors.redAccent, size: 14),
+                            ),
                           ),
                         ],
                       ],
