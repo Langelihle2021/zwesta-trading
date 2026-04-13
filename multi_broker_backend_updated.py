@@ -9449,7 +9449,7 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
             rsi_strength = 20
             entry_reason.append(f'RSI neutral ({rsi:.0f}) + strong downtrend + MACD')
         else:
-            # Neutral RSI zone can still trade if trend and MACD are aligned strongly
+            # Neutral RSI zone can still trade, but only with stronger confirmation.
             if trend == 'UP' and macd_signal == 'BUY' and strong_trend:
                 rsi_signal = 'BUY'
                 rsi_strength = 15
@@ -9458,15 +9458,32 @@ def evaluate_real_trade_signal(symbol: str, market_data: Dict) -> Dict:
                 rsi_signal = 'SELL'
                 rsi_strength = 15
                 entry_reason.append(f'RSI neutral ({rsi:.0f}) + trend/MD confirmation')
-            elif trend in ['UP', 'DOWN'] and volatility != 'HIGH':
-                # Controlled fallback to avoid hour-long no-trade stalls in low-vol trend phases.
-                # Direction follows trend, with confidence kept moderate and later validated by MACD/trend bonuses.
-                rsi_signal = 'BUY' if trend == 'UP' else 'SELL'
-                rsi_strength = 20
-                entry_reason.append(f'RSI neutral ({rsi:.0f}) + trend-follow fallback ({trend})')
             else:
-                rsi_strength = 0
-                entry_reason.append(f'RSI neutral ({rsi:.0f})')
+                fallback_buy = (
+                    trend == 'UP'
+                    and macd_signal == 'BUY'
+                    and macd_just_crossed_bullish
+                    and strong_trend
+                    and volatility == 'LOW'
+                    and 42 <= rsi <= 58
+                )
+                fallback_sell = (
+                    trend == 'DOWN'
+                    and macd_signal == 'SELL'
+                    and macd_just_crossed_bearish
+                    and strong_trend
+                    and volatility == 'LOW'
+                    and 42 <= rsi <= 58
+                )
+                if fallback_buy or fallback_sell:
+                    rsi_signal = 'BUY' if fallback_buy else 'SELL'
+                    rsi_strength = 5
+                    entry_reason.append(
+                        f'RSI neutral ({rsi:.0f}) + fresh low-volatility trend crossover ({trend})'
+                    )
+                else:
+                    rsi_strength = 0
+                    entry_reason.append(f'RSI neutral ({rsi:.0f})')
         
         strength += rsi_strength
         signal = rsi_signal
@@ -10152,7 +10169,7 @@ class DynamicPositionSizer:
         """
         import random
         
-        size = self.base_size
+        size = max(_safe_float(bot_config.get('basePositionSize'), self.base_size), self.min_size)
         
         # Get account performance metrics
         total_trades = bot_config.get('totalTrades', 0)
@@ -10184,6 +10201,12 @@ class DynamicPositionSizer:
                 size *= (1.0 + (win_streak * 0.1))  # +10% per win in streak
             elif loss_streak >= 2:
                 size *= max(0.45, 1.0 - (loss_streak * 0.15))
+
+        performance_state = _build_performance_sizing_state(bot_config, volatility_level)
+        performance_multiplier = _safe_float(performance_state.get('multiplier'), 1.0)
+        size *= performance_multiplier
+        bot_config['effectivePositionSizeMultiplier'] = round(performance_multiplier, 3)
+        bot_config['lastSizingAdjustment'] = performance_state
         
         # 3. VOLATILITY ADJUSTMENT
         volatility_multiplier = {
@@ -10587,7 +10610,15 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
     symbol_universe = build_scanner_symbol_universe(bot_config)
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
     adaptive_offset = int(bot_config.get('adaptiveSignalThresholdOffset') or 0)
-    fallback_slack = 0 if profile == 'small_account' or bot_config.get('managementState') == 'recovery' else max(10, adaptive_offset)
+    mode_value = str(bot_config.get('mode') or bot_config.get('botMode') or 'demo').strip().lower()
+    is_live = mode_value == 'live' or bool(bot_config.get('is_live'))
+    conservative_entry_mode = (
+        profile == 'small_account'
+        or bot_config.get('managementState') == 'recovery'
+        or is_live
+        or int(bot_config.get('consecutiveLosses') or 0) > 0
+    )
+    fallback_slack = 0 if conservative_entry_mode else min(8, max(5, adaptive_offset))
     
     def _is_symbol_tradeable_now(symbol_to_test: str) -> bool:
         """Best-effort tradability check to avoid selecting closed/illiquid symbols."""
@@ -10863,6 +10894,7 @@ PERSISTED_BOT_STATE_FIELDS = {
     'profit', 'drawdownPauseUntil', 'accountBalance', 'accountEquity', 'tradeAmount',
     'selectedPreset', 'presetName',
     'autoAdaptationEnabled', 'lastAdaptationAt', 'lastAdaptationReason',
+    'effectivePositionSizeMultiplier', 'lastSizingAdjustment',
     'promotionReadyAt', 'promotionExpiredAt',
     'open_positions', 'lastPauseEvent', 'intelligentScanner', 'lastScanResults', 'mode',
     'profitProtection', 'symbolReentryCooldowns'
@@ -10931,6 +10963,8 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'autoAdaptationEnabled': True,
         'lastAdaptationAt': None,
         'lastAdaptationReason': None,
+        'effectivePositionSizeMultiplier': 1.0,
+        'lastSizingAdjustment': None,
         'promotionReadyAt': None,
         'promotionExpiredAt': None,
         'intelligentScanner': False,
@@ -14462,6 +14496,23 @@ UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE = 35.0
 LOSS_STREAK_PAUSE_AFTER = 2
 LOSS_STREAK_PAUSE_MINUTES = 20
 LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES = 30
+PERFORMANCE_SIZING_WINDOW = 6
+PERFORMANCE_SIZING_MIN_SAMPLE = 3
+PERFORMANCE_SIZING_MAX_BOOST = 1.35
+PERFORMANCE_SIZING_MAX_REDUCTION = 0.45
+UPSWING_SCALE_MIN_OPEN_PROFIT = 2.0
+UPSWING_SCALE_MIN_SIGNAL_STRENGTH = 72.0
+UPSWING_RETRACE_MIN_PEAK_PROFIT = 3.0
+UPSWING_RETRACE_MIN_AGE_MINUTES = 8.0
+UPSWING_RETRACE_CLOSE_SHARE = 0.45
+PYRAMID_ADDON_SIGNAL_BUFFER = 8.0
+PYRAMID_ADDON_MIN_SIGNAL = 78.0
+PYRAMID_ADDON_MIN_OPEN_PROFIT = 1.5
+PYRAMID_ADDON_VOLUME_MULTIPLIER = 0.45
+PYRAMID_ADDON_MAX_PER_SYMBOL = 1
+PYRAMID_ADDON_MAX_HOLD_MINUTES = 12.0
+PYRAMID_ADDON_MIN_PEAK_PROFIT = 1.5
+PYRAMID_ADDON_LOCKED_PROFIT_SHARE = 0.6
 
 BOT_MANAGEMENT_PROFILES = {
     'small_account': {
@@ -14827,6 +14878,77 @@ def _position_age_minutes(entry_time: Optional[str]) -> float:
         return 0.0
 
 
+def _evaluate_pyramid_addon(
+    bot_config: Dict[str, Any],
+    symbol: str,
+    order_type: str,
+    signal_strength: float,
+    required_strength: float,
+) -> Dict[str, Any]:
+    decision = {
+        'allowed': False,
+        'parentTicket': None,
+        'multiplier': PYRAMID_ADDON_VOLUME_MULTIPLIER,
+        'reason': None,
+    }
+
+    if not symbol or not order_type:
+        return decision
+    if bot_config.get('managementState') == 'recovery':
+        return decision
+    if _normalize_management_profile(bot_config.get('managementProfile')) == 'small_account':
+        return decision
+    if _is_guarded_small_live_account(bot_config, 2.0):
+        return decision
+
+    tracked_positions = bot_config.get('open_positions') if isinstance(bot_config.get('open_positions'), dict) else {}
+    if not tracked_positions:
+        return decision
+
+    same_symbol_positions = []
+    addon_count = 0
+    for ticket, tracked in tracked_positions.items():
+        if str(tracked.get('symbol') or '') != str(symbol):
+            continue
+        if str(tracked.get('type') or '').upper() != str(order_type).upper():
+            continue
+        if tracked.get('status') not in {None, 'open'}:
+            continue
+        same_symbol_positions.append((ticket, tracked))
+        if tracked.get('isPyramidAddon'):
+            addon_count += 1
+
+    if not same_symbol_positions or addon_count >= PYRAMID_ADDON_MAX_PER_SYMBOL:
+        return decision
+
+    parent_ticket = None
+    parent_profit = 0.0
+    parent_peak = 0.0
+    for ticket, tracked in same_symbol_positions:
+        if tracked.get('isPyramidAddon'):
+            continue
+        current_profit = _safe_float(tracked.get('profit'), 0.0)
+        peak_profit = _safe_float(tracked.get('peakProfit'), current_profit)
+        if current_profit > parent_profit:
+            parent_ticket = ticket
+            parent_profit = current_profit
+            parent_peak = peak_profit
+
+    if not parent_ticket:
+        return decision
+    if parent_profit < PYRAMID_ADDON_MIN_OPEN_PROFIT or parent_peak < PYRAMID_ADDON_MIN_PEAK_PROFIT:
+        return decision
+    if signal_strength < max(PYRAMID_ADDON_MIN_SIGNAL, required_strength + PYRAMID_ADDON_SIGNAL_BUFFER):
+        return decision
+
+    decision['allowed'] = True
+    decision['parentTicket'] = parent_ticket
+    decision['reason'] = (
+        f"parent {symbol} position positive at {parent_profit:.2f} with signal {signal_strength:.0f}/{required_strength:.0f}"
+    )
+    return decision
+
+
 def _profit_protection_activation_amount(bot_config: Dict[str, Any], protection_config: Dict[str, Any]) -> float:
     activation_min_profit = float(protection_config.get('activationMinProfit') or 0.0)
     activation_percent = float(protection_config.get('activationPercent') or 0.0)
@@ -14892,14 +15014,63 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
         signal_eval = evaluate_real_trade_signal(tracked.get('symbol', ''), _get_market_data_for_symbol(tracked.get('symbol', '')))
         current_signal = signal_eval.get('signal', 'NEUTRAL')
         locked_floor = _safe_float(tracked.get('lockedProfitFloor'), 0.0)
+        peak_profit = _safe_float(tracked.get('peakProfit'), 0.0)
+        upswing_retrace_floor = max(0.5, round(peak_profit * UPSWING_RETRACE_CLOSE_SHARE, 2))
+        pyramid_locked_floor = max(0.25, round(peak_profit * PYRAMID_ADDON_LOCKED_PROFIT_SHARE, 2))
 
         if not close_reason:
             # Zero-loss lock: close any trade that was ever in profit but has fallen back to 0 or negative.
             # This fires regardless of whether profitProtectionArmed is set, so even small winning
             # positions that reversed before hitting the activation threshold are protected.
-            peak = _safe_float(tracked.get('peakProfit'), 0.0)
-            if effective_protection.get('zeroLossLockEnabled', True) and peak > 0 and current_profit <= 0 and not _recent_close_request(tracked):
+            if effective_protection.get('zeroLossLockEnabled', True) and peak_profit > 0 and current_profit <= 0 and not _recent_close_request(tracked):
                 close_reason = 'ZERO_LOSS_LOCK'
+
+        if not close_reason:
+            if (
+                time_in_position >= UPSWING_RETRACE_MIN_AGE_MINUTES
+                and peak_profit >= UPSWING_RETRACE_MIN_PEAK_PROFIT
+                and current_profit > 0
+                and current_profit <= upswing_retrace_floor
+                and not _recent_close_request(tracked)
+            ):
+                close_reason = 'UPSWING_RETRACE_LOCK'
+
+        if not close_reason:
+            if (
+                time_in_position >= UPSWING_RETRACE_MIN_AGE_MINUTES
+                and peak_profit >= UPSWING_RETRACE_MIN_PEAK_PROFIT
+                and current_profit > 0
+                and _signal_reversed_for_position(tracked.get('type', ''), current_signal)
+                and not _recent_close_request(tracked)
+            ):
+                close_reason = 'UPSWING_SIGNAL_REVERSAL'
+
+        if not close_reason and tracked.get('isPyramidAddon'):
+            if (
+                time_in_position >= PYRAMID_ADDON_MAX_HOLD_MINUTES
+                and current_profit > 0
+                and not _recent_close_request(tracked)
+            ):
+                close_reason = 'PYRAMID_TIME_EXIT'
+            elif (
+                peak_profit >= PYRAMID_ADDON_MIN_PEAK_PROFIT
+                and current_profit > 0
+                and current_profit <= pyramid_locked_floor
+                and not _recent_close_request(tracked)
+            ):
+                close_reason = 'PYRAMID_RETRACE_LOCK'
+            elif (
+                current_profit > 0
+                and _signal_reversed_for_position(tracked.get('type', ''), current_signal)
+                and not _recent_close_request(tracked)
+            ):
+                close_reason = 'PYRAMID_SIGNAL_REVERSAL'
+            elif (
+                peak_profit > 0
+                and current_profit <= 0
+                and not _recent_close_request(tracked)
+            ):
+                close_reason = 'PYRAMID_BREAK_EVEN_FAILURE'
 
         if not close_reason:
             if not tracked.get('profitProtectionArmed') or _recent_close_request(tracked):
@@ -15677,6 +15848,138 @@ def _recent_closed_trades(bot_config: Dict[str, Any], limit: int = UNIVERSAL_ADA
     if limit <= 0:
         return closed_trades
     return closed_trades[-limit:]
+
+
+def _build_performance_sizing_state(bot_config: Dict[str, Any], volatility_level: str = 'Medium') -> Dict[str, Any]:
+    recent_closed = _recent_closed_trades(bot_config, limit=PERFORMANCE_SIZING_WINDOW)
+    recent_count = len(recent_closed)
+    recent_profit = sum(_safe_float(trade.get('profit'), 0.0) for trade in recent_closed)
+    recent_wins = sum(1 for trade in recent_closed if _safe_float(trade.get('profit'), 0.0) > 0)
+    recent_win_rate = (recent_wins / recent_count * 100.0) if recent_count else 0.0
+
+    consecutive_wins = 0
+    consecutive_losses = 0
+    for trade in reversed(recent_closed):
+        profit = _safe_float(trade.get('profit'), 0.0)
+        if profit > 0 and consecutive_losses == 0:
+            consecutive_wins += 1
+        elif profit < 0 and consecutive_wins == 0:
+            consecutive_losses += 1
+        else:
+            break
+
+    last_scan_results = bot_config.get('lastScanResults') if isinstance(bot_config.get('lastScanResults'), dict) else {}
+    qualifying_opportunities = int(last_scan_results.get('qualifyingOpportunities') or 0)
+    top_strength = 0.0
+    top_opportunities = last_scan_results.get('topOpportunities') if isinstance(last_scan_results.get('topOpportunities'), list) else []
+    if top_opportunities:
+        top_strength = max(_safe_float(opportunity.get('strength'), 0.0) for opportunity in top_opportunities[:3])
+
+    open_positions = bot_config.get('open_positions') if isinstance(bot_config.get('open_positions'), dict) else {}
+    aggregate_open_profit = round(sum(_safe_float(position.get('profit'), 0.0) for position in open_positions.values()), 2)
+    positive_open_positions = sum(1 for position in open_positions.values() if _safe_float(position.get('profit'), 0.0) > 0)
+    best_open_peak = max((_safe_float(position.get('peakProfit'), 0.0) for position in open_positions.values()), default=0.0)
+
+    multiplier = 1.0
+    reasons: List[str] = []
+    state = 'normal'
+    guarded_small_live = _is_guarded_small_live_account(bot_config, 2.0)
+    is_live = str(bot_config.get('mode') or 'demo').strip().lower() == 'live' or bool(bot_config.get('is_live'))
+
+    if recent_count >= PERFORMANCE_SIZING_MIN_SAMPLE:
+        if recent_profit > 0 and recent_win_rate >= 65.0:
+            hot_bonus = min(0.18, (recent_win_rate - 60.0) / 100.0)
+            multiplier += hot_bonus
+            state = 'hot'
+            reasons.append(f"recent win rate {recent_win_rate:.0f}%")
+            if recent_profit >= max(10.0, abs(_safe_float(bot_config.get('dailyProfit'), 0.0)) * 0.5):
+                multiplier += 0.05
+                reasons.append('recent profit momentum')
+        elif recent_profit < 0 or recent_win_rate <= 45.0:
+            multiplier -= 0.18
+            state = 'defensive'
+            reasons.append(f"recent win rate {recent_win_rate:.0f}%")
+
+    if consecutive_wins >= 3:
+        multiplier += 0.07
+        state = 'hot'
+        reasons.append(f'{consecutive_wins} trade win streak')
+    elif consecutive_losses >= 2:
+        multiplier -= 0.15
+        state = 'defensive'
+        reasons.append(f'{consecutive_losses} trade loss streak')
+
+    if qualifying_opportunities >= 3 and top_strength >= 75.0 and state != 'defensive':
+        multiplier += 0.08
+        state = 'hot'
+        reasons.append(f'{qualifying_opportunities} strong scanner setups')
+    elif qualifying_opportunities == 0 and recent_count >= PERFORMANCE_SIZING_MIN_SAMPLE:
+        multiplier -= 0.08
+        state = 'defensive'
+        reasons.append('scanner opportunity drought')
+
+    if (
+        open_positions
+        and aggregate_open_profit >= UPSWING_SCALE_MIN_OPEN_PROFIT
+        and positive_open_positions > 0
+        and top_strength >= UPSWING_SCALE_MIN_SIGNAL_STRENGTH
+        and bot_config.get('managementState') != 'recovery'
+    ):
+        multiplier += 0.12
+        state = 'hot'
+        reasons.append(
+            f'open P/L {aggregate_open_profit:.2f} with live signal strength {top_strength:.0f}'
+        )
+    elif open_positions and aggregate_open_profit <= 0:
+        multiplier = min(multiplier, 0.88)
+        state = 'defensive'
+        reasons.append(f'open P/L pressure {aggregate_open_profit:.2f}')
+
+    if best_open_peak >= UPSWING_RETRACE_MIN_PEAK_PROFIT and aggregate_open_profit > 0 and state != 'defensive':
+        multiplier += 0.05
+        reasons.append(f'open trade peak reached {best_open_peak:.2f}')
+
+    if bot_config.get('managementState') == 'recovery':
+        multiplier = min(multiplier, 0.65)
+        state = 'defensive'
+        reasons.append('recovery mode active')
+
+    if volatility_level == 'High':
+        multiplier = min(multiplier, 0.9)
+        reasons.append('high volatility cap')
+    elif volatility_level == 'Very High':
+        multiplier = min(multiplier, 0.75)
+        state = 'defensive'
+        reasons.append('very high volatility cap')
+
+    if guarded_small_live:
+        multiplier = min(multiplier, 0.75)
+        reasons.append('small live account cap')
+    elif is_live:
+        multiplier = min(multiplier, 1.2)
+
+    multiplier = max(PERFORMANCE_SIZING_MAX_REDUCTION, min(multiplier, PERFORMANCE_SIZING_MAX_BOOST))
+    if abs(multiplier - 1.0) < 0.03:
+        multiplier = 1.0
+        if state != 'defensive':
+            state = 'normal'
+
+    return {
+        'timestamp': datetime.now().isoformat(),
+        'state': state,
+        'multiplier': round(multiplier, 3),
+        'recentTradeCount': recent_count,
+        'recentWinRate': round(recent_win_rate, 2),
+        'recentProfit': round(recent_profit, 2),
+        'consecutiveWins': consecutive_wins,
+        'consecutiveLosses': consecutive_losses,
+        'aggregateOpenProfit': aggregate_open_profit,
+        'positiveOpenPositions': positive_open_positions,
+        'bestOpenPeakProfit': round(best_open_peak, 2),
+        'qualifyingOpportunities': qualifying_opportunities,
+        'topOpportunityStrength': round(top_strength, 2),
+        'reason': '; '.join(reasons) if reasons else 'baseline sizing',
+    }
 
 
 def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, Any]) -> List[str]:
@@ -17479,12 +17782,26 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             )
                             continue
 
-                        adjusted_volume = fixed_trade_volume if fixed_trade_volume is not None else trade_params['volume'] * position_size
                         order_type = trade_params['type']
+                        pyramid_decision = _evaluate_pyramid_addon(
+                            bot_config,
+                            symbol,
+                            order_type,
+                            signal_strength,
+                            required_strength,
+                        )
+                        adjusted_volume = fixed_trade_volume if fixed_trade_volume is not None else trade_params['volume'] * position_size
+                        if pyramid_decision['allowed']:
+                            adjusted_volume = max(0.01, adjusted_volume * pyramid_decision['multiplier'])
 
                         # Log signal details
                         logger.info(f"🎯 Bot {bot_id}: {signal_info.get('signal', 'UNKNOWN')} setup on {symbol} -> executing {order_type}")
                         logger.info(f"   Signal Strength: {signal_info.get('strength', 0):.0f}/100 | Reason: {signal_info.get('entry_reason', 'N/A')}")
+                        if pyramid_decision['allowed']:
+                            logger.info(
+                                f"📈 Bot {bot_id}: Pyramiding add-on enabled for {symbol} at {adjusted_volume:.4f} lots | "
+                                f"{pyramid_decision['reason']}"
+                            )
                         
                         # Place order via broker with RETRY LOGIC
                         logger.info(f"📍 Bot {bot_id}: Placing {order_type} order on {symbol} via {broker_type} | Cycle: {trade_cycle}")
@@ -17538,9 +17855,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             # ✅ POSITION LIMIT CHECK: Enforce maxOpenPositions to prevent unlimited trades
                             max_open = bot_config.get('effectiveMaxOpenPositions') or bot_config.get('maxOpenPositions') or 5
                             max_per_symbol = bot_config.get('effectiveMaxPositionsPerSymbol') or bot_config.get('maxPositionsPerSymbol') or max_open
+                            allowed_positions_on_symbol = max_per_symbol + (PYRAMID_ADDON_MAX_PER_SYMBOL if pyramid_decision['allowed'] else 0)
                             existing_positions = mt5_conn.get_positions()
                             bot_id_short = bot_id.split('_')[-1][:8]
                             comment_short = f'ZBot{bot_id_short}'
+                            order_comment = f"{comment_short}-P1" if pyramid_decision['allowed'] else comment_short
                             
                             # Count positions belonging to THIS bot (by comment) and also by tracked open_positions
                             bot_position_count = 0
@@ -17560,10 +17879,10 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         bot_positions_on_symbol += 1
                             
                             # Respect the bot's configured per-symbol position cap.
-                            if bot_positions_on_symbol >= max_per_symbol:
+                            if bot_positions_on_symbol >= allowed_positions_on_symbol:
                                 logger.info(
                                     f"📌 Bot {bot_id}: Already has {bot_positions_on_symbol} open position(s) on {symbol} "
-                                    f"(limit {max_per_symbol}) - skipping"
+                                    f"(limit {allowed_positions_on_symbol}) - skipping"
                                 )
                                 continue
                             
@@ -17654,7 +17973,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         symbol=attempt_symbol,
                                         order_type=order_type,
                                         volume=adjusted_volume,
-                                        comment=comment_short,
+                                        comment=order_comment,
                                         stopLoss=sl_price,
                                         takeProfit=tp_price
                                     )
@@ -17687,7 +18006,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                                     symbol=attempt_symbol,
                                                     order_type=order_type,
                                                     volume=adjusted_volume,
-                                                    comment=comment_short,
+                                                    comment=order_comment,
                                                     stopLoss=sl_price,
                                                     takeProfit=tp_price
                                                 )
@@ -17838,6 +18157,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         'cycle': trade_cycle,
                                         'strategy': strategy_name,
                                         'broker': broker_type,
+                                        'isPyramidAddon': bool(pyramid_decision['allowed']),
+                                        'pyramidParentTicket': pyramid_decision.get('parentTicket'),
+                                        'pyramidReason': pyramid_decision.get('reason'),
                                         'peakProfit': round(current_profit, 2),
                                         'profitProtectionArmed': False,
                                         'lockedProfitFloor': 0.0,
@@ -17865,7 +18187,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                             None,  # No close time yet
                                             'open',  # Mark as OPEN, not closed
                                             datetime.now().isoformat(),
-                                            json.dumps({'ticket': str(pos_ticket), 'symbol': pos_symbol, 'type': pos_type, 'entryPrice': matched_pos.get('openPrice', 0), 'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}"}),
+                                            json.dumps({'ticket': str(pos_ticket), 'symbol': pos_symbol, 'type': pos_type, 'entryPrice': matched_pos.get('openPrice', 0), 'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}", 'isPyramidAddon': bool(pyramid_decision['allowed']), 'pyramidParentTicket': pyramid_decision.get('parentTicket')}),
                                             int(datetime.now().timestamp() * 1000)
                                         ))
                                         trade_conn.commit()
@@ -17887,6 +18209,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         'botId': bot_id,
                                         'cycle': trade_cycle,
                                         'strategy': strategy_name,
+                                        'isPyramidAddon': bool(pyramid_decision['allowed']),
+                                        'pyramidParentTicket': pyramid_decision.get('parentTicket'),
                                         'isWinning': current_profit > 0,
                                         'status': 'open',
                                         'source': f"REAL_{str(broker_type).upper().replace(' ', '_')}",
@@ -19216,6 +19540,8 @@ def bot_summary():
             strategy_history = bot.get('strategyHistory') if isinstance(bot.get('strategyHistory'), list) else []
             last_strategy_event = strategy_history[-1] if strategy_history else None
             last_scan_results = bot.get('lastScanResults') if isinstance(bot.get('lastScanResults'), dict) else None
+            last_sizing_adjustment = bot.get('lastSizingAdjustment') if isinstance(bot.get('lastSizingAdjustment'), dict) else None
+            pyramid_open_count = sum(1 for position in open_positions if position.get('isPyramidAddon'))
             if promotion_state.get('stateChanged'):
                 persist_bot_runtime_state(bot.get('botId', ''))
 
@@ -19233,6 +19559,8 @@ def bot_summary():
                     'breakEvenFloor': round(_safe_float(pos.get('breakEvenFloor'), 0.0), 2),
                     'profitProtectionArmed': bool(pos.get('profitProtectionArmed', False)),
                     'profitProtectionBucket': pos.get('profitProtectionBucket'),
+                    'isPyramidAddon': bool(pos.get('isPyramidAddon', False)),
+                    'pyramidParentTicket': pos.get('pyramidParentTicket'),
                 })
 
             active_symbol_cooldowns = []
@@ -19303,6 +19631,8 @@ def bot_summary():
                 'autoAdaptationEnabled': _coerce_bool(bot.get('autoAdaptationEnabled', True), True),
                 'lastAdaptationAt': bot.get('lastAdaptationAt'),
                 'lastAdaptationReason': bot.get('lastAdaptationReason'),
+                'effectivePositionSizeMultiplier': round(_safe_float(bot.get('effectivePositionSizeMultiplier'), 1.0), 3),
+                'lastSizingAdjustment': last_sizing_adjustment,
                 'selectedPreset': bot.get('selectedPreset'),
                 'presetName': bot.get('presetName'),
                 'promotionStatus': promotion_state['status'],
@@ -19322,8 +19652,10 @@ def bot_summary():
                 'accountEquity': round(bot.get('accountEquity', 0), 2),
                 'tradeAmount': bot.get('tradeAmount'),
                 'openPositionsCount': len(open_positions),
+                'pyramidOpenCount': pyramid_open_count,
                 'openPositionsPreview': open_positions_preview,
                 'activeSymbolCooldowns': active_symbol_cooldowns,
+                'scannerTopOpportunities': (last_scan_results or {}).get('topOpportunities', []),
                 'cumulativeProfitFloor': round(cumulative_profit * 0.70, 2) if cumulative_profit > 0 else 0,
                 'cumulativeProfitFloorRemaining': round(max(0, current_profit - (cumulative_profit * 0.70)), 2) if cumulative_profit > 0 else 0,
                 'cumulativeProfitFloorBreach': current_profit <= (cumulative_profit * 0.70) if cumulative_profit > 0 else False,
@@ -19414,6 +19746,8 @@ def get_bot_analytics_snapshot(bot_id: str):
         strategy_history = bot.get('strategyHistory') if isinstance(bot.get('strategyHistory'), list) else []
         last_strategy_event = strategy_history[-1] if strategy_history else None
         last_scan_results = bot.get('lastScanResults') if isinstance(bot.get('lastScanResults'), dict) else None
+        last_sizing_adjustment = bot.get('lastSizingAdjustment') if isinstance(bot.get('lastSizingAdjustment'), dict) else None
+        pyramid_open_count = sum(1 for position in open_positions if position.get('isPyramidAddon'))
 
         trade_history = bot.get('tradeHistory', [])
         last_trade_time = trade_history[-1].get('time') if trade_history else bot.get('createdAt', datetime.now().isoformat())
@@ -19427,6 +19761,8 @@ def get_bot_analytics_snapshot(bot_id: str):
                 'breakEvenFloor': round(_safe_float(pos.get('breakEvenFloor'), 0.0), 2),
                 'profitProtectionArmed': bool(pos.get('profitProtectionArmed', False)),
                 'profitProtectionBucket': pos.get('profitProtectionBucket'),
+                'isPyramidAddon': bool(pos.get('isPyramidAddon', False)),
+                'pyramidParentTicket': pos.get('pyramidParentTicket'),
             })
 
         active_symbol_cooldowns = []
@@ -19511,12 +19847,16 @@ def get_bot_analytics_snapshot(bot_id: str):
                 'lastStrategyEvent': last_strategy_event,
                 'scannerMode': (last_scan_results or {}).get('scannerMode'),
                 'lastScanTimestamp': (last_scan_results or {}).get('timestamp'),
+                'scannerTopOpportunities': (last_scan_results or {}).get('topOpportunities', []),
+                'effectivePositionSizeMultiplier': round(_safe_float(bot.get('effectivePositionSizeMultiplier'), 1.0), 3),
+                'lastSizingAdjustment': last_sizing_adjustment,
                 'mode': str(bot_mode_value).upper(),
                 'is_live': bot_is_live,
                 'profitField': round(current_profit, 2),
                 'tradeHistory': trade_history,
                 'dailyProfits': daily_profits,
                 'openPositions': open_positions_payload,
+                'pyramidOpenCount': pyramid_open_count,
                 'accountBalance': round(bot.get('accountBalance', 0), 2),
                 'accountEquity': round(bot.get('accountEquity', 0), 2),
                 'activeSymbolCooldowns': active_symbol_cooldowns,

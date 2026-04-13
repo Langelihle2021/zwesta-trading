@@ -130,6 +130,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return _truncateLabel('$summary • $reason', maxLength: 88);
   }
 
+  String? _sizingSummary(Map<String, dynamic> bot) {
+    final sizing = bot['lastSizingAdjustment'];
+    if (sizing is! Map) return null;
+
+    final state = sizing['state']?.toString().trim();
+    final multiplier = double.tryParse(bot['effectivePositionSizeMultiplier']?.toString() ?? '') ??
+        double.tryParse(sizing['multiplier']?.toString() ?? '') ??
+        1.0;
+    final reason = sizing['reason']?.toString().trim();
+
+    if ((state == null || state.isEmpty) && (reason == null || reason.isEmpty) && multiplier == 1.0) {
+      return null;
+    }
+
+    final parts = <String>[];
+    if (state != null && state.isNotEmpty) {
+      parts.add(state.toUpperCase());
+    }
+    parts.add('${multiplier.toStringAsFixed(2)}x size');
+    if (reason != null && reason.isNotEmpty && reason != 'baseline sizing') {
+      parts.add(reason);
+    }
+    return _truncateLabel(parts.join(' • '), maxLength: 92);
+  }
+
+  String? _pyramidSummary(Map<String, dynamic> bot) {
+    final pyramidCount = int.tryParse(bot['pyramidOpenCount']?.toString() ?? '0') ?? 0;
+    final opportunities = bot['scannerTopOpportunities'];
+    String? topOpportunity;
+    if (opportunities is List && opportunities.isNotEmpty && opportunities.first is Map) {
+      final first = opportunities.first as Map;
+      final symbol = first['symbol']?.toString().trim();
+      final strength = double.tryParse(first['strength']?.toString() ?? '0') ?? 0.0;
+      if (symbol != null && symbol.isNotEmpty) {
+        topOpportunity = '$symbol ${strength.toStringAsFixed(0)}/100';
+      }
+    }
+
+    if (pyramidCount <= 0 && topOpportunity == null) {
+      return null;
+    }
+
+    final parts = <String>[];
+    if (pyramidCount > 0) {
+      parts.add('$pyramidCount add-on${pyramidCount == 1 ? '' : 's'} active');
+    }
+    if (topOpportunity != null) {
+      parts.add('scanner lead $topOpportunity');
+    }
+    return _truncateLabel(parts.join(' • '), maxLength: 92);
+  }
+
   String _accountCurrency(Map<String, dynamic> account) {
     return _normalizeCurrency(account['currency'] ?? account['account_currency']);
   }
@@ -897,6 +949,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final scannerMode = bot['scannerMode']?.toString().trim();
             final strategySelectionSummary = _scannerStrategySummary(bot);
             final lastStrategySwitchSummary = _lastStrategySwitchSummary(bot);
+            final sizingSummary = _sizingSummary(bot);
+            final pyramidSummary = _pyramidSummary(bot);
             
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
@@ -968,7 +1022,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    if (strategySelectionSummary != null || lastStrategySwitchSummary != null) ...[
+                    if (strategySelectionSummary != null || lastStrategySwitchSummary != null || sizingSummary != null || pyramidSummary != null) ...[
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
@@ -1017,6 +1071,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Expanded(
                                     child: Text(
                                       'Last switch: $lastStrategySwitchSummary',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white60,
+                                        fontSize: 10.2,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            if ((lastStrategySwitchSummary != null) && (sizingSummary != null || pyramidSummary != null))
+                              const SizedBox(height: 6),
+                            if (sizingSummary != null)
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.speed,
+                                    size: 14,
+                                    color: Color(0xFF80CBC4),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Sizing: $sizingSummary',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white60,
+                                        fontSize: 10.2,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            if (sizingSummary != null && pyramidSummary != null)
+                              const SizedBox(height: 6),
+                            if (pyramidSummary != null)
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.trending_up,
+                                    size: 14,
+                                    color: Color(0xFFFF9E80),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Pyramid: $pyramidSummary',
                                       style: GoogleFonts.poppins(
                                         color: Colors.white60,
                                         fontSize: 10.2,
