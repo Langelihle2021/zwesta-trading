@@ -9852,6 +9852,8 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
     normalized_configured = validate_and_correct_symbols(configured_symbols, normalized_broker) if configured_symbols else []
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
     broker_symbol_universe = get_mt5_ready_symbols_for_broker(normalized_broker)
+    idle_cycles = int(bot_config.get('adaptiveSignalMissCount') or 0)
+    expand_small_account_universe = idle_cycles >= ADAPTIVE_SCANNER_TRIGGER_MISSES
 
     if profile == 'small_account':
         allowed_symbols = [
@@ -9865,7 +9867,7 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
                 if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
             ]
             if configured_safe:
-                if not allow_cross_market:
+                if not allow_cross_market and not expand_small_account_universe:
                     return configured_safe
                 return configured_safe + [symbol for symbol in allowed_symbols if symbol not in configured_safe]
         return allowed_symbols or normalized_configured or broker_symbol_universe
@@ -10972,6 +10974,44 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'profitProtection': dict(DEFAULT_PROFIT_PROTECTION_CONFIG),
         'symbolReentryCooldowns': {},
     }
+
+
+def _normalize_bot_mode_value(mode_value: Any = None, is_live_value: Any = None) -> str:
+    normalized_mode = str(mode_value or '').strip().lower()
+    if normalized_mode in ['live', 'demo']:
+        return normalized_mode
+    if is_live_value is not None:
+        return 'live' if bool(is_live_value) else 'demo'
+    return 'demo'
+
+
+def _resolve_bot_name_for_mode(
+    requested_name: Any,
+    existing_name: Any,
+    strategy_name: Any,
+    mode_value: Any,
+) -> str:
+    requested = str(requested_name or '').strip()
+    if requested:
+        return requested
+
+    normalized_mode = _normalize_bot_mode_value(mode_value)
+    normalized_existing = str(existing_name or '').strip()
+    generic_mode_names = {
+        'demo bot': 'demo',
+        'live bot': 'live',
+    }
+
+    if normalized_existing:
+        existing_mode = generic_mode_names.get(normalized_existing.lower())
+        if existing_mode:
+            return 'Live Bot' if normalized_mode == 'live' else 'Demo Bot'
+        return normalized_existing
+
+    strategy = str(strategy_name or '').strip()
+    if strategy:
+        return strategy
+    return 'Live Bot' if normalized_mode == 'live' else 'Demo Bot'
 
 
 def _get_demo_promotion_state(bot_config: Dict[str, Any], current_profit: float, total_trades: int) -> Dict[str, Any]:
@@ -16558,7 +16598,7 @@ def create_bot():
     with bot_creation_lock:
         conn = None
         try:
-            data = request.json
+            data = request.get_json(silent=True)
             if not data:
                 return jsonify({'success': False, 'error': 'No configuration provided'}), 400
 
@@ -19077,7 +19117,7 @@ def start_bot():
     - LIVE: Trades using user's real MT5 account (if credentials stored)
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         bot_id = data.get('botId')
         user_id = data.get('user_id') or request.user_id  # Get from request or session
         activation_pin = data.get('activation_pin')  # NEW: Required for 2FA
@@ -20531,7 +20571,7 @@ def get_pause_summary():
 def stop_bot(bot_id):
     """Stop a trading bot (still keeps it in system for restart)"""
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('user_id') or request.user_id
         
         if not user_id:
