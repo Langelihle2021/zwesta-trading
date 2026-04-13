@@ -94,6 +94,26 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     return currency == null || currency.isEmpty ? 'USD' : currency;
   }
 
+  bool _isLiveBot(Map<String, dynamic> bot) {
+    final mode = bot['mode']?.toString().trim().toLowerCase();
+    if (mode == 'live' || mode == 'real') {
+      return true;
+    }
+    return bot['is_live'] == true;
+  }
+
+  String _botDisplayCurrency(Map<String, dynamic> bot) {
+    final rawCurrency = bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency'];
+    if ((rawCurrency == null || rawCurrency.toString().trim().isEmpty) && _isLiveBot(bot)) {
+      return 'ZAR';
+    }
+    final normalized = _normalizeCurrencyCode(rawCurrency);
+    if (_isLiveBot(bot) && normalized == 'USD' && bot['displayCurrency'] == null) {
+      return 'ZAR';
+    }
+    return normalized;
+  }
+
   String _symbolForCode(String currencyCode) {
     switch (_normalizeCurrencyCode(currencyCode)) {
       case 'ZAR':
@@ -249,7 +269,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
   String _formatBotAggregate(CurrencyProvider currencyProvider, List<Map<String, dynamic>> bots, String field, {int decimals = 2}) {
     final totals = <String, double>{};
     for (final bot in bots) {
-      final currency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+      final currency = _botDisplayCurrency(bot);
       final amount = double.tryParse(bot[field]?.toString() ?? '0') ?? 0.0;
       totals[currency] = (totals[currency] ?? 0.0) + amount;
     }
@@ -739,7 +759,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final symbols = bot['symbol'] ?? bot['symbols'] ?? 'N/A';
     final strategy = bot['strategy'] ?? 'Auto';
     final brokerType = bot['broker_type'] ?? bot['broker'] ?? 'MT5';
-    final displayCurrency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+    final displayCurrency = _botDisplayCurrency(bot);
     final tradeAmount = double.tryParse(bot['tradeAmount']?.toString() ?? '0') ?? 0;
     final presetName = (bot['presetName'] ?? '').toString().trim();
     final profileLabel = _formatProfileLabel(bot['managementProfile']?.toString());
@@ -1912,7 +1932,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
     final botId = bot['botId'] ?? 'Unknown';
     final isEnabled = bot['enabled'] == true;
     final profit = double.tryParse(bot['profit']?.toString() ?? '0') ?? 0;
-    final displayCurrency = _normalizeCurrencyCode(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+    final displayCurrency = _botDisplayCurrency(bot);
 
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotAnalyticsScreen(bot: bot))),

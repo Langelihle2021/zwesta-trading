@@ -277,10 +277,24 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     return currency == null || currency.isEmpty ? 'USD' : currency;
   }
 
+  bool _isLiveBot() {
+    final mode = _botData['mode']?.toString().trim().toLowerCase();
+    if (mode == 'live' || mode == 'real') {
+      return true;
+    }
+    return _botData['is_live'] == true;
+  }
+
   String _displayCurrencyCode() {
-    return _normalizeCurrencyCode(
-      _botData['displayCurrency'] ?? _botData['accountCurrency'] ?? _botData['currency'],
-    );
+    final rawCurrency = _botData['displayCurrency'] ?? _botData['accountCurrency'] ?? _botData['currency'];
+    if ((rawCurrency == null || rawCurrency.toString().trim().isEmpty) && _isLiveBot()) {
+      return 'ZAR';
+    }
+    final normalized = _normalizeCurrencyCode(rawCurrency);
+    if (_isLiveBot() && normalized == 'USD' && _botData['displayCurrency'] == null) {
+      return 'ZAR';
+    }
+    return normalized;
   }
 
   List<Map<String, dynamic>> _tradeHistoryRecords() {

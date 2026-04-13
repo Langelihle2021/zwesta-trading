@@ -82,8 +82,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return _normalizeCurrency(account['currency'] ?? account['account_currency']);
   }
 
+  bool _isLiveBot(Map<String, dynamic> bot) {
+    final mode = bot['mode']?.toString().trim().toLowerCase();
+    if (mode == 'live' || mode == 'real') return true;
+    return bot['is_live'] == true;
+  }
+
   String _botCurrency(Map<String, dynamic> bot) {
-    return _normalizeCurrency(bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency']);
+    final rawCurrency = bot['displayCurrency'] ?? bot['accountCurrency'] ?? bot['currency'];
+    if ((rawCurrency == null || rawCurrency.toString().trim().isEmpty) && _isLiveBot(bot)) {
+      return 'ZAR';
+    }
+    final normalized = _normalizeCurrency(rawCurrency);
+    if (_isLiveBot(bot) && normalized == 'USD' && bot['displayCurrency'] == null) {
+      return 'ZAR';
+    }
+    return normalized;
   }
 
   Map<String, double> _aggregateAccountBalances(Iterable<Map<String, dynamic>> accounts) {

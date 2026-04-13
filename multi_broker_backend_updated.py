@@ -14280,14 +14280,14 @@ BOT_MANAGEMENT_PROFILES = {
 
 SUPPORTED_DISPLAY_CURRENCIES = {'USD', 'ZAR', 'GBP'}
 SMALL_LIVE_ACCOUNT_THRESHOLDS = {
-    'USD': 25.0,
-    'ZAR': 250.0,
-    'GBP': 20.0,
+    'USD': 100.0,
+    'ZAR': 1500.0,
+    'GBP': 80.0,
 }
 SMALL_ACCOUNT_TRADE_AMOUNT_CAPS = {
-    'USD': 12.0,
-    'ZAR': 120.0,
-    'GBP': 10.0,
+    'USD': 8.0,
+    'ZAR': 80.0,
+    'GBP': 7.0,
 }
 SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
     'AUDUSD', 'EURUSD', 'GBPUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'USDJPY', 'EURJPY', 'GBPJPY', 'EURGBP'
@@ -14868,6 +14868,24 @@ def _get_small_live_account_threshold(currency: str) -> float:
     return SMALL_LIVE_ACCOUNT_THRESHOLDS.get(normalized_currency, SMALL_LIVE_ACCOUNT_THRESHOLDS['USD'])
 
 
+def _is_guarded_small_live_account(bot_config: Dict[str, Any], multiplier: float = 1.5) -> bool:
+    if not isinstance(bot_config, dict):
+        return False
+
+    mode = str(bot_config.get('mode') or bot_config.get('botMode') or 'demo').strip().lower()
+    is_live = mode == 'live' or bool(bot_config.get('is_live'))
+    if not is_live:
+        return False
+
+    account_currency = str(bot_config.get('displayCurrency') or 'USD').strip().upper()
+    threshold = _get_small_live_account_threshold(account_currency)
+    balance_basis = max(
+        _safe_float(bot_config.get('accountEquity'), 0.0),
+        _safe_float(bot_config.get('accountBalance'), 0.0),
+    )
+    return balance_basis > 0 and balance_basis <= (threshold * multiplier)
+
+
 LIVE_CAPITAL_SAFETY_BANDS = [
     {
         'name': 'sovereign_guard',
@@ -15155,14 +15173,14 @@ def derive_small_account_trade_amount(balance: float, currency: Optional[str]) -
     cap = SMALL_ACCOUNT_TRADE_AMOUNT_CAPS.get(normalized_currency, SMALL_ACCOUNT_TRADE_AMOUNT_CAPS['USD'])
 
     if safe_balance <= threshold:
-        ratio = 0.05
+        ratio = 0.025
     elif safe_balance <= threshold * 2:
-        ratio = 0.065
+        ratio = 0.035
     else:
-        ratio = 0.08
+        ratio = 0.045
 
-    target_amount = min(safe_balance * ratio, safe_balance * 0.15, cap)
-    return round(max(target_amount, safe_balance * 0.02), 2)
+    target_amount = min(safe_balance * ratio, safe_balance * 0.08, cap)
+    return round(max(target_amount, safe_balance * 0.015), 2)
 
 
 def enforce_small_live_account_guard(
@@ -15211,7 +15229,7 @@ def enforce_small_live_account_guard(
 
     guarded_data.update({
         'intelligentManagement': intelligent_management,
-        'intelligentScanner': True,
+        'intelligentScanner': False,
         'managementProfile': 'small_account',
         'riskProfile': 'small_account',
         'riskPerTrade': defaults['riskPerTrade'],
@@ -15222,7 +15240,7 @@ def enforce_small_live_account_guard(
         'maxOpenPositions': 1,
         'maxOpenTrades': 1,
         'maxPositionsPerSymbol': 1,
-        'signalThreshold': min(max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 20), 40),
+        'signalThreshold': max(65, min(max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 20), 70)),
         'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'dynamicSizing': True,
@@ -15424,6 +15442,8 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
 
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
     defaults = BOT_MANAGEMENT_PROFILES.get(profile, BOT_MANAGEMENT_PROFILES['beginner'])
+    is_live = str(bot_config.get('mode') or 'demo').strip().lower() == 'live' or bool(bot_config.get('is_live'))
+    guarded_small_live = _is_guarded_small_live_account(bot_config, 2.0)
     changes: List[str] = []
     reasons: List[str] = []
 
@@ -15441,7 +15461,7 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
     idle_cycles = int(bot_config.get('adaptiveSignalMissCount') or 0)
     no_open_positions = not bool(open_positions)
 
-    if no_open_positions and idle_cycles >= max(2, ADAPTIVE_SCANNER_TRIGGER_MISSES + 2):
+    if not is_live and no_open_positions and idle_cycles >= max(2, ADAPTIVE_SCANNER_TRIGGER_MISSES + 2):
         if not bot_config.get('intelligentScanner', False):
             bot_config['intelligentScanner'] = True
             changes.append('intelligentScanner=enabled')
@@ -15453,7 +15473,10 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
         reasons.append(f'idle reallocation after {idle_cycles} missed cycles')
 
     recent_closed = _recent_closed_trades(bot_config)
-    if len(recent_closed) >= UNIVERSAL_ADAPTATION_MIN_SAMPLE_TRADES:
+    minimum_sample = UNIVERSAL_ADAPTATION_MIN_SAMPLE_TRADES
+    if is_live:
+        minimum_sample = max(12, UNIVERSAL_ADAPTATION_MIN_SAMPLE_TRADES * 2)
+    if len(recent_closed) >= minimum_sample:
         recent_profit = sum(float(trade.get('profit') or 0.0) for trade in recent_closed)
         recent_wins = sum(1 for trade in recent_closed if float(trade.get('profit') or 0.0) > 0)
         recent_win_rate = (recent_wins / len(recent_closed)) * 100.0
@@ -15464,7 +15487,7 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
             else:
                 break
 
-        if recent_profit > 0 and recent_win_rate >= UNIVERSAL_ADAPTATION_SUCCESS_WIN_RATE:
+        if (not is_live) and recent_profit > 0 and recent_win_rate >= UNIVERSAL_ADAPTATION_SUCCESS_WIN_RATE:
             target_threshold = max(ADAPTIVE_SIGNAL_THRESHOLD_MIN, current_threshold - 3)
             if target_threshold != current_threshold:
                 bot_config['signalThreshold'] = target_threshold
@@ -15497,8 +15520,10 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
             reasons.append(
                 f'strong recent form ({recent_win_rate:.0f}% win rate, {recent_profit:.2f} profit over {len(recent_closed)} trades)'
             )
-        elif recent_profit < 0 or recent_win_rate <= UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE or consecutive_losses >= 3:
+        elif recent_profit < 0 or recent_win_rate <= UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE or consecutive_losses >= 2:
             target_threshold = min(85, current_threshold + 5)
+            if is_live and guarded_small_live:
+                target_threshold = max(target_threshold, 65)
             if target_threshold != current_threshold:
                 bot_config['signalThreshold'] = target_threshold
                 current_threshold = target_threshold
@@ -15524,7 +15549,10 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
                 current_drawdown_hours = longer_drawdown_hours
                 changes.append(f'drawdownPauseHours={longer_drawdown_hours:.1f}')
 
-            if not bot_config.get('intelligentScanner', False) and no_open_positions:
+            if is_live and bot_config.get('intelligentScanner', False):
+                bot_config['intelligentScanner'] = False
+                changes.append('intelligentScanner=disabled')
+            elif (not is_live) and (not bot_config.get('intelligentScanner', False)) and no_open_positions:
                 bot_config['intelligentScanner'] = True
                 changes.append('intelligentScanner=enabled')
 
@@ -15605,6 +15633,7 @@ def update_adaptive_signal_threshold_state(
 def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str, Any]:
     profile = _normalize_management_profile(bot_config.get('managementProfile'))
     is_assisted = bot_config.get('managementMode', 'assisted') != 'manual'
+    guarded_small_live = _is_guarded_small_live_account(bot_config, 2.0)
     defaults = BOT_MANAGEMENT_PROFILES.get(profile, BOT_MANAGEMENT_PROFILES['beginner'])
     effective = {
         'profile': profile,
@@ -15626,10 +15655,19 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         if profile == 'small_account':
             effective['maxOpenPositions'] = 1
             effective['maxPositionsPerSymbol'] = 1
-            effective['signalThreshold'] = min(max(effective['signalThreshold'], 20), 40)
+            effective['signalThreshold'] = min(max(effective['signalThreshold'], 20), 55 if guarded_small_live else 40)
             effective['allowedVolatility'] = [
                 level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
             ] or ['Very Low', 'Low', 'Medium']
+
+        if guarded_small_live:
+            effective['maxOpenPositions'] = 1
+            effective['maxPositionsPerSymbol'] = 1
+            effective['signalThreshold'] = max(effective['signalThreshold'], 65)
+            effective['allowedVolatility'] = [
+                level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
+            ] or ['Very Low', 'Low', 'Medium']
+            bot_config['intelligentScanner'] = False
 
         recent_trades = bot_config.get('tradeHistory') or []
         recent_closed = recent_trades[-6:]
@@ -15662,8 +15700,14 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
                 idle_minutes = (datetime.now() - latest_trade_dt).total_seconds() / 60.0
                 if idle_minutes >= 45:
                     bot_config['managementState'] = 'normal'
-                    effective['signalThreshold'] = min(effective['signalThreshold'], defaults['signalThreshold'])
-                    effective['allowedVolatility'] = list(defaults['allowedVolatility'])
+                    relaxed_threshold = defaults['signalThreshold']
+                    if guarded_small_live:
+                        relaxed_threshold = max(relaxed_threshold, 65)
+                    effective['signalThreshold'] = min(effective['signalThreshold'], relaxed_threshold)
+                    if guarded_small_live:
+                        effective['allowedVolatility'] = ['Very Low', 'Low', 'Medium']
+                    else:
+                        effective['allowedVolatility'] = list(defaults['allowedVolatility'])
                     logger.info(
                         f"🧠 Bot {bot_config.get('botId', 'unknown')}: Recovery relaxed after {idle_minutes:.0f}m "
                         f"without trades (threshold -> {effective['signalThreshold']})"

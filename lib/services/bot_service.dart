@@ -148,9 +148,15 @@ class BotService extends ChangeNotifier {
       return;
     }
 
-    _isLoading = true;
+    final previousBots = List<Map<String, dynamic>>.from(_activeBots);
+    final previousError = _errorMessage;
+    final shouldShowLoading = _activeBots.isEmpty;
+
+    _isLoading = shouldShowLoading;
     _errorMessage = null;
-    notifyListeners();
+    if (shouldShowLoading || previousError != null) {
+      notifyListeners();
+    }
 
     try {
       if (!_isConnected) {
@@ -215,7 +221,26 @@ class BotService extends ChangeNotifier {
     }
 
     _isLoading = false;
-    notifyListeners();
+    if (!_botListsEqual(previousBots, _activeBots) || previousError != _errorMessage || shouldShowLoading) {
+      notifyListeners();
+    }
+  }
+
+  bool _botListsEqual(List<Map<String, dynamic>> first, List<Map<String, dynamic>> second) {
+    if (identical(first, second)) {
+      return true;
+    }
+    if (first.length != second.length) {
+      return false;
+    }
+
+    for (var index = 0; index < first.length; index++) {
+      if (jsonEncode(first[index]) != jsonEncode(second[index])) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /// Create new bot on backend
