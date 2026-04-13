@@ -289,6 +289,7 @@ API_KEY = os.getenv('API_KEY', 'your_generated_api_key_here_change_in_production
 # ==================== WORKER POOL CONFIG ====================
 WORKER_COUNT = max(0, int(os.getenv('WORKER_COUNT', '0')))  # 0 = single-process (legacy), 1+ = multi-process
 MAX_BOTS_PER_WORKER = max(1, int(os.getenv('MAX_BOTS_PER_WORKER', '35')))
+MAX_CONCURRENT_ACTIVE_BOTS = max(1, int(os.getenv('MAX_CONCURRENT_ACTIVE_BOTS', '5')))  # 4GB VPS starter cap
 
 # ==================== REST TRADING CONFIG (Phase 2 Scaling) ====================
 METAAPI_TOKEN = os.getenv('METAAPI_TOKEN', '')  # MetaAPI cloud token for REST-based MT5 trading
@@ -13310,6 +13311,20 @@ def get_bot_start_lock(bot_id: str) -> 'threading.Lock':
             bot_start_locks[bot_id] = threading.Lock()
         return bot_start_locks[bot_id]
 
+def get_running_bot_count(exclude_bot_id: str = None) -> int:
+    """Count currently active bot loops using runtime flags and thread liveness."""
+    active_count = 0
+    for current_bot_id, is_running in list(running_bots.items()):
+        if exclude_bot_id and current_bot_id == exclude_bot_id:
+            continue
+        if is_running:
+            active_count += 1
+            continue
+        thread_obj = bot_threads.get(current_bot_id)
+        if thread_obj and thread_obj.is_alive():
+            active_count += 1
+    return active_count
+
 # ==================== CONNECTION CACHING (Performance Optimization) ====================
 # Cache broker connections to reduce reconnection overhead from 3-5s per cycle to ~100ms
 # Format: {f"{user_id}|{broker}|{account}": connection_object}
@@ -19734,6 +19749,24 @@ def start_bot():
                         'accountBalance': bot_config.get('accountBalance', 0),
                     }
                 }), 200
+
+            # Enforce VPS-safe global concurrency cap before expensive broker initialization.
+            active_count = get_running_bot_count(exclude_bot_id=bot_id)
+            if active_count >= MAX_CONCURRENT_ACTIVE_BOTS:
+                logger.warning(
+                    f"Bot {bot_id}: Start denied - active cap reached "
+                    f"({active_count}/{MAX_CONCURRENT_ACTIVE_BOTS})"
+                )
+                return jsonify({
+                    'success': False,
+                    'error': (
+                        f'Server is at active bot capacity '
+                        f'({MAX_CONCURRENT_ACTIVE_BOTS}). Please stop another bot first.'
+                    ),
+                    'status': 'CAPACITY_LIMIT',
+                    'activeBots': active_count,
+                    'capacity': MAX_CONCURRENT_ACTIVE_BOTS,
+                }), 429
 
             # Bot thread not running — connect to broker and start a new thread (INSIDE LOCK)
             # ✅ AUTOMATIC BROKER DETECTION
