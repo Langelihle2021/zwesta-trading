@@ -14545,6 +14545,12 @@ UPSWING_SCALE_MIN_SIGNAL_STRENGTH = 72.0
 UPSWING_RETRACE_MIN_PEAK_PROFIT = 3.0
 UPSWING_RETRACE_MIN_AGE_MINUTES = 8.0
 UPSWING_RETRACE_CLOSE_SHARE = 0.45
+# ==================== HARD LOSS CAPS ====================
+# Per-trade monetary limit: force-close any position losing more than this amount
+HARD_LOSS_PER_TRADE_LIMIT = 6.0      # $6 hard cap per trade (≈R110 at 18 ZAR/USD)
+# Stale-loss exit: close a position that has never been in profit and keeps bleeding
+STALE_LOSS_THRESHOLD = -1.5          # Min loss ($) before stale check kicks in
+STALE_LOSS_MINUTES = 12             # Position must be at least this old (minutes)
 PYRAMID_ADDON_SIGNAL_BUFFER = 8.0
 PYRAMID_ADDON_MIN_SIGNAL = 78.0
 PYRAMID_ADDON_MIN_OPEN_PROFIT = 1.5
@@ -14648,10 +14654,10 @@ DEFAULT_PROFIT_PROTECTION_CONFIG = {
     'switchOnReversal': True,
     'adaptiveByVolatility': True,
     'breakEvenLockEnabled': True,
-    'breakEvenBufferProfit': 1.5,
+    'breakEvenBufferProfit': 0.5,   # Lowered from 1.5 — move SL to break-even sooner
     'breakEvenActivationShare': 0.5,
     'protectedSymbolCooldownMinutes': 5.0,
-    'zeroLossLockEnabled': False,  # Disabled: letting trades run to natural SL/TP is safer than early breakeven exit
+    'zeroLossLockEnabled': True,   # Enabled: close immediately when a previously-profitable trade returns to 0
 }
 
 PROFIT_PROTECTION_VOLATILITY_PROFILES = {
@@ -15050,6 +15056,28 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
         close_reason = None  # Initialize before any conditional assignments
         if max_hold_minutes > 0 and time_in_position >= max_hold_minutes:
             close_reason = 'MAX_HOLD_TIME_EXCEEDED'
+
+        # ── HARD LOSS CAP: force-close if per-trade loss exceeds limit ──────────
+        if not close_reason and current_profit < -HARD_LOSS_PER_TRADE_LIMIT and not _recent_close_request(tracked):
+            close_reason = 'HARD_LOSS_LIMIT'
+            logger.warning(
+                f"[LOSS] Bot {bot_id}: position {ticket} hit hard loss limit "
+                f"(loss {current_profit:.2f} > {-HARD_LOSS_PER_TRADE_LIMIT:.2f}) — force closing"
+            )
+
+        # ── STALE LOSS EXIT: close slowly-bleeding positions that never turned profit ─
+        if (
+            not close_reason
+            and peak_profit <= 0          # position never reached profit
+            and current_profit <= STALE_LOSS_THRESHOLD
+            and time_in_position >= STALE_LOSS_MINUTES
+            and not _recent_close_request(tracked)
+        ):
+            close_reason = 'STALE_LOSS_EXIT'
+            logger.warning(
+                f"[LOSS] Bot {bot_id}: position {ticket} is stale-losing "
+                f"({current_profit:.2f} after {time_in_position:.0f}m, never in profit) — closing early"
+            )
 
         signal_eval = evaluate_real_trade_signal(tracked.get('symbol', ''), _get_market_data_for_symbol(tracked.get('symbol', '')))
         current_signal = signal_eval.get('signal', 'NEUTRAL')
@@ -17970,8 +17998,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         _tp_pips = trade_params.get('take_profit', 100)
                                         _sl_dist = _sl_pips * _point
                                         _tp_dist = _tp_pips * _point
-                                        # Scale TP for small accounts - more aggressive exits (2.5x spread instead of 5x)
-                                        _spread_multiplier_sl = 3
+                                        # Tightened: SL min 2x spread (was 3x) to reduce per-trade loss
+                                        _spread_multiplier_sl = 2
                                         _spread_multiplier_tp = 2.5 if bot_config.get('profile') == 'small_account' else 3.5
                                         _sl_dist = max(_sl_dist, _spread * _spread_multiplier_sl)
                                         _tp_dist = max(_tp_dist, _spread * _spread_multiplier_tp)
@@ -17993,10 +18021,10 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         _tp_pips = trade_params.get('take_profit', 100)
                                         _sl_dist = _sl_pips * _point
                                         _tp_dist = _tp_pips * _point
-                                        # Scale TP for small accounts - more aggressive exits (2.5x spread instead of 5x)
-                                        _spread_multiplier_sl = 3
+                                        # Tightened: SL min 2x spread (was 3x) to reduce per-trade loss
+                                        _spread_multiplier_sl = 2
                                         _spread_multiplier_tp = 2.5 if bot_config.get('profile') == 'small_account' else 3.5
-                                        # Ensure SL is at least 3x spread, TP at least (2.5-3.5)x spread
+                                        # Ensure SL is at least 2x spread, TP at least (2.5-3.5)x spread
                                         _sl_dist = max(_sl_dist, _spread * _spread_multiplier_sl)
                                         _tp_dist = max(_tp_dist, _spread * _spread_multiplier_tp)
                                         if order_type == 'BUY':
@@ -18018,14 +18046,14 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                         _sym_fb = mt5_conn.mt5.symbol_info(symbol)
                                         _point_fb = _sym_fb.point if _sym_fb else 0.00001
                                         _digits_fb = _sym_fb.digits if _sym_fb else 5
-                                        # Default SL: 50 pips, TP: 100 pips
+                                        # Default SL: 25 pips (was 50), TP: 75 pips — tighter to reduce max loss
                                         if order_type == 'BUY':
-                                            sl_price = sl_price or round(_price_fb - 50 * _point_fb, _digits_fb)
-                                            tp_price = tp_price or round(_price_fb + 100 * _point_fb, _digits_fb)
+                                            sl_price = sl_price or round(_price_fb - 25 * _point_fb, _digits_fb)
+                                            tp_price = tp_price or round(_price_fb + 75 * _point_fb, _digits_fb)
                                         else:
-                                            sl_price = sl_price or round(_price_fb + 50 * _point_fb, _digits_fb)
-                                            tp_price = tp_price or round(_price_fb - 100 * _point_fb, _digits_fb)
-                                        logger.info(f"📐 Bot {bot_id}: Fallback SL={sl_price}, TP={tp_price} (default 50/100 pips)")
+                                            sl_price = sl_price or round(_price_fb + 25 * _point_fb, _digits_fb)
+                                            tp_price = tp_price or round(_price_fb - 75 * _point_fb, _digits_fb)
+                                        logger.info(f"📐 Bot {bot_id}: Fallback SL={sl_price}, TP={tp_price} (default 25/75 pips)")
                                 except Exception as fb_e:
                                     logger.warning(f"Bot {bot_id}: Fallback SL/TP calculation also failed: {fb_e}")
                             
