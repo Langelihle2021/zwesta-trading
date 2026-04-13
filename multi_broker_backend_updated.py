@@ -14547,10 +14547,24 @@ UPSWING_RETRACE_MIN_AGE_MINUTES = 8.0
 UPSWING_RETRACE_CLOSE_SHARE = 0.45
 # ==================== HARD LOSS CAPS ====================
 # Per-trade monetary limit: force-close any position losing more than this amount
-HARD_LOSS_PER_TRADE_LIMIT = 6.0      # $6 hard cap per trade (≈R110 at 18 ZAR/USD)
-# Stale-loss exit: close a position that has never been in profit and keeps bleeding
-STALE_LOSS_THRESHOLD = -1.5          # Min loss ($) before stale check kicks in
-STALE_LOSS_MINUTES = 12             # Position must be at least this old (minutes)
+# Defaults (USD / demo fallback)
+HARD_LOSS_PER_TRADE_LIMIT = 6.0          # USD hard cap per trade
+STALE_LOSS_THRESHOLD = -1.5             # Min USD loss before stale check kicks in
+STALE_LOSS_MINUTES = 12                 # Position must be at least this old (minutes)
+# ZAR-specific limits used when a live account's display currency is ZAR
+HARD_LOSS_ZAR_LIVE = 15.0               # R15 hard cap on live ZAR accounts
+STALE_LOSS_ZAR_LIVE = -3.0             # R3 stale-loss trigger on live ZAR accounts
+
+def _resolve_hard_loss_limits(bot_config: dict) -> tuple:
+    """Return (hard_loss_limit, stale_loss_threshold) in the account's currency.
+    Live ZAR accounts use Rand-denominated limits; everything else uses USD defaults.
+    """
+    currency = str(bot_config.get('displayCurrency') or 'USD').upper()
+    is_live = str(bot_config.get('mode', 'demo')).lower() == 'live'
+    if currency == 'ZAR' and is_live:
+        return HARD_LOSS_ZAR_LIVE, STALE_LOSS_ZAR_LIVE
+    return HARD_LOSS_PER_TRADE_LIMIT, STALE_LOSS_THRESHOLD
+
 PYRAMID_ADDON_SIGNAL_BUFFER = 8.0
 PYRAMID_ADDON_MIN_SIGNAL = 78.0
 PYRAMID_ADDON_MIN_OPEN_PROFIT = 1.5
@@ -15058,25 +15072,27 @@ def manage_protected_open_positions(bot_id, bot_config, current_positions, activ
             close_reason = 'MAX_HOLD_TIME_EXCEEDED'
 
         # ── HARD LOSS CAP: force-close if per-trade loss exceeds limit ──────────
-        if not close_reason and current_profit < -HARD_LOSS_PER_TRADE_LIMIT and not _recent_close_request(tracked):
+        _hard_loss_limit, _stale_loss_threshold = _resolve_hard_loss_limits(bot_config)
+        _currency_label = str(bot_config.get('displayCurrency') or 'USD').upper()
+        if not close_reason and current_profit < -_hard_loss_limit and not _recent_close_request(tracked):
             close_reason = 'HARD_LOSS_LIMIT'
             logger.warning(
                 f"[LOSS] Bot {bot_id}: position {ticket} hit hard loss limit "
-                f"(loss {current_profit:.2f} > {-HARD_LOSS_PER_TRADE_LIMIT:.2f}) — force closing"
+                f"(loss {current_profit:.2f} {_currency_label} > {-_hard_loss_limit:.2f} {_currency_label}) — force closing"
             )
 
         # ── STALE LOSS EXIT: close slowly-bleeding positions that never turned profit ─
         if (
             not close_reason
             and peak_profit <= 0          # position never reached profit
-            and current_profit <= STALE_LOSS_THRESHOLD
+            and current_profit <= _stale_loss_threshold
             and time_in_position >= STALE_LOSS_MINUTES
             and not _recent_close_request(tracked)
         ):
             close_reason = 'STALE_LOSS_EXIT'
             logger.warning(
                 f"[LOSS] Bot {bot_id}: position {ticket} is stale-losing "
-                f"({current_profit:.2f} after {time_in_position:.0f}m, never in profit) — closing early"
+                f"({current_profit:.2f} {_currency_label} after {time_in_position:.0f}m, never in profit) — closing early"
             )
 
         signal_eval = evaluate_real_trade_signal(tracked.get('symbol', ''), _get_market_data_for_symbol(tracked.get('symbol', '')))
