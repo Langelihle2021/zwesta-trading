@@ -1026,14 +1026,15 @@ def _enrich_market_data_with_bot_context(
 def _get_cached_strategy_params(strategy_cache: Dict[str, Optional[Dict[str, Any]]], strategy_func, symbol: str,
                                 account_id: str, risk_per_trade: float,
                                 market_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    if symbol in strategy_cache:
-        return strategy_cache[symbol]
+    cache_key = f"{getattr(strategy_func, '__name__', 'strategy')}::{symbol}"
+    if cache_key in strategy_cache:
+        return strategy_cache[cache_key]
 
     if market_data is None:
         market_data = _get_market_data_for_symbol(symbol)
 
-    strategy_cache[symbol] = strategy_func(symbol, account_id, risk_per_trade, market_data)
-    return strategy_cache[symbol]
+    strategy_cache[cache_key] = strategy_func(symbol, account_id, risk_per_trade, market_data)
+    return strategy_cache[cache_key]
 
 
 def _get_effective_symbol_params(symbol: str, market_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -4979,6 +4980,52 @@ def persist_account_snapshot(
     except Exception as exc:
         logger.warning(f"Could not persist SQLite balance cache for {normalized_broker} {resolved_account_number}: {exc}")
 
+
+def read_active_mt5_account_snapshot(
+    broker_name: str,
+    account_number,
+    credential_id: str = None,
+    user_id: str = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a snapshot only when the current MT5 session is already on the requested account."""
+    normalized_account = str(account_number or '').strip()
+    if not normalized_account:
+        return None
+
+    try:
+        import MetaTrader5 as mt5
+
+        active_info = mt5.account_info()
+        if active_info is None or str(getattr(active_info, 'login', '')) != normalized_account:
+            return None
+
+        snapshot = {
+            'accountNumber': normalized_account,
+            'balance': float(getattr(active_info, 'balance', 0) or 0),
+            'equity': float(getattr(active_info, 'equity', getattr(active_info, 'balance', 0)) or 0),
+            'marginFree': float(getattr(active_info, 'margin_free', 0) or 0),
+            'margin': float(getattr(active_info, 'margin', 0) or 0),
+            'margin_level': float(getattr(active_info, 'margin_level', 0) or 0),
+            'total_pl': float(getattr(active_info, 'profit', 0) or 0),
+            'profit': float(getattr(active_info, 'profit', 0) or 0),
+            'currency': str(getattr(active_info, 'currency', 'USD') or 'USD').upper(),
+            'broker': canonicalize_broker_name(broker_name),
+            'server': getattr(active_info, 'server', None),
+            'leverage': getattr(active_info, 'leverage', None),
+            'dataSource': 'active_mt5_session',
+        }
+        persist_account_snapshot(
+            broker_name,
+            normalized_account,
+            snapshot,
+            credential_id=credential_id,
+            user_id=user_id,
+        )
+        return snapshot
+    except Exception as exc:
+        logger.warning(f"Could not read active MT5 session for {broker_name} {normalized_account}: {exc}")
+        return None
+
 # ==================== IN-MEMORY STORAGE ====================
 # Store demo trades placed via API (temporary storage for this session)
 demo_trades_storage = {}
@@ -6834,23 +6881,36 @@ def get_account_balances():
         user_id = request.user_id
         conn = get_db_connection()
         cursor = conn.cursor()
+        requested_mode = str(request.args.get('mode') or 'ALL').strip().upper()
+        if requested_mode not in ['LIVE', 'DEMO', 'ALL', '']:
+            requested_mode = 'ALL'
         
-        # Get all active broker credentials for this user
-        cursor.execute('''
+        # Get active broker credentials for this user, optionally scoped to one mode.
+        credentials_query = '''
             SELECT credential_id, broker_name, account_number, is_live, api_key, password, server, account_currency
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1
-        ''', (user_id,))
+        '''
+        credentials_params = [user_id]
+        if requested_mode in ['LIVE', 'DEMO']:
+            credentials_query += ' AND is_live = ?'
+            credentials_params.append(1 if requested_mode == 'LIVE' else 0)
+        cursor.execute(credentials_query, credentials_params)
         
         credentials = [dict(row) for row in cursor.fetchall()]
         
         # CRITICAL FIX: Fetch cached balances for fallback on timeout
-        cursor.execute('''
+        cached_query = '''
             SELECT credential_id, cached_balance, cached_equity, cached_margin_free, 
                    cached_margin, cached_margin_level, cached_profit, last_update
             FROM broker_credentials 
             WHERE user_id = ? AND is_active = 1
-        ''', (user_id,))
+        '''
+        cached_params = [user_id]
+        if requested_mode in ['LIVE', 'DEMO']:
+            cached_query += ' AND is_live = ?'
+            cached_params.append(1 if requested_mode == 'LIVE' else 0)
+        cursor.execute(cached_query, cached_params)
         
         cached_data = {row['credential_id']: dict(row) for row in cursor.fetchall()}
         conn.close()
@@ -6898,38 +6958,51 @@ def get_account_balances():
             
             try:
                 if broker_name in ['Exness', 'XM', 'XM Global', 'PXBT']:
-                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint unless cache is empty and no bots are running.
-                    logger.info(f"ℹ️ Balance: {broker_name} {account_num} ({account_currency}) — using cache only (MT5 disconnected in balance endpoint)")
-                    error_msg = f"Using cached balance ({account_currency}) — MT5 reads handled by trading loop"
-                    cache_key = get_balance_cache_key(broker_name, account_num)
-                    cache_empty = True
-                    with balance_cache_lock:
-                        if cache_key in balance_cache and balance_cache[cache_key].get('balance', 0) > 0:
-                            cache_empty = False
-
-                    # Diagnostics: Log cache status
-                    # Suppress repeated ZAR diagnostic warnings during polling - only show once per hour
-                    cache_diag_key = f"zar_cache_warning_{broker_name}_{account_num}"
-                    last_zar_warning = getattr(get_account_balances, '_last_warnings', {}).get(cache_diag_key, 0)
-                    now_unix = time.time()
-                    
-                    if cache_empty:
-                        # Only log warning if more than 1 hour has passed since last warning
-                        if now_unix - last_zar_warning > 3600:
-                            logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Returning disconnected account state without probing MT5 from balances endpoint.")
-                            if not hasattr(get_account_balances, '_last_warnings'):
-                                get_account_balances._last_warnings = {}
-                            get_account_balances._last_warnings[cache_diag_key] = now_unix
+                    account_info = read_active_mt5_account_snapshot(
+                        broker_name,
+                        account_num,
+                        credential_id=cred['credential_id'],
+                        user_id=user_id,
+                    )
+                    if account_info:
+                        error_msg = None
+                        logger.info(
+                            f"✅ Balance: using active MT5 session for {broker_name} {account_num} -> "
+                            f"{float(account_info.get('balance', 0) or 0):.2f} {account_info.get('currency', 'USD')}"
+                        )
                     else:
-                        # Show positive cache hit once per hour only
-                        if now_unix - last_zar_warning > 3600:
-                            logger.info(f"[DIAGNOSTIC] Cached balance present for {broker_name} {account_num}.")
-                            if not hasattr(get_account_balances, '_last_warnings'):
-                                get_account_balances._last_warnings = {}
-                            get_account_balances._last_warnings[cache_diag_key] = now_unix
-                    if cache_empty:
-                        logger.warning(f"[WARNING] No cached or live balance for {broker_name} {account_num}. Returning $0 and warning in API response.")
-                        error_msg = "No cached or live balance available. Start a bot to update balance."
+                    # DISCONNECTED MODE: Do NOT call MT5 from the balance endpoint unless cache is empty and no bots are running.
+                        logger.info(f"ℹ️ Balance: {broker_name} {account_num} ({account_currency}) — using cache only (MT5 disconnected in balance endpoint)")
+                        error_msg = f"Using cached balance ({account_currency}) — MT5 reads handled by trading loop"
+                        cache_key = get_balance_cache_key(broker_name, account_num)
+                        cache_empty = True
+                        with balance_cache_lock:
+                            if cache_key in balance_cache and balance_cache[cache_key].get('balance', 0) > 0:
+                                cache_empty = False
+
+                        # Diagnostics: Log cache status
+                        # Suppress repeated ZAR diagnostic warnings during polling - only show once per hour
+                        cache_diag_key = f"zar_cache_warning_{broker_name}_{account_num}"
+                        last_zar_warning = getattr(get_account_balances, '_last_warnings', {}).get(cache_diag_key, 0)
+                        now_unix = time.time()
+                    
+                        if cache_empty:
+                            # Only log warning if more than 1 hour has passed since last warning
+                            if now_unix - last_zar_warning > 3600:
+                                logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Returning disconnected account state without probing MT5 from balances endpoint.")
+                                if not hasattr(get_account_balances, '_last_warnings'):
+                                    get_account_balances._last_warnings = {}
+                                get_account_balances._last_warnings[cache_diag_key] = now_unix
+                        else:
+                            # Show positive cache hit once per hour only
+                            if now_unix - last_zar_warning > 3600:
+                                logger.info(f"[DIAGNOSTIC] Cached balance present for {broker_name} {account_num}.")
+                                if not hasattr(get_account_balances, '_last_warnings'):
+                                    get_account_balances._last_warnings = {}
+                                get_account_balances._last_warnings[cache_diag_key] = now_unix
+                        if cache_empty:
+                            logger.warning(f"[WARNING] No cached or live balance for {broker_name} {account_num}. Returning $0 and warning in API response.")
+                            error_msg = "No cached or live balance available. Start a bot to update balance."
                 
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
@@ -9899,6 +9972,168 @@ class StrategyPerformanceTracker:
         }
 
 
+AUTO_STRATEGY_SWITCH_COOLDOWN_MINUTES = 20
+
+
+def _get_recent_strategy_trade_stats(bot_config: Dict[str, Any], strategy_name: str, limit: int = 12) -> Dict[str, float]:
+    closed_trades = [
+        trade for trade in (bot_config.get('tradeHistory') or [])
+        if isinstance(trade, dict)
+        and str(trade.get('status') or '').lower() == 'closed'
+        and str(trade.get('strategy') or '').strip() == strategy_name
+    ]
+    if limit > 0:
+        closed_trades = closed_trades[-limit:]
+
+    trade_count = len(closed_trades)
+    wins = sum(1 for trade in closed_trades if _safe_float(trade.get('profit'), 0.0) > 0)
+    total_profit = sum(_safe_float(trade.get('profit'), 0.0) for trade in closed_trades)
+    return {
+        'trades': trade_count,
+        'wins': wins,
+        'win_rate': (wins / trade_count * 100.0) if trade_count else 0.0,
+        'profit': total_profit,
+    }
+
+
+def _choose_strategy_for_cycle(
+    bot_id: str,
+    bot_config: Dict[str, Any],
+    configured_symbols: List[str],
+    signal_threshold: int,
+) -> str:
+    current_strategy = str(bot_config.get('strategy') or 'Trend Following')
+    if not _coerce_bool(bot_config.get('autoSwitch', True), True):
+        return current_strategy
+
+    if bot_config.get('open_positions'):
+        return current_strategy
+
+    last_switch_raw = bot_config.get('lastStrategySwitch')
+    if last_switch_raw:
+        try:
+            last_switch_at = datetime.fromisoformat(str(last_switch_raw))
+            if (datetime.now() - last_switch_at).total_seconds() < (AUTO_STRATEGY_SWITCH_COOLDOWN_MINUTES * 60):
+                return current_strategy
+        except Exception:
+            pass
+
+    idle_cycles = int(bot_config.get('adaptiveSignalMissCount') or 0)
+    should_expand_symbol_universe = _coerce_bool(bot_config.get('intelligentScanner', False), False) or idle_cycles >= ADAPTIVE_SCANNER_TRIGGER_MISSES
+    candidate_symbols = build_scanner_symbol_universe(bot_config) if should_expand_symbol_universe else list(configured_symbols)
+    candidate_symbols = list(dict.fromkeys([symbol for symbol in candidate_symbols if str(symbol).strip()]))
+    if not candidate_symbols:
+        return current_strategy
+
+    account_id = bot_config.get('accountId', '')
+    risk_per_trade = _safe_float(bot_config.get('riskPerTrade'), 10.0)
+    scored_candidates = []
+
+    for strategy_name, strategy_func in STRATEGY_MAP.items():
+        strategy_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        strengths: List[float] = []
+        qualifying_hits = 0
+        best_symbol = None
+        best_signal_label = 'NEUTRAL'
+
+        for symbol in candidate_symbols:
+            market_data = _enrich_market_data_with_bot_context(bot_config, symbol)
+            trade_params = _get_cached_strategy_params(
+                strategy_cache,
+                strategy_func,
+                symbol,
+                account_id,
+                risk_per_trade,
+                market_data,
+            )
+            if not trade_params:
+                continue
+
+            signal_info = trade_params.get('signal', {}) or {}
+            strength = _safe_float(signal_info.get('strength'), 0.0)
+            strengths.append(strength)
+            if strength >= signal_threshold:
+                qualifying_hits += 1
+            if best_symbol is None or strength > max(strengths[:-1], default=-1.0):
+                best_symbol = symbol
+                best_signal_label = str(signal_info.get('signal') or 'NEUTRAL')
+
+        if not strengths:
+            continue
+
+        top_strengths = sorted(strengths, reverse=True)[:3]
+        average_top_strength = sum(top_strengths) / len(top_strengths)
+        global_stats = strategy_tracker.strategy_stats.get(strategy_name, {})
+        global_trade_count = int(global_stats.get('trades', 0) or 0)
+        global_perf_bonus = 0.0
+        if global_trade_count >= 3:
+            global_perf_bonus += min(strategy_tracker.get_win_rate(strategy_name) / 10.0, 10.0)
+            global_perf_bonus += min(strategy_tracker.get_profit_factor(strategy_name) * 2.0, 10.0)
+            global_perf_bonus += max(-5.0, min(_safe_float(global_stats.get('profit'), 0.0) / 50.0, 5.0))
+
+        recent_stats = _get_recent_strategy_trade_stats(bot_config, strategy_name)
+        recent_perf_bonus = 0.0
+        if recent_stats['trades'] > 0:
+            recent_perf_bonus += min(recent_stats['win_rate'] / 12.5, 8.0)
+            recent_perf_bonus += max(-6.0, min(recent_stats['profit'] / 40.0, 6.0))
+
+        stickiness_bonus = 4.0 if strategy_name == current_strategy else 0.0
+        score = (
+            qualifying_hits * 100.0
+            + average_top_strength * 1.2
+            + max(top_strengths)
+            + global_perf_bonus
+            + recent_perf_bonus
+            + stickiness_bonus
+        )
+
+        scored_candidates.append({
+            'strategy': strategy_name,
+            'score': score,
+            'hits': qualifying_hits,
+            'bestStrength': max(top_strengths),
+            'bestSymbol': best_symbol,
+            'bestSignal': best_signal_label,
+            'globalTrades': global_trade_count,
+            'recentTrades': int(recent_stats['trades']),
+        })
+
+    if not scored_candidates:
+        return current_strategy
+
+    scored_candidates.sort(key=lambda item: (item['score'], item['hits'], item['bestStrength']), reverse=True)
+    chosen = scored_candidates[0]
+    chosen_strategy = chosen['strategy']
+    bot_config['lastStrategySelection'] = {
+        'timestamp': datetime.now().isoformat(),
+        'strategy': chosen_strategy,
+        'score': round(chosen['score'], 2),
+        'hits': chosen['hits'],
+        'bestSymbol': chosen['bestSymbol'],
+        'bestSignal': chosen['bestSignal'],
+    }
+
+    if chosen_strategy == current_strategy:
+        return current_strategy
+
+    switch_reason = (
+        f"scanner selected {chosen_strategy} on {chosen['bestSymbol']} "
+        f"({chosen['bestSignal']} {chosen['bestStrength']:.0f}/100, {chosen['hits']} qualifying setup(s))"
+    )
+    logger.info(f"🧠 Bot {bot_id}: Strategy switch {current_strategy} -> {chosen_strategy} | {switch_reason}")
+    bot_config['strategy'] = chosen_strategy
+    bot_config['lastStrategySwitch'] = datetime.now().isoformat()
+    bot_config.setdefault('strategyHistory', []).append({
+        'timestamp': bot_config['lastStrategySwitch'],
+        'fromStrategy': current_strategy,
+        'toStrategy': chosen_strategy,
+        'reason': switch_reason,
+    })
+    bot_config['strategyHistory'] = bot_config['strategyHistory'][-50:]
+    persist_bot_runtime_state(bot_id)
+    return chosen_strategy
+
+
 class DynamicPositionSizer:
     """Intelligently adjusts position sizes based on account performance"""
     
@@ -10644,6 +10879,8 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     created_at = row['created_at'] or datetime.now().isoformat()
     total_profit = float(row['total_profit'] or 0.0)
     daily_profit = float(row['daily_profit'] or 0.0)
+    cached_balance = float(row['cached_balance'] or 0.0)
+    cached_equity = float(row['cached_equity'] or cached_balance)
     return {
         'mode': 'live' if row['is_live'] else 'demo',
         'symbols': row['symbols'].split(',') if row['symbols'] else ['EURUSDm'],
@@ -10666,7 +10903,7 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'adaptiveSignalThresholdOffset': 0,
         'adaptiveSignalMissCount': 0,
         'adaptiveSignalThresholdReason': None,
-        'displayCurrency': 'USD',
+        'displayCurrency': str(row['account_currency'] or 'USD').upper(),
         'totalTrades': 0,
         'winningTrades': 0,
         'totalProfit': total_profit,
@@ -10685,8 +10922,8 @@ def _default_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
         'volatilityLevel': 'Medium',
         'profit': total_profit,
         'drawdownPauseUntil': None,
-        'accountBalance': 0.0,
-        'accountEquity': 0.0,
+        'accountBalance': cached_balance,
+        'accountEquity': cached_equity,
         'open_positions': {},
         'tradeAmount': None,
         'selectedPreset': None,
@@ -11025,6 +11262,8 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     bot_state['profitHistory'] = bot_state.get('profitHistory') or []
     bot_state['dailyProfits'] = bot_state.get('dailyProfits') or {}
     _rebuild_bot_profit_tracking(bot_state)
+    bot_state['accountBalance'] = _safe_float(bot_state.get('accountBalance'), _safe_float(row['cached_balance'], 0.0))
+    bot_state['accountEquity'] = _safe_float(bot_state.get('accountEquity'), _safe_float(row['cached_equity'], bot_state['accountBalance']))
     # Restore open_positions from DB if not already in runtime_state
     if not bot_state.get('open_positions'):
         bot_state['open_positions'] = {}
@@ -11397,7 +11636,10 @@ def load_user_bots_from_database(enabled_only: bool = False):
                 ub.runtime_state,
                 bc.credential_id,
                 bcr.broker_name,
-                bcr.is_live
+                bcr.is_live,
+                bcr.account_currency,
+                bcr.cached_balance,
+                bcr.cached_equity
             FROM user_bots ub
             LEFT JOIN bot_credentials bc ON bc.bot_id = ub.bot_id AND bc.user_id = ub.user_id
             LEFT JOIN broker_credentials bcr ON bcr.credential_id = bc.credential_id
@@ -13222,6 +13464,7 @@ def test_broker_connection():
             actual_profit = 0.00
             actual_currency = 'USD'  # Default; overwritten below from MT5 account_info().currency
             got_real_balance = False
+            verified_connection = False
             
             # FIRST: Check global balance_cache (populated on startup with hardcoded demo balances)
             try:
@@ -13250,6 +13493,7 @@ def test_broker_connection():
                         actual_profit = getattr(active_info, 'profit', 0)
                         actual_currency = str(getattr(active_info, 'currency', actual_currency) or actual_currency).upper()
                         got_real_balance = True
+                        verified_connection = True
                         logger.info(
                             f"💰 Captured Exness balance from active MT5 session during credential save: {actual_balance:.2f} {actual_currency}"
                         )
@@ -13276,6 +13520,7 @@ def test_broker_connection():
                                 actual_balance = acct_info.get('balance', actual_balance)
                                 actual_currency = acct_info.get('currency', actual_currency)
                                 got_real_balance = True
+                                verified_connection = True
                                 logger.info(f"💰 Got real balance from cached {cached_connection_id}: {actual_balance:.2f} {actual_currency}")
                 except Exception as e:
                     logger.warning(f"Could not fetch cached balance: {e}")
@@ -13307,6 +13552,7 @@ def test_broker_connection():
                         actual_profit = getattr(_current_info, 'profit', 0)
                         actual_currency = getattr(_current_info, 'currency', 'USD')
                         got_real_balance = True
+                        verified_connection = True
                         logger.info(f"💰 Got real balance from active MT5 session (account {account}): {actual_balance:.2f} {actual_currency}")
                     elif _current_info is not None:
                         # MT5 is on a different account – do NOT call initialize(); it would block
@@ -13344,6 +13590,7 @@ def test_broker_connection():
                                         actual_profit = getattr(info, 'profit', 0)
                                         actual_currency = getattr(info, 'currency', 'USD')
                                         got_real_balance = True
+                                        verified_connection = True
                                         logger.info(f"💰 Got real balance via quick MT5 login: {actual_balance:.2f} {actual_currency} | Equity: {actual_equity:.2f} | Free Margin: {actual_margin_free:.2f} | P/L: {actual_profit:.2f}")
                                 else:
                                     err = mt5_mod.last_error()
@@ -13414,7 +13661,7 @@ def test_broker_connection():
             connection_status = 'saved'
             warning = None
 
-            if defer_exness_verification:
+            if defer_exness_verification and not verified_connection:
                 warning = (
                     'Exness credential saved. Live MT5 verification is deferred to avoid request timeout '
                     'while the terminal is attached to another account.'
@@ -13448,45 +13695,51 @@ def test_broker_connection():
 
             if broker == 'Exness':
                 target_mode = 'LIVE' if is_live else 'DEMO'
-                warm_result = warm_trading_mode_credential(user_id, credential_id, target_mode)
-                if warm_result['connected']:
+                if verified_connection:
                     auto_connected = True
                     connection_status = 'connected'
-                    account_info = warm_result.get('account_info', {}) or {}
-                    if account_info:
-                        actual_balance = account_info.get('balance', actual_balance)
-                        actual_equity = account_info.get('equity', actual_equity)
-                        actual_margin_free = account_info.get('margin_free', account_info.get('marginFree', actual_margin_free))
-                        actual_margin_used = account_info.get('margin', actual_margin_used)
-                        actual_margin_level = account_info.get('margin_level', account_info.get('marginLevel', actual_margin_level))
-                        actual_profit = account_info.get('profit', actual_profit)
-                        actual_currency = str(account_info.get('currency', actual_currency)).upper()
-                        got_real_balance = True
-                        cursor.execute('''
-                            UPDATE broker_credentials
-                            SET cached_balance = ?, cached_equity = ?, cached_margin_free = ?,
-                                cached_margin = ?, cached_margin_level = ?, cached_profit = ?,
-                                account_currency = ?, updated_at = ?
-                            WHERE credential_id = ?
-                        ''', (
-                            actual_balance,
-                            actual_equity,
-                            actual_margin_free,
-                            actual_margin_used,
-                            actual_margin_level,
-                            actual_profit,
-                            actual_currency,
-                            datetime.now().isoformat(),
-                            credential_id,
-                        ))
-                        conn.commit()
-                        warning = None
-                        logger.info(
-                            f"✅ Warmed Exness credential {account}: {actual_balance:.2f} {actual_currency}"
-                        )
+                    warning = None
                 else:
-                    connection_status = 'connection-failed'
-                    warning = warm_result.get('error')
+                    warm_result = warm_trading_mode_credential(user_id, credential_id, target_mode)
+                    if warm_result['connected']:
+                        auto_connected = True
+                        connection_status = 'connected'
+                        verified_connection = True
+                        account_info = warm_result.get('account_info', {}) or {}
+                        if account_info:
+                            actual_balance = account_info.get('balance', actual_balance)
+                            actual_equity = account_info.get('equity', actual_equity)
+                            actual_margin_free = account_info.get('margin_free', account_info.get('marginFree', actual_margin_free))
+                            actual_margin_used = account_info.get('margin', actual_margin_used)
+                            actual_margin_level = account_info.get('margin_level', account_info.get('marginLevel', actual_margin_level))
+                            actual_profit = account_info.get('profit', actual_profit)
+                            actual_currency = str(account_info.get('currency', actual_currency)).upper()
+                            got_real_balance = True
+                            cursor.execute('''
+                                UPDATE broker_credentials
+                                SET cached_balance = ?, cached_equity = ?, cached_margin_free = ?,
+                                    cached_margin = ?, cached_margin_level = ?, cached_profit = ?,
+                                    account_currency = ?, updated_at = ?
+                                WHERE credential_id = ?
+                            ''', (
+                                actual_balance,
+                                actual_equity,
+                                actual_margin_free,
+                                actual_margin_used,
+                                actual_margin_level,
+                                actual_profit,
+                                actual_currency,
+                                datetime.now().isoformat(),
+                                credential_id,
+                            ))
+                            conn.commit()
+                            warning = None
+                            logger.info(
+                                f"✅ Warmed Exness credential {account}: {actual_balance:.2f} {actual_currency}"
+                            )
+                    else:
+                        connection_status = 'connection-failed'
+                        warning = warm_result.get('error')
 
             conn.close()
             
@@ -17009,10 +17262,6 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                         time.sleep(trading_interval)
                         continue
                 
-                # Execute trade cycle (same logic as in start_bot endpoint)
-                strategy_name = bot_config.get('strategy', 'trend_following')
-                strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
-                
                 trades_placed = 0
                 symbols = bot_config.get('symbols', ['EURUSDm'])
 
@@ -17072,6 +17321,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 management_state = apply_assisted_management_overrides(bot_config)
                 base_signal_threshold = max(int(bot_config.get('signalThreshold', 70) or 70), ADAPTIVE_SIGNAL_THRESHOLD_MIN)
                 signal_threshold = management_state['signalThreshold']
+                strategy_name = _choose_strategy_for_cycle(bot_id, bot_config, symbols, signal_threshold)
+                strategy_func = STRATEGY_MAP.get(strategy_name, trend_following_strategy)
                 strategy_cache: Dict[str, Optional[Dict[str, Any]]] = {}
                 signal_summary = []
                 best_signal_strength = 0.0
@@ -17818,6 +18069,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
 
                                 # Apply immediate post-close protection (pause/cooldown on loss streaks).
                                 _apply_loss_streak_safety(bot_config, trade)
+                                strategy_tracker.record_trade(
+                                    str(trade.get('strategy') or tracked.get('strategy') or bot_config.get('strategy') or 'Trend Following'),
+                                    real_profit,
+                                    tracked.get('symbol', ''),
+                                )
                                 
                                 display_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
                                 logger.info(f"💰 Bot {bot_id}: Position CLOSED by TP/SL | {tracked.get('symbol')} | Real P&L: {real_profit:.2f} {display_currency}")
@@ -18903,6 +19159,20 @@ def bot_summary():
         user_id = request.user_id
         mode_filter = request.args.get('mode', '').upper()
 
+        has_matching_runtime_bot = False
+        for bot in active_bots.values():
+            if bot.get('user_id') != user_id:
+                continue
+            if mode_filter in ('LIVE', 'DEMO'):
+                bot_mode = str(bot.get('mode') or 'demo').upper()
+                if bot_mode != mode_filter:
+                    continue
+            has_matching_runtime_bot = True
+            break
+
+        if not has_matching_runtime_bot:
+            load_user_bots_from_database(enabled_only=False)
+
         bots_list = []
         for bot in active_bots.values():
             if bot.get('user_id') != user_id:
@@ -18939,6 +19209,10 @@ def bot_summary():
             bot_is_live = str(bot_mode_value).lower() == 'live'
             display_currency = _resolve_display_currency_for_mode(bot_mode_value, bot.get('displayCurrency', 'USD'))
             promotion_state = _get_demo_promotion_state(bot, current_profit, total_trades)
+            last_strategy_selection = bot.get('lastStrategySelection') if isinstance(bot.get('lastStrategySelection'), dict) else None
+            strategy_history = bot.get('strategyHistory') if isinstance(bot.get('strategyHistory'), list) else []
+            last_strategy_event = strategy_history[-1] if strategy_history else None
+            last_scan_results = bot.get('lastScanResults') if isinstance(bot.get('lastScanResults'), dict) else None
             if promotion_state.get('stateChanged'):
                 persist_bot_runtime_state(bot.get('botId', ''))
 
@@ -19075,6 +19349,9 @@ def get_bot_analytics_snapshot(bot_id: str):
         user_id = request.user_id
 
         bot = active_bots.get(bot_id)
+        if not bot:
+            load_user_bots_from_database(enabled_only=False)
+            bot = active_bots.get(bot_id)
         if not bot or bot.get('user_id') != user_id:
             return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
 
@@ -19127,6 +19404,10 @@ def get_bot_analytics_snapshot(bot_id: str):
         bot_mode_value = (bot.get('mode') or 'demo')
         bot_is_live = str(bot_mode_value).lower() == 'live'
         display_currency = _resolve_display_currency_for_mode(bot_mode_value, bot.get('displayCurrency', 'USD'))
+        last_strategy_selection = bot.get('lastStrategySelection') if isinstance(bot.get('lastStrategySelection'), dict) else None
+        strategy_history = bot.get('strategyHistory') if isinstance(bot.get('strategyHistory'), list) else []
+        last_strategy_event = strategy_history[-1] if strategy_history else None
+        last_scan_results = bot.get('lastScanResults') if isinstance(bot.get('lastScanResults'), dict) else None
 
         trade_history = bot.get('tradeHistory', [])
         last_trade_time = trade_history[-1].get('time') if trade_history else bot.get('createdAt', datetime.now().isoformat())
@@ -19218,6 +19499,12 @@ def get_bot_analytics_snapshot(bot_id: str):
                 'drawdownPauseUntil': bot.get('drawdownPauseUntil'),
                 'lastTradeTime': last_trade_time,
                 'broker_type': bot.get('broker_type', 'MT5'),
+                'intelligentScanner': bool(bot.get('intelligentScanner', False)),
+                'lastStrategySwitch': bot.get('lastStrategySwitch'),
+                'lastStrategySelection': last_strategy_selection,
+                'lastStrategyEvent': last_strategy_event,
+                'scannerMode': (last_scan_results or {}).get('scannerMode'),
+                'lastScanTimestamp': (last_scan_results or {}).get('timestamp'),
                 'mode': str(bot_mode_value).upper(),
                 'is_live': bot_is_live,
                 'profitField': round(current_profit, 2),

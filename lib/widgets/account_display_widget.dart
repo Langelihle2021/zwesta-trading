@@ -78,7 +78,7 @@ class _AccountDisplayWidgetState extends State<AccountDisplayWidget> {
 
       // Fetch balance data for the current mode
       final response = await http.get(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/accounts/balances'),
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/accounts/balances?mode=${widget.tradingMode.toUpperCase()}'),
         headers: {
           'Content-Type': 'application/json',
           'X-Session-Token': sessionToken,

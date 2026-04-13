@@ -78,6 +78,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '${_currencySymbol(currency)}${amount.toStringAsFixed(decimals)}';
   }
 
+  String _truncateLabel(String value, {int maxLength = 64}) {
+    final normalized = value.trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+    return '${normalized.substring(0, maxLength - 1)}…';
+  }
+
+  String? _scannerStrategySummary(Map<String, dynamic> bot) {
+    final selection = bot['lastStrategySelection'];
+    if (selection is! Map) return null;
+
+    final strategy = selection['strategy']?.toString().trim();
+    final bestSymbol = selection['bestSymbol']?.toString().trim();
+    final bestSignal = selection['bestSignal']?.toString().trim();
+    final hits = int.tryParse(selection['hits']?.toString() ?? '0') ?? 0;
+
+    if (strategy == null || strategy.isEmpty) return null;
+
+    final parts = <String>[strategy];
+    if (bestSymbol != null && bestSymbol.isNotEmpty) {
+      parts.add('on $bestSymbol');
+    }
+    if (bestSignal != null && bestSignal.isNotEmpty && bestSignal != 'NEUTRAL') {
+      parts.add(bestSignal);
+    }
+    if (hits > 0) {
+      parts.add('$hits setup${hits == 1 ? '' : 's'}');
+    }
+    return _truncateLabel(parts.join(' • '), maxLength: 72);
+  }
+
+  String? _lastStrategySwitchSummary(Map<String, dynamic> bot) {
+    final event = bot['lastStrategyEvent'];
+    if (event is! Map) return null;
+
+    final fromStrategy = event['fromStrategy']?.toString().trim();
+    final toStrategy = event['toStrategy']?.toString().trim();
+    final reason = event['reason']?.toString().trim();
+
+    if (toStrategy == null || toStrategy.isEmpty) return null;
+
+    final summary = fromStrategy != null && fromStrategy.isNotEmpty
+        ? '$fromStrategy -> $toStrategy'
+        : toStrategy;
+    if (reason == null || reason.isEmpty) {
+      return _truncateLabel(summary, maxLength: 72);
+    }
+
+    return _truncateLabel('$summary • $reason', maxLength: 88);
+  }
+
   String _accountCurrency(Map<String, dynamic> account) {
     return _normalizeCurrency(account['currency'] ?? account['account_currency']);
   }
@@ -292,6 +344,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Withdrawal data
   List<Map<String, dynamic>> _recentWithdrawals = [];
   bool _withdrawalsLoading = false;
+  bool _refreshInProgress = false;
 
   @override
   void initState() {
@@ -324,8 +377,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         throw Exception('No auth token');
       }
 
+      final modeParam = _balanceMode == 'all' ? 'ALL' : _balanceMode.toUpperCase();
       final response = await http.get(
-        Uri.parse('${EnvironmentConfig.apiUrl}/api/accounts/balances'),
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/accounts/balances?mode=$modeParam'),
         headers: {
           'Content-Type': 'application/json',
           'X-Session-Token': sessionToken,
@@ -409,7 +463,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         throw Exception('Session token missing. Please login again.');
       }
 
-      var url = '${EnvironmentConfig.apiUrl}/api/bot/summary?mode=&include_history=true';
+      var url = '${EnvironmentConfig.apiUrl}/api/bot/summary?mode=ALL&include_history=true';
       if (userId != null && userId.isNotEmpty) {
         url += '&user_id=$userId';
       }
@@ -460,12 +514,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
   
   Future<void> _performRefresh() async {
+    if (_refreshInProgress) return;
+    _refreshInProgress = true;
     try {
-      await Future.wait<void>([
-        _fetchRealBots(),
-        _fetchBrokerBalances(),
-        _fetchRecentWithdrawals(),
-      ], eagerError: false);
+      await _fetchRealBots();
+      await _fetchBrokerBalances();
+      await _fetchRecentWithdrawals();
       
       if (mounted) {
         setState(() {
@@ -478,6 +532,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _refreshFailureCount++;
         });
       }
+    } finally {
+      _refreshInProgress = false;
     }
   }
 
@@ -837,6 +893,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final isProfitable = profit > 0;
             final botMode = _botMode(bot);
             final botCurrency = _botCurrency(bot);
+            final intelligentScanner = bot['intelligentScanner'] == true;
+            final scannerMode = bot['scannerMode']?.toString().trim();
+            final strategySelectionSummary = _scannerStrategySummary(bot);
+            final lastStrategySwitchSummary = _lastStrategySwitchSummary(bot);
             
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
@@ -908,6 +968,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    if (strategySelectionSummary != null || lastStrategySwitchSummary != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white.withOpacity(0.06)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (strategySelectionSummary != null)
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    intelligentScanner ? Icons.radar : Icons.auto_awesome,
+                                    size: 14,
+                                    color: intelligentScanner ? const Color(0xFF00E5FF) : Colors.white54,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      '${intelligentScanner ? 'Scanner' : 'Auto-select'}${scannerMode != null && scannerMode.isNotEmpty ? ' [$scannerMode]' : ''}: $strategySelectionSummary',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white70,
+                                        fontSize: 10.5,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            if (strategySelectionSummary != null && lastStrategySwitchSummary != null)
+                              const SizedBox(height: 6),
+                            if (lastStrategySwitchSummary != null)
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.swap_horiz,
+                                    size: 14,
+                                    color: Color(0xFFFFD166),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Last switch: $lastStrategySwitchSummary',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white60,
+                                        fontSize: 10.2,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     // Action buttons row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
