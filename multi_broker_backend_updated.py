@@ -19183,6 +19183,9 @@ def bot_summary():
                 if bot_mode != mode_filter:
                     continue
 
+            if bot.get('tradeHistory'):
+                _rebuild_bot_profit_tracking(bot)
+
             created_at = bot.get('createdAt', datetime.now().isoformat())
             created = datetime.fromisoformat(created_at)
             runtime_seconds = (datetime.now() - created).total_seconds()
@@ -19354,6 +19357,9 @@ def get_bot_analytics_snapshot(bot_id: str):
             bot = active_bots.get(bot_id)
         if not bot or bot.get('user_id') != user_id:
             return jsonify({'success': False, 'error': f'Bot {bot_id} not found'}), 404
+
+        if bot.get('tradeHistory'):
+            _rebuild_bot_profit_tracking(bot)
 
         created = datetime.fromisoformat(bot.get('createdAt', datetime.now().isoformat()))
         runtime_seconds = (datetime.now() - created).total_seconds()
