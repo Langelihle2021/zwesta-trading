@@ -2188,6 +2188,13 @@ def init_database():
         except Exception as e:
             logger.debug(f"account_currency column might already exist: {e}")
 
+    if 'mt5_terminal_path' not in broker_cred_columns:
+        try:
+            cursor.execute('ALTER TABLE broker_credentials ADD COLUMN mt5_terminal_path TEXT')
+            logger.info("✅ Migration: Added mt5_terminal_path column to broker_credentials")
+        except Exception as e:
+            logger.debug(f"mt5_terminal_path column might already exist: {e}")
+
     # Product migration: XM has been retired from active workflows; deactivate legacy XM credentials.
     try:
         cursor.execute(
@@ -13280,6 +13287,28 @@ def cleanup_old_bots(max_bots=10):
 running_bots = {}  # {bot_id: True/False}
 bot_threads = {}   # {bot_id: thread_object}
 bot_stop_flags = {} # {bot_id: stop_requested}
+bot_start_locks = {}  # {bot_id: threading.Lock()} — prevents duplicate thread spawning on concurrent /start requests
+bot_start_locks_lock = threading.Lock()  # protects access to bot_start_locks dict
+
+# Per-account MT5 connection locks — allows different accounts on different terminals to connect in parallel
+# Key: canonical terminal path string, Value: threading.Lock()
+mt5_per_terminal_locks = {}  # {terminal_path: threading.Lock()}
+mt5_per_terminal_locks_lock = threading.Lock()  # protects access to mt5_per_terminal_locks dict
+
+def get_mt5_terminal_lock(terminal_path: str) -> 'threading.Lock':
+    """Return (or create) a lock for the given MT5 terminal path."""
+    key = str(terminal_path or 'default').lower().strip()
+    with mt5_per_terminal_locks_lock:
+        if key not in mt5_per_terminal_locks:
+            mt5_per_terminal_locks[key] = threading.Lock()
+        return mt5_per_terminal_locks[key]
+
+def get_bot_start_lock(bot_id: str) -> 'threading.Lock':
+    """Return (or create) a per-bot mutex to prevent concurrent /start handling."""
+    with bot_start_locks_lock:
+        if bot_id not in bot_start_locks:
+            bot_start_locks[bot_id] = threading.Lock()
+        return bot_start_locks[bot_id]
 
 # ==================== CONNECTION CACHING (Performance Optimization) ====================
 # Cache broker connections to reduce reconnection overhead from 3-5s per cycle to ~100ms
@@ -19198,7 +19227,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
         # Load credential from database
         cursor.execute('''
             SELECT credential_id, broker_name, api_key, username, password,
-                   account_number, server, is_live
+                   account_number, server, is_live, mt5_terminal_path
             FROM broker_credentials
             WHERE credential_id = ? AND user_id = ? AND is_active = 1
         ''', (credential_id, user_id))
@@ -19283,6 +19312,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 'server': server,
                 'broker': broker_for_mt5,
                 'is_live': bool(is_live),
+                'path': cred.get('mt5_terminal_path') or None,  # Per-account terminal path (prevents account-switching conflict)
                 'priority_mode_switch': bool(bot_id and str(bot_id).startswith('mode-switch:')),
             })
             
@@ -19668,126 +19698,147 @@ def start_bot():
         
         conn.close()
 
-        # ✅ FAST PATH: If bot thread is already alive (started by create_bot), return immediately
-        # This avoids the expensive broker connection + 120s MT5 readiness wait on start_bot
-        if bot_id in bot_threads and bot_threads[bot_id].is_alive():
-            logger.info(f"Bot {bot_id}: Already running via background thread - returning success immediately")
-            bot_config = active_bots[bot_id]
+        # ✅ PER-BOT MUTEX: Prevent duplicate thread spawning from concurrent /start requests
+        # Without this, 3 simultaneous POST /api/bot/start calls would all pass the is_alive()
+        # check before any thread is registered, spawning 3 trading loops for the same bot.
+        bot_lock = get_bot_start_lock(bot_id)
+        if not bot_lock.acquire(blocking=False):
+            # Another request is already handling startup for this bot (e.g., user tapped Start 3x)
+            logger.info(f"Bot {bot_id}: Another /start request is already in progress — returning early")
+            bot_config = active_bots.get(bot_id, {})
             return jsonify({
                 'success': True,
                 'botId': bot_id,
-                'strategy': bot_config.get('strategy', 'unknown'),
+                'status': 'STARTING',
+                'message': f'Bot {bot_id} is already being started by another request',
+            }), 200
+
+        try:
+            # ✅ FAST PATH: If bot thread is already alive (started by create_bot), return immediately
+            # This avoids the expensive broker connection + 120s MT5 readiness wait on start_bot
+            if bot_id in bot_threads and bot_threads[bot_id].is_alive():
+                logger.info(f"Bot {bot_id}: Already running via background thread - returning success immediately")
+                bot_config = active_bots[bot_id]
+                return jsonify({
+                    'success': True,
+                    'botId': bot_id,
+                    'strategy': bot_config.get('strategy', 'unknown'),
+                    'status': 'RUNNING',
+                    'message': f'Bot {bot_id} is already trading in background',
+                    'tradingInterval': bot_config.get('tradingInterval', 300),
+                    'botStats': {
+                        'totalTrades': bot_config.get('totalTrades', 0),
+                        'winningTrades': bot_config.get('winningTrades', 0),
+                        'totalLosses': round(bot_config.get('totalLosses', 0), 2),
+                        'totalProfit': round(bot_config.get('totalProfit', 0), 2),
+                        'accountBalance': bot_config.get('accountBalance', 0),
+                    }
+                }), 200
+
+            # Bot thread not running — connect to broker and start a new thread (INSIDE LOCK)
+            # ✅ AUTOMATIC BROKER DETECTION
+            credential_id = bot.get('credentialId')
+
+            if not credential_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'Bot missing credentialId - must link to broker credential first'
+                }), 400
+
+            broker_type, broker_conn = get_broker_connection(credential_id, user_id, bot_id)
+
+            if broker_conn is None or not hasattr(broker_conn, 'connected'):
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to connect to broker: {broker_type or broker_conn}',
+                    'botId': bot_id,
+                    'status': 'FAILED'
+                }), 503
+
+            logger.info(f"✅ Bot {bot_id}: Broker connection established ({broker_type})")
+
+            bot_config = active_bots[bot_id]
+            bot_config['broker_type'] = broker_type
+            bot_config['broker_conn'] = broker_conn
+            
+            import random
+            
+            # ✅ VALIDATE & CORRECT BOT SYMBOLS IMMEDIATELY (in case they're old/unavailable)
+            # This prevents users from being shown old symbols and ensures trades use valid ones
+            original_symbols = bot_config.get('symbols', ['EURUSDm'])
+            corrected_symbols = validate_and_correct_symbols(original_symbols, broker_type)
+            if corrected_symbols != original_symbols:
+                logger.info(f"📝 Bot {bot_id} symbols corrected: {original_symbols} → {corrected_symbols}")
+                bot_config['symbols'] = corrected_symbols
+                # Update in-memory and database
+                active_bots[bot_id]['symbols'] = corrected_symbols
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        UPDATE user_bots 
+                        SET symbols = ?, updated_at = ?
+                        WHERE bot_id = ?
+                    ''', (','.join(corrected_symbols), datetime.now().isoformat(), bot_id))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.warning(f"Could not update bot symbols in DB: {e}")
+            
+            logger.info(f"✅ Bot {bot_id}: All validation checks passed - ready to start trading")
+            
+            # Validate symbols are available
+            validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSDm']), broker_type)
+            bot_config['symbols'] = validated_symbols
+            logger.info(f"📍 Bot {bot_id}: Trading symbols validated: {validated_symbols}")
+            
+            logger.info(f"Bot {bot_id}: Starting CONTINUOUS trading in background thread")
+            
+            # Bot thread not running or stopped - create a new one
+            logger.info(f"Bot {bot_id}: No active thread found - creating new background thread")
+            
+            # Reset stop flag and start new thread
+            bot_stop_flags[bot_id] = False
+            
+            # ✅ REGISTER BOT AS RUNNING IMMEDIATELY (before thread starts)
+            # This prevents dashboard from showing it as stopped during startup
+            running_bots[bot_id] = True
+            bot_config['enabled'] = True
+            persist_bot_runtime_state(bot_id)
+            
+            bot_thread = threading.Thread(
+                target=continuous_bot_trading_loop,
+                args=(bot_id, user_id, None),
+                daemon=True,
+                name=f"BotThread-{bot_id}"
+            )
+            bot_threads[bot_id] = bot_thread
+            bot_thread.start()
+            
+            logger.info(f"✅ Bot {bot_id}: Background thread launched successfully")
+            
+            # Return immediately - bot is running in background
+            return jsonify({
+                'success': True,
+                'botId': bot_id,
+                'strategy': bot_config['strategy'],
                 'status': 'RUNNING',
-                'message': f'Bot {bot_id} is already trading in background',
+                'message': f'Bot {bot_id} started - continuous trading in background',
                 'tradingInterval': bot_config.get('tradingInterval', 300),
                 'botStats': {
-                    'totalTrades': bot_config.get('totalTrades', 0),
-                    'winningTrades': bot_config.get('winningTrades', 0),
-                    'totalLosses': round(bot_config.get('totalLosses', 0), 2),
-                    'totalProfit': round(bot_config.get('totalProfit', 0), 2),
+                    'totalTrades': bot_config['totalTrades'],
+                    'winningTrades': bot_config['winningTrades'],
+                    'totalLosses': round(bot_config['totalLosses'], 2),
+                    'totalProfit': round(bot_config['totalProfit'], 2),
                     'accountBalance': bot_config.get('accountBalance', 0),
                 }
             }), 200
 
-        # Bot thread not running — connect to broker and start a new thread
-        # ✅ AUTOMATIC BROKER DETECTION
-        credential_id = bot.get('credentialId')
+        except Exception:
+            raise
+        finally:
+            bot_lock.release()
 
-        if not credential_id:
-            return jsonify({
-                'success': False,
-                'error': 'Bot missing credentialId - must link to broker credential first'
-            }), 400
-
-        broker_type, broker_conn = get_broker_connection(credential_id, user_id, bot_id)
-
-        if broker_conn is None or not hasattr(broker_conn, 'connected'):
-            return jsonify({
-                'success': False,
-                'error': f'Failed to connect to broker: {broker_type or broker_conn}',
-                'botId': bot_id,
-                'status': 'FAILED'
-            }), 503
-
-        logger.info(f"✅ Bot {bot_id}: Broker connection established ({broker_type})")
-
-        bot_config = active_bots[bot_id]
-        bot_config['broker_type'] = broker_type
-        bot_config['broker_conn'] = broker_conn
-        
-        import random
-        
-        # ✅ VALIDATE & CORRECT BOT SYMBOLS IMMEDIATELY (in case they're old/unavailable)
-        # This prevents users from being shown old symbols and ensures trades use valid ones
-        original_symbols = bot_config.get('symbols', ['EURUSDm'])
-        corrected_symbols = validate_and_correct_symbols(original_symbols, broker_type)
-        if corrected_symbols != original_symbols:
-            logger.info(f"📝 Bot {bot_id} symbols corrected: {original_symbols} → {corrected_symbols}")
-            bot_config['symbols'] = corrected_symbols
-            # Update in-memory and database
-            active_bots[bot_id]['symbols'] = corrected_symbols
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE user_bots 
-                    SET symbols = ?, updated_at = ?
-                    WHERE bot_id = ?
-                ''', (','.join(corrected_symbols), datetime.now().isoformat(), bot_id))
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                logger.warning(f"Could not update bot symbols in DB: {e}")
-        
-        logger.info(f"✅ Bot {bot_id}: All validation checks passed - ready to start trading")
-        
-        # Validate symbols are available
-        validated_symbols = validate_and_correct_symbols(bot_config.get('symbols', ['EURUSDm']), broker_type)
-        bot_config['symbols'] = validated_symbols
-        logger.info(f"📍 Bot {bot_id}: Trading symbols validated: {validated_symbols}")
-        
-        logger.info(f"Bot {bot_id}: Starting CONTINUOUS trading in background thread")
-        
-        # Bot thread not running or stopped - create a new one
-        logger.info(f"Bot {bot_id}: No active thread found - creating new background thread")
-        
-        # Reset stop flag and start new thread
-        bot_stop_flags[bot_id] = False
-        
-        # ✅ REGISTER BOT AS RUNNING IMMEDIATELY (before thread starts)
-        # This prevents dashboard from showing it as stopped during startup
-        running_bots[bot_id] = True
-        bot_config['enabled'] = True
-        persist_bot_runtime_state(bot_id)
-        
-        bot_thread = threading.Thread(
-            target=continuous_bot_trading_loop,
-            args=(bot_id, user_id, None),
-            daemon=True,
-            name=f"BotThread-{bot_id}"
-        )
-        bot_threads[bot_id] = bot_thread
-        bot_thread.start()
-        
-        logger.info(f"✅ Bot {bot_id}: Background thread launched successfully")
-        
-        # Return immediately - bot is running in background
-        return jsonify({
-            'success': True,
-            'botId': bot_id,
-            'strategy': bot_config['strategy'],
-            'status': 'RUNNING',
-            'message': f'Bot {bot_id} started - continuous trading in background',
-            'tradingInterval': bot_config.get('tradingInterval', 300),
-            'botStats': {
-                'totalTrades': bot_config['totalTrades'],
-                'winningTrades': bot_config['winningTrades'],
-                'totalLosses': round(bot_config['totalLosses'], 2),
-                'totalProfit': round(bot_config['totalProfit'], 2),
-                'accountBalance': bot_config.get('accountBalance', 0),
-            }
-        }), 200
-    
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
