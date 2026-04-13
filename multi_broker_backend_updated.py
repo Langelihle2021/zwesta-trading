@@ -14551,18 +14551,37 @@ UPSWING_RETRACE_CLOSE_SHARE = 0.45
 HARD_LOSS_PER_TRADE_LIMIT = 6.0          # USD hard cap per trade
 STALE_LOSS_THRESHOLD = -1.5             # Min USD loss before stale check kicks in
 STALE_LOSS_MINUTES = 12                 # Position must be at least this old (minutes)
-# ZAR-specific limits used when a live account's display currency is ZAR
-HARD_LOSS_ZAR_LIVE = 15.0               # R15 hard cap on live ZAR accounts
-STALE_LOSS_ZAR_LIVE = -3.0             # R3 stale-loss trigger on live ZAR accounts
+# ZAR limits — scaled proportionally to account balance in live mode
+# e.g. R100 account → R1.50 hard cap, R200 → R3, R500 → R7.50, R1000+ → R15
+HARD_LOSS_ZAR_PERCENT = 0.015           # 1.5% of account balance per trade
+HARD_LOSS_ZAR_MIN = 1.0                 # Never less than R1 (avoids killing tiny pip moves)
+HARD_LOSS_ZAR_MAX = 15.0               # Never more than R15 (large accounts capped)
+STALE_LOSS_ZAR_PERCENT = 0.008         # 0.8% of balance → stale-loss trigger
+STALE_LOSS_ZAR_MIN = 0.50              # Min R0.50 stale trigger
+STALE_LOSS_ZAR_MAX = 5.0              # Max R5 stale trigger
+
 
 def _resolve_hard_loss_limits(bot_config: dict) -> tuple:
     """Return (hard_loss_limit, stale_loss_threshold) in the account's currency.
-    Live ZAR accounts use Rand-denominated limits; everything else uses USD defaults.
+
+    Live ZAR accounts use balance-proportional Rand limits so that small
+    investors (R100-R200) are protected with R1-R3 caps while larger
+    accounts scale up to the R15 maximum.
+    All other accounts (USD, demo) use the fixed USD defaults.
     """
     currency = str(bot_config.get('displayCurrency') or 'USD').upper()
     is_live = str(bot_config.get('mode', 'demo')).lower() == 'live'
     if currency == 'ZAR' and is_live:
-        return HARD_LOSS_ZAR_LIVE, STALE_LOSS_ZAR_LIVE
+        balance = max(
+            float(bot_config.get('accountBalance') or 0.0),
+            float(bot_config.get('accountEquity') or 0.0),
+        )
+        if balance <= 0:
+            # Balance not yet loaded — use conservative minimum
+            return HARD_LOSS_ZAR_MIN, -STALE_LOSS_ZAR_MIN
+        hard_cap = max(HARD_LOSS_ZAR_MIN, min(HARD_LOSS_ZAR_MAX, round(balance * HARD_LOSS_ZAR_PERCENT, 2)))
+        stale_cap = -max(STALE_LOSS_ZAR_MIN, min(STALE_LOSS_ZAR_MAX, round(balance * STALE_LOSS_ZAR_PERCENT, 2)))
+        return hard_cap, stale_cap
     return HARD_LOSS_PER_TRADE_LIMIT, STALE_LOSS_THRESHOLD
 
 PYRAMID_ADDON_SIGNAL_BUFFER = 8.0
