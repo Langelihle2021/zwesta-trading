@@ -17231,6 +17231,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         running_bots[bot_id] = True
         trade_cycle = 0
         mt5_ready_timeout = 30  # OPTIMIZED: Reduced from 120 to 30 seconds - MT5 usually ready in 5-15s
+        consecutive_connection_failures = 0  # Auto-stop bot after repeated broker disconnects
+        MAX_BROKER_DISCONNECT_FAILURES = 5   # Stop bot after 5 consecutive failed connections
         
         # ==================== MARKET HOURS CONFIG ====================
         # Define market hours for different symbol groups (UTC time)
@@ -17444,13 +17446,33 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     logger.info(f"Bot {bot_id}: Updated MT5 credentials (is_live={_bot_is_live}, account={bot_credentials.get('account', '?')})")
 
                                 if not mt5_conn.connect():
-                                    logger.error(f"Bot {bot_id}: MT5 connection failed - will retry next cycle")
+                                    consecutive_connection_failures += 1
+                                    logger.error(f"Bot {bot_id}: MT5 connection failed (attempt {consecutive_connection_failures}/{MAX_BROKER_DISCONNECT_FAILURES}) - will retry next cycle")
+                                    if consecutive_connection_failures >= MAX_BROKER_DISCONNECT_FAILURES:
+                                        logger.error(f"🛑 Bot {bot_id}: Broker disconnected {MAX_BROKER_DISCONNECT_FAILURES} times in a row - AUTO-STOPPING bot")
+                                        bot_config['status'] = 'STOPPED'
+                                        bot_config['enabled'] = False
+                                        bot_config['stopReason'] = f'Broker disconnected - auto-stopped after {MAX_BROKER_DISCONNECT_FAILURES} failed reconnection attempts'
+                                        bot_stop_flags[bot_id] = True
+                                        running_bots[bot_id] = False
+                                        persist_bot_runtime_state(bot_id)
+                                        try:
+                                            _dc = get_db_connection()
+                                            _dcc = _dc.cursor()
+                                            _dcc.execute('UPDATE user_bots SET status=?, enabled=0 WHERE bot_id=?', ('STOPPED', bot_id))
+                                            _dc.commit()
+                                            _dc.close()
+                                        except Exception as _dce:
+                                            logger.warning(f"Bot {bot_id}: DB update on auto-stop failed: {_dce}")
+                                        return
                                     # STAGGER: Add random delay (1-15s) so bots don't all retry simultaneously
                                     stagger_delay = random.uniform(1, 15)
                                     actual_wait = trading_interval + stagger_delay
                                     logger.info(f"   ⏰ Staggered retry in {actual_wait:.0f}s (base {trading_interval}s + jitter {stagger_delay:.0f}s)")
                                     time.sleep(actual_wait)
                                     continue
+                                else:
+                                    consecutive_connection_failures = 0  # Reset on successful connection
                         
                                 # ==================== MULTI-USER ACCOUNT VERIFICATION ====================
                                 # Verify MT5 is logged into THIS bot's account before trading.
@@ -22515,6 +22537,115 @@ def get_recent_withdrawals():
     
     except Exception as e:
         logger.error(f"Error getting recent withdrawals: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/withdrawals/analytics', methods=['GET'])
+@require_session
+def get_withdrawal_analytics():
+    """Return aggregated withdrawal amounts + commission distributions for analytics screen."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        user_id = request.user_id
+
+        # Total withdrawn from broker (Exness/PXBT style)
+        cursor.execute('''
+            SELECT COALESCE(SUM(total_amount), 0) as total,
+                   COUNT(*) as count
+            FROM exness_withdrawals
+            WHERE user_id = ? AND status IN ('completed', 'approved', 'done')
+        ''', (user_id,))
+        ew = cursor.fetchone()
+        broker_total = float(ew['total'] if ew else 0)
+        broker_count = int(ew['count'] if ew else 0)
+
+        # Total from general withdrawals table
+        cursor.execute('''
+            SELECT COALESCE(SUM(amount), 0) as total,
+                   COUNT(*) as count
+            FROM withdrawals
+            WHERE user_id = ? AND status IN ('completed', 'approved', 'done')
+        ''', (user_id,))
+        gw = cursor.fetchone()
+        general_total = float(gw['total'] if gw else 0)
+
+        # Commission totals (what earner received)
+        cursor.execute('''
+            SELECT COALESCE(SUM(amount), 0) as earned,
+                   COUNT(*) as count
+            FROM commission_withdrawals
+            WHERE user_id = ? AND status IN ('completed', 'approved', 'done')
+        ''', (user_id,))
+        cw = cursor.fetchone()
+        commission_earned = float(cw['earned'] if cw else 0)
+
+        # Commission generated FROM this user's bots (developer/platform cut)
+        cursor.execute('''
+            SELECT COALESCE(SUM(commission_amount), 0) as total_generated,
+                   COALESCE(AVG(commission_rate), 0) as avg_rate
+            FROM commission_records
+            WHERE client_id = ?
+        ''', (user_id,))
+        cr = cursor.fetchone()
+        commission_generated = float(cr['total_generated'] if cr else 0)
+        avg_commission_rate = float(cr['avg_rate'] if cr else 0)
+
+        # Monthly breakdown (last 6 months)
+        cursor.execute('''
+            SELECT strftime('%Y-%m', created_at) as month,
+                   SUM(total_amount) as broker_amount
+            FROM exness_withdrawals
+            WHERE user_id = ?
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT 6
+        ''', (user_id,))
+        monthly_broker = [{'month': r['month'], 'amount': float(r['broker_amount'] or 0)} for r in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT strftime('%Y-%m', created_at) as month,
+                   SUM(amount) as commission_amount
+            FROM commission_withdrawals
+            WHERE user_id = ?
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT 6
+        ''', (user_id,))
+        monthly_commission = [{'month': r['month'], 'amount': float(r['commission_amount'] or 0)} for r in cursor.fetchall()]
+
+        # Get user commission config
+        cursor.execute('''
+            SELECT ig_developer_rate, recruiter_rate, mt5_commission_enabled
+            FROM commission_config
+            WHERE user_id = ?
+            LIMIT 1
+        ''', (user_id,))
+        cfg_row = cursor.fetchone()
+        platform_rate = float((cfg_row['ig_developer_rate'] if cfg_row else None) or 0.25)
+        recruiter_rate = float((cfg_row['recruiter_rate'] if cfg_row else None) or 0.05)
+        comm_enabled = bool((cfg_row['mt5_commission_enabled'] if cfg_row else None) or False)
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'totalWithdrawn': round(broker_total + general_total, 2),
+            'brokerWithdrawals': round(broker_total, 2),
+            'brokerWithdrawalsCount': broker_count,
+            'generalWithdrawals': round(general_total, 2),
+            'commissionEarned': round(commission_earned, 2),
+            'commissionGenerated': round(commission_generated, 2),
+            'avgCommissionRate': round(avg_commission_rate * 100, 1),
+            'platformRate': round(platform_rate * 100, 1),
+            'recruiterRate': round(recruiter_rate * 100, 1),
+            'commissionEnabled': comm_enabled,
+            'monthlyBrokerWithdrawals': monthly_broker,
+            'monthlyCommissions': monthly_commission,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting withdrawal analytics: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

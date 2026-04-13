@@ -276,6 +276,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .toList();
   }
 
+  List<Map<String, dynamic>> _finishedBotsFor([String? mode]) {
+    return _filteredBots(mode)
+        .where((bot) {
+          final enabled = bot['enabled'] == true;
+          final status = (bot['status'] ?? '').toString().toUpperCase();
+          return !enabled || status == 'STOPPED' || status == 'FINISHED' || status == 'COMPLETED';
+        })
+        .cast<Map<String, dynamic>>()
+        .toList();
+  }
+
   Map<String, double> _aggregateBotValuesFor(String field, {String? mode}) {
     final totals = <String, double>{};
     for (final bot in _filteredBots(mode)) {
@@ -1280,12 +1291,126 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             );
           }),
+          ...(() {
+            final finishedBots = _finishedBotsFor();
+            if (finishedBots.isEmpty) return <Widget>[];
+            return [
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFF5252),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Finished Bots',
+                    style: GoogleFonts.poppins(
+                      color: const Color(0xFFFF5252),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${finishedBots.length}',
+                    style: GoogleFonts.poppins(color: Colors.white38, fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...finishedBots.map((bot) {
+                final fBotId = bot['botId']?.toString() ?? 'Unknown';
+                final fProfit = double.tryParse(
+                    bot['currentProfit']?.toString() ?? bot['totalProfit']?.toString() ?? '0') ?? 0;
+                final fTrades = bot['totalTrades']?.toString() ?? '0';
+                final fStrategy = bot['strategy']?.toString() ?? 'Unknown';
+                final stopReason = bot['stopReason']?.toString();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF5252).withOpacity(0.05),
+                      border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.25)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF5252).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.smart_toy, color: Color(0xFFFF5252), size: 18),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fBotId,
+                                style: GoogleFonts.poppins(
+                                    color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                              ),
+                              Text(
+                                '$fStrategy • $fTrades trades',
+                                style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11),
+                              ),
+                              if (stopReason != null)
+                                Text(
+                                  stopReason,
+                                  style: GoogleFonts.poppins(
+                                      color: const Color(0xFFFF8A80), fontSize: 10),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '${fProfit >= 0 ? '+' : ''}${fProfit.toStringAsFixed(2)}',
+                              style: GoogleFonts.poppins(
+                                color: fProfit >= 0
+                                    ? const Color(0xFF69F0AE)
+                                    : const Color(0xFFFF8A80),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.circle, color: Color(0xFFFF5252), size: 8),
+                                SizedBox(width: 4),
+                                Text(
+                                  'STOPPED',
+                                  style: TextStyle(color: Color(0xFFFF5252), fontSize: 10),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ];
+          })(),
         ],
       ),
     );
   }
-
-  // ── GLASS CARD HELPER ──
   Widget _glassCard({required Widget child, LinearGradient? gradient}) => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(

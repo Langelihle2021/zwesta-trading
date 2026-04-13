@@ -28,6 +28,10 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
   late Map<String, dynamic> _botData;
   List<Map<String, dynamic>> _fallbackTradeHistory = [];
 
+  // Withdrawal analytics state
+  Map<String, dynamic>? _withdrawalAnalytics;
+  bool _withdrawalLoading = false;
+
   // IG state
   bool _isIG = false;
   bool _igLoading = false;
@@ -44,6 +48,7 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
     _isIG = brokerType.toString().toUpperCase().contains('IG');
 
     _refreshAnalytics();
+    _loadWithdrawalAnalytics();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (mounted) {
         _refreshAnalytics();
@@ -126,6 +131,34 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           _igError = e.toString();
         });
       }
+    }
+  }
+
+  Future<void> _loadWithdrawalAnalytics() async {
+    if (mounted) setState(() => _withdrawalLoading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('auth_token');
+      if (sessionToken == null || sessionToken.isEmpty) return;
+
+      final response = await http.get(
+        Uri.parse('${EnvironmentConfig.apiUrl}/api/withdrawals/analytics'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['success'] == true && mounted) {
+          setState(() => _withdrawalAnalytics = data);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading withdrawal analytics: $e');
+    } finally {
+      if (mounted) setState(() => _withdrawalLoading = false);
     }
   }
 
@@ -456,6 +489,10 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
               const SizedBox(height: 24),
               _buildSectionHeader('Recent Trades'),
               _buildTradeHistorySection(),
+
+              // Withdrawals & Commission Analytics
+              _buildWithdrawalsSection(),
+              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -771,6 +808,136 @@ class _BotAnalyticsScreenState extends State<BotAnalyticsScreen> {
           ],
         ),
       );
+
+  Widget _buildWithdrawalsSection() {
+    if (_withdrawalLoading && _withdrawalAnalytics == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    final d = _withdrawalAnalytics ?? {};
+    final totalWithdrawn = (d['totalWithdrawn'] as num?)?.toDouble() ?? 0.0;
+    final brokerWithdrawn = (d['brokerWithdrawals'] as num?)?.toDouble() ?? 0.0;
+    final commissionEarned = (d['commissionEarned'] as num?)?.toDouble() ?? 0.0;
+    final commissionGenerated = (d['commissionGenerated'] as num?)?.toDouble() ?? 0.0;
+    final platformRate = (d['platformRate'] as num?)?.toDouble() ?? 0.0;
+    final recruiterRate = (d['recruiterRate'] as num?)?.toDouble() ?? 0.0;
+    final commEnabled = d['commissionEnabled'] == true;
+
+    Widget _tile(String label, String value, Color color, IconData icon) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(icon, color: color, size: 15),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(label,
+                    style: TextStyle(color: color.withOpacity(0.85), fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Text(value,
+                style: TextStyle(
+                    color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 24),
+        _buildSectionHeader('Withdrawals & Commissions'),
+        const SizedBox(height: 4),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 1.9,
+          children: [
+            _tile('Total Withdrawn', '\$${totalWithdrawn.toStringAsFixed(2)}',
+                const Color(0xFF00E5FF), Icons.account_balance_wallet),
+            _tile('Broker Withdrawals', '\$${brokerWithdrawn.toStringAsFixed(2)}',
+                const Color(0xFF69F0AE), Icons.swap_horiz),
+            _tile('Commission Earned', '\$${commissionEarned.toStringAsFixed(2)}',
+                const Color(0xFFFFD166), Icons.workspace_premium),
+            _tile('Platform Commission', '\$${commissionGenerated.toStringAsFixed(2)}',
+                const Color(0xFFFF9E80), Icons.percent),
+          ],
+        ),
+        if (commEnabled || platformRate > 0) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withOpacity(0.08)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Commission Distribution',
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 10),
+                _commissionBar('Platform / Developer', platformRate, const Color(0xFF7C4DFF)),
+                const SizedBox(height: 8),
+                _commissionBar('Recruiter / Referral', recruiterRate, const Color(0xFFFFD166)),
+                const SizedBox(height: 8),
+                _commissionBar(
+                    'Net to you',
+                    (100 - platformRate - recruiterRate).clamp(0, 100),
+                    const Color(0xFF69F0AE)),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _commissionBar(String label, double percent, Color color) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 130,
+          child: Text(label,
+              style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (percent / 100).clamp(0.0, 1.0),
+              backgroundColor: Colors.white12,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 8,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text('${percent.toStringAsFixed(1)}%',
+            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
 
   Widget _buildSectionHeader(String title) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
