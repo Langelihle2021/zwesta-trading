@@ -13469,7 +13469,7 @@ def get_broker_credentials():
         
         cursor.execute('''
             SELECT credential_id, broker_name, account_number, server, is_live, is_active,
-                   created_at, account_currency, COALESCE(cached_balance, 0)
+                   created_at, account_currency, COALESCE(cached_balance, 0), mt5_terminal_path
             FROM broker_credentials
             WHERE user_id = ? AND is_active = 1
             ORDER BY broker_name, account_number, created_at DESC
@@ -13498,6 +13498,7 @@ def get_broker_credentials():
                     'account_currency': (row[7] or 'USD').upper(),
                     'cached_balance': float(row[8] or 0),
                     'has_cached_balance': float(row[8] or 0) > 0,
+                    'mt5_terminal_path': row[9],
                 }
         
         credentials = list(seen.values())
@@ -13545,6 +13546,7 @@ def save_broker_credentials():
         username = data.get('username')  # For IG Markets
         api_secret = data.get('api_secret')
         token = data.get('token')
+        mt5_terminal_path = data.get('mt5_terminal_path') or data.get('mt5_path')
         is_live = normalize_mt5_is_live_flag(broker_name, data.get('is_live', False), server)
         
         if not broker_name:
@@ -13632,9 +13634,9 @@ def save_broker_credentials():
             if broker_name in ['MetaQuotes', 'XM Global', 'XM', 'MetaTrader 5', 'Exness', 'PXBT']:
                 cursor.execute('''
                     UPDATE broker_credentials
-                    SET account_number = ?, password = ?, server = ?, is_live = ?, updated_at = ?
+                    SET account_number = ?, password = ?, server = ?, is_live = ?, mt5_terminal_path = ?, updated_at = ?
                     WHERE credential_id = ?
-                ''', (account_number, password, server, 1 if is_live else 0, created_at, credential_id))
+                ''', (account_number, password, server, 1 if is_live else 0, mt5_terminal_path, created_at, credential_id))
             else:
                 cursor.execute('''
                     UPDATE broker_credentials
@@ -13649,11 +13651,11 @@ def save_broker_credentials():
             cursor.execute('''
                 INSERT INTO broker_credentials
                 (credential_id, user_id, broker_name, account_number, password, server, 
-                 api_key, username, is_live, is_active, created_at, updated_at, account_currency)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                 api_key, username, is_live, is_active, created_at, updated_at, account_currency, mt5_terminal_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
             ''', (
                 credential_id, user_id, broker_name, account_number or '', password, server or '',
-                api_key or '', username or '', 1 if is_live else 0, created_at, created_at, 'USD'
+                api_key or '', username or '', 1 if is_live else 0, created_at, created_at, 'USD', mt5_terminal_path
             ))
             logger.info(f"✅ Created new broker credential for user {user_id}: {broker_name} | Account: {account_id}")
         
@@ -13706,6 +13708,7 @@ def save_broker_credentials():
                 'account_number': account_number or username,
                 'server': server or '',
                 'is_live': is_live,
+                'mt5_terminal_path': mt5_terminal_path,
                 'is_active': True,
                 'created_at': created_at,
                 'account_currency': (locals().get('account_currency') or 'USD').upper(),
@@ -22228,6 +22231,7 @@ def add_broker_credentials(user_id):
         password = data.get('password')
         server = data.get('server')
         is_live = data.get('is_live', False)
+        mt5_terminal_path = data.get('mt5_terminal_path') or data.get('mt5_path')
         
         if not all([broker_name, account_number, password]):
             return jsonify({'success': False, 'error': 'Missing required fields'}), 400
@@ -22247,9 +22251,9 @@ def add_broker_credentials(user_id):
         
         cursor.execute('''
             INSERT INTO broker_credentials 
-            (credential_id, user_id, broker_name, account_number, password, server, is_live, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (credential_id, user_id, broker_name, account_number, password, server, is_live, created_at, created_at))
+            (credential_id, user_id, broker_name, account_number, password, server, is_live, mt5_terminal_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (credential_id, user_id, broker_name, account_number, password, server, is_live, mt5_terminal_path, created_at, created_at))
         
         conn.commit()
         conn.close()
@@ -22259,6 +22263,7 @@ def add_broker_credentials(user_id):
         return jsonify({
             'success': True,
             'credential_id': credential_id,
+            'mt5_terminal_path': mt5_terminal_path,
             'message': f'Broker credentials added for {broker_name}'
         }), 200
     

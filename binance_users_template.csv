@@ -1,0 +1,3 @@
+email,name,user_password,api_key,api_secret,market,is_live,account_number
+client1@example.com,Client 1,Zwesta1985,<SET_BINANCE_API_KEY>,<SET_BINANCE_API_SECRET>,spot,true,SPOT
+client2@example.com,Client 2,Zwesta1985,<SET_BINANCE_API_KEY>,<SET_BINANCE_API_SECRET>,spot,true,SPOT

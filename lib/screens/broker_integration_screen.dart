@@ -974,9 +974,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             TextField(
               controller: _apiKeyController,
               decoration: const InputDecoration(
-                labelText: 'Binance API Key',
+                labelText: 'Client Binance API Key',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.vpn_key),
+                hintText: 'Use this logged-in client\'s Binance API key',
               ),
             ),
             const SizedBox(height: 24),
@@ -986,9 +987,10 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
               controller: _passwordController,
               obscureText: true,
               decoration: const InputDecoration(
-                labelText: 'Binance API Secret',
+                labelText: 'Client Binance API Secret',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.lock),
+                hintText: 'Never reuse an admin or shared master key',
               ),
             ),
             const SizedBox(height: 24),
@@ -1014,6 +1016,36 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                     DropdownMenuItem(value: 'futures', child: Text('Futures')),
                   ],
                 ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0B90B).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFF0B90B).withOpacity(0.35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Per-client Binance security',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Each client must connect their own Binance API key. Keep withdrawals disabled and restrict API access to your VPS IP before enabling live trading.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.white70,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1343,7 +1375,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                 const SizedBox(height: 12),
                 Text(
                   _isBinanceBroker
-                      ? '1. Open Binance and create an API key\n2. Enable trading permission for the key\n3. Copy the API key and secret\n4. Choose Spot or Futures\n5. Fund that Binance account before starting the bot'
+                      ? '1. Create a separate Binance API key for this client account\n2. Enable reading and spot or futures trading only\n3. Keep withdrawals disabled\n4. Restrict the key to the VPS public IP\n5. Copy the API key and secret and choose Spot or Futures\n6. Fund that same client Binance account before starting the bot'
                       : _isOandaBroker
                           ? '1. Go to oanda.com → My Account → Manage API Access\n2. Click "Generate" to create a Personal Access Token\n3. Copy the full token (shown once — save it!)\n4. Find your Account ID on the OANDA dashboard\n   (format: 001-001-XXXXXXX-001)\n5. Choose DEMO (fxpractice) or LIVE (fxtrade) mode'
                           : _isIgBroker
@@ -1369,14 +1401,14 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                     children: [
                       Text(
                         _isBinanceBroker
-                            ? 'API Key: paste your Binance API key'
+                            ? 'API Key: paste this client\'s Binance API key'
                             : (_isIgBroker ? 'API Key: paste your IG API key' : 'Account: demo or 136372035'),
                         style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         _isBinanceBroker
-                            ? 'Secret: paste your Binance API secret'
+                            ? 'Secret: paste this client\'s Binance API secret'
                             : (_isIgBroker ? 'Account ID: D... or live account ID' : 'Password: demo123'),
                         style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
                       ),
