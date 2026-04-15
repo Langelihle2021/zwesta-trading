@@ -5986,7 +5986,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'intelligentScanner': True,
         'dynamicSizing': True,
@@ -6013,7 +6013,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'intelligentScanner': True,
         'dynamicSizing': True,
@@ -6040,7 +6040,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 70,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'intelligentScanner': True,
         'dynamicSizing': True,
@@ -6067,7 +6067,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 1,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'intelligentScanner': True,
         'dynamicSizing': True,
@@ -6094,7 +6094,7 @@ SMALL_ACCOUNT_PRESETS = {
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
         'signalThreshold': 75,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,
         'intelligentScanner': True,
         'dynamicSizing': True,
@@ -9198,7 +9198,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 200,  # Reduced from 50000 - crypto pips are 0.01 USD
         'take_profit_pips': 600,  # Reduced from 100000 - more realistic targets
         'max_slippage': 0.002,
-        'min_signal_strength': 60,  # Adjusted from 70 - allow more trades while maintaining quality
+        'min_signal_strength': 70,  # Stricter live filtering after stop-loss-heavy crypto runs
         'volatility_high': 5.0,
         'volatility_low': 1.0,
     },
@@ -9207,7 +9207,7 @@ SYMBOL_PARAMETERS = {
         'stop_loss_pips': 40,  # Faster ETH exit range for more frequent turnarounds
         'take_profit_pips': 120,  # Faster ETH TP scaling for quicker crypto exits
         'max_slippage': 0.002,
-        'min_signal_strength': 50,  # More responsive ETH entries while still filtering noise
+        'min_signal_strength': 65,  # ETH needed tighter gating in live history
         'volatility_high': 4.0,
         'volatility_low': 1.0,
         'max_hold_minutes': 60,  # Close ETH positions after 1 hour to prevent holding too long in volatile crypto
@@ -15036,8 +15036,8 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 12.0,   # Long cooldown after drawdown
         'maxOpenPositions': 2,        # Max 2 trades open at once
         'maxPositionsPerSymbol': 1,   # 1 trade per symbol
-        'signalThreshold': 40,        # Balanced for small live accounts
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],  # Allow High (crypto/gold are naturally High spread)
+        'signalThreshold': 70,        # Require stronger setups on small live accounts
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': False,          # Stick to swing trend strategy
         'dynamicSizing': True,        # Scale with equity
     },
@@ -15049,8 +15049,8 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 8.0,
         'maxOpenPositions': 2,
         'maxPositionsPerSymbol': 1,
-        'signalThreshold': 45,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'signalThreshold': 70,
+        'allowedVolatility': ['Very Low', 'Low'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -15062,8 +15062,8 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 6.0,
         'maxOpenPositions': 3,
         'maxPositionsPerSymbol': 2,
-        'signalThreshold': 40,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'signalThreshold': 65,
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -15075,8 +15075,8 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 4.0,
         'maxOpenPositions': 5,
         'maxPositionsPerSymbol': 2,
-        'signalThreshold': 35,
-        'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+        'signalThreshold': 60,
+        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -15088,8 +15088,8 @@ BOT_MANAGEMENT_PROFILES = {
         'drawdownPauseHours': 3.0,
         'maxOpenPositions': 6,
         'maxPositionsPerSymbol': 2,
-        'signalThreshold': 35,
-        'allowedVolatility': ['Low', 'Medium', 'High'],
+        'signalThreshold': 60,
+        'allowedVolatility': ['Low', 'Medium'],
         'autoSwitch': True,
         'dynamicSizing': True,
     },
@@ -16219,7 +16219,7 @@ def _normalize_management_profile(raw_profile) -> str:
     profile = str(raw_profile or 'beginner').strip().lower()
     if profile in {'small_account', 'small', 'micro', 'tiny', 'dca', 'swing', 'swing_dca', 'small-account'}:
         return 'small_account'
-    if profile in {'fast_growth', 'fast-growth', 'fast', 'growth', 'quick_growth'}:
+    if profile in {'fast_growth', 'fast-growth', 'fast', 'growth', 'quick_growth', 'quick-profit', 'quick_profit', 'quick profit'}:
         return 'fast_growth'
     if profile in {'safe', 'conservative', 'starter', 'new', 'novice'}:
         return 'beginner'
@@ -16614,7 +16614,8 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
                 f'strong recent form ({recent_win_rate:.0f}% win rate, {recent_profit:.2f} profit over {len(recent_closed)} trades)'
             )
         elif recent_profit < 0 or recent_win_rate <= UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE or consecutive_losses >= 2:
-            target_threshold = min(85, current_threshold + 5)
+            threshold_step = 8 if profile == 'fast_growth' else 5
+            target_threshold = min(88 if profile == 'fast_growth' else 85, current_threshold + threshold_step)
             if is_live and guarded_small_live:
                 target_threshold = max(target_threshold, 65)
             if target_threshold != current_threshold:
@@ -16625,6 +16626,10 @@ def apply_universal_performance_adaptation(bot_id: str, bot_config: Dict[str, An
             safer_allowed = [
                 level for level in current_allowed_volatility if level in ['Very Low', 'Low', 'Medium']
             ] or ['Very Low', 'Low', 'Medium']
+            if profile == 'fast_growth':
+                safer_allowed = [
+                    level for level in safer_allowed if level in ['Very Low', 'Low']
+                ] or ['Very Low', 'Low']
             if safer_allowed != current_allowed_volatility:
                 bot_config['allowedVolatility'] = safer_allowed
                 current_allowed_volatility = safer_allowed
@@ -16753,6 +16758,14 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
                 level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
             ] or ['Very Low', 'Low', 'Medium']
 
+        if profile == 'fast_growth':
+            effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 2)
+            effective['maxPositionsPerSymbol'] = 1
+            effective['signalThreshold'] = max(effective['signalThreshold'], 68 if is_assisted else defaults['signalThreshold'])
+            effective['allowedVolatility'] = [
+                level for level in effective['allowedVolatility'] if level in ['Low', 'Medium']
+            ] or ['Low', 'Medium']
+
         if guarded_small_live:
             effective['maxOpenPositions'] = 1
             effective['maxPositionsPerSymbol'] = 1
@@ -16781,6 +16794,10 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
             effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 1 if profile == 'beginner' else 2)
             effective['maxPositionsPerSymbol'] = 1
             effective['allowedVolatility'] = ['Very Low', 'Low', 'Medium']  # Tighten but still allow trading
+            if profile == 'fast_growth':
+                effective['signalThreshold'] = min(88, max(effective['signalThreshold'], 75))
+                effective['maxOpenPositions'] = 1
+                effective['allowedVolatility'] = ['Very Low', 'Low']
             bot_config['managementState'] = 'recovery'
         else:
             bot_config['managementState'] = 'normal'
@@ -17380,7 +17397,9 @@ def create_bot():
                 'profit': 0,
                 'open_positions': {},  # Track open positions for closure detection
             }
-            persist_bot_runtime_state(bot_id)
+            # Force immediate persistence so bot settings survive restarts
+            # even before the periodic runtime-state debounce cycle.
+            persist_bot_runtime_state(bot_id, force=True)
 
             logger.info(f"✅ Created bot {bot_id} for user {user_id}")
             logger.info(f"   Broker: {broker_name} | Account: {account_number} | Mode: {mode}")
@@ -17705,7 +17724,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
         if normalized_symbols != bot_config.get('symbols', []):
             logger.info(f"🔄 Bot {bot_id}: Normalized symbols for {normalized_broker}: {bot_config.get('symbols')} -> {normalized_symbols}")
             bot_config['symbols'] = normalized_symbols
-            persist_bot_runtime_state(bot_id)
+            # Force immediate persistence so bot settings survive restarts
+            # even before the periodic runtime-state debounce cycle.
+            persist_bot_runtime_state(bot_id, force=True)
         
         # Get trading mode configuration
         trading_mode = bot_config.get('tradingMode', 'interval')  # 'interval' or 'signal-driven'
@@ -19496,6 +19517,22 @@ def quick_create_bot():
 
             symbols = BINANCE_PRESETS.get(preset, BINANCE_PRESETS['top_edge'])
 
+            quick_profit_defaults = BOT_MANAGEMENT_PROFILES.get('fast_growth', {})
+            management_profile = 'fast_growth'  # User-facing label: Quick Profit
+            management_mode = 'assisted'
+            signal_threshold = max(68, int(quick_profit_defaults.get('signalThreshold', 60) or 60))
+            allowed_volatility = ['Low', 'Medium']
+            max_open_positions = min(2, int(quick_profit_defaults.get('maxOpenPositions', 2) or 2))
+            max_positions_per_symbol = 1
+            intelligent_scanner = True
+            profit_protection = {
+                'enabled': True,
+                'activationPercent': 3,
+                'activationMinProfit': 2,
+                'retraceClosePercent': 22,
+                'switchOnReversal': True,
+            }
+
             # Bot configuration (optimized for crypto)
             bot_id = f"quick_bot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
             strategy = 'Momentum Trading'  # Best for crypto
@@ -19543,6 +19580,26 @@ def quick_create_bot():
                 'profitLock': profit_lock,
                 'drawdownPausePercent': drawdown_pause_percent,
                 'drawdownPauseHours': drawdown_pause_hours,
+                'managementProfile': management_profile,
+                'managementMode': management_mode,
+                'signalThreshold': signal_threshold,
+                'allowedVolatility': allowed_volatility,
+                'maxOpenPositions': max_open_positions,
+                'maxOpenTrades': max_open_positions,
+                'maxPositionsPerSymbol': max_positions_per_symbol,
+                'autoSwitch': True,
+                'dynamicSizing': True,
+                'intelligentScanner': intelligent_scanner,
+                'selectedPreset': f'binance_{preset}',
+                'presetName': f'Quick Profit ({preset})',
+                'intelligentManagement': {
+                    'enabled': True,
+                    'profile': management_profile,
+                    'experienceLevel': management_profile,
+                    'autoSwitch': True,
+                    'dynamicSizing': True,
+                },
+                'profitProtection': profit_protection,
                 'displayCurrency': account_currency,  # Use actual account currency (USDT, USD, etc.)
                 'enabled': trading_enabled,
                 'totalTrades': 0,
@@ -19632,6 +19689,9 @@ def quick_create_bot():
                 'pairs': symbols,
                 'strategy': strategy,
                 'riskPerTrade': risk_per_trade,
+                'managementProfile': management_profile,
+                'signalThreshold': signal_threshold,
+                'allowedVolatility': allowed_volatility,
                 'tradingEnabled': trading_enabled,
             }), 201
             logger.error(f"Error in quick_create_bot: {e}")

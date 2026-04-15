@@ -426,7 +426,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
   late TextEditingController _investmentAmountController;
   final FundService _fundService = FundService();
 
-  List<String> _allowedVolatility = ['Low', 'Medium'];
+  List<String> _allowedVolatility = ['Very Low', 'Low'];
 
   // ========== NEW: Automated Risk Management Settings ==========
   double _riskPercent = 2; // Risk per trade as %
@@ -484,7 +484,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'maxDailyLoss': 20.0,
       'maxOpenTrades': 2,
       'maxDrawdownPercent': 15.0,
-      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'allowedVolatility': ['Very Low', 'Low', 'Medium'],
       'tips': [
         'DCA weekly: buy fixed amount regardless of price',
         'Only spot or max 2-5x leverage',
@@ -505,7 +505,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'maxDailyLoss': 20.0,
       'maxOpenTrades': 2,
       'maxDrawdownPercent': 15.0,
-      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'allowedVolatility': ['Very Low', 'Low', 'Medium'],
       'tips': [
         'Use cent/micro account (0.01 lots)',
         'Only EUR/USD and GBP/USD (tightest spreads)',
@@ -526,7 +526,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'maxDailyLoss': 20.0,
       'maxOpenTrades': 2,
       'maxDrawdownPercent': 15.0,
-      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'allowedVolatility': ['Very Low', 'Low', 'Medium'],
       'tips': [
         'Use fractional shares or CFDs for small sizing',
         'Focus on mega-cap tech (NVDA, AAPL, MSFT)',
@@ -547,7 +547,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'maxDailyLoss': 20.0,
       'maxOpenTrades': 1,
       'maxDrawdownPercent': 15.0,
-      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'allowedVolatility': ['Very Low', 'Low', 'Medium'],
       'tips': [
         'Gold is volatile — use wider stops (1.5-2x ATR)',
         'Only trade with the daily trend',
@@ -568,7 +568,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
       'maxDailyLoss': 20.0,
       'maxOpenTrades': 2,
       'maxDrawdownPercent': 15.0,
-      'allowedVolatility': ['Very Low', 'Low', 'Medium', 'High'],
+      'allowedVolatility': ['Very Low', 'Low', 'Medium'],
       'tips': [
         'Max 3 assets — keeps risk manageable',
         'Gold hedges crypto drops',
@@ -1124,27 +1124,30 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
         if (_maxOpenTrades > 2) _maxOpenTrades = 2;
         if (_riskPercent > 2.0) _riskPercent = 2.0;
         if (_maxDrawdownPercent > 12.0) _maxDrawdownPercent = 12.0;
-        _allowedVolatility = ['Low'];
+        _allowedVolatility = ['Very Low', 'Low'];
       } else if (profile == 'balanced') {
         if (_maxOpenTrades > 3) _maxOpenTrades = 3;
         if (_riskPercent > 3.0) _riskPercent = 3.0;
         if (_maxDrawdownPercent > 18.0) _maxDrawdownPercent = 18.0;
         _allowedVolatility = ['Low', 'Medium'];
       } else if (profile == 'fast_growth') {
-        // Fast Growth: for small accounts, aggressive but capped
-        _maxOpenTrades = 6;
-        _riskPercent = 4.0;
-        _maxDrawdownPercent = 25.0;
-        _allowedVolatility = ['Medium', 'High'];
+        // Quick Profit: faster cadence, but with tighter downside controls.
+        _maxOpenTrades = 4;
+        _riskPercent = 3.0;
+        _maxDrawdownPercent = 18.0;
+        _allowedVolatility = ['Low', 'Medium'];
         _targetProfit = 20; // Lower target for quick compounding
         _minProfit = 5;
         _maxProfit = 50;
-        _winRateMin = 50;
+        _winRateMin = 58;
+        _profitProtectionActivationPercent = 3;
+        _profitProtectionActivationMinProfit = 2;
+        _profitProtectionRetracePercent = 22;
       } else if (profile == 'small_account') {
         _maxOpenTrades = 2;
         _riskPercent = 5.0;
         _maxDrawdownPercent = 15.0;
-        _allowedVolatility = ['Very Low', 'Low', 'Medium', 'High'];
+        _allowedVolatility = ['Very Low', 'Low', 'Medium'];
       } else {
         _allowedVolatility = ['Low', 'Medium'];
       }
@@ -1153,30 +1156,41 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
 
   int _recommendedSignalThreshold() {
     switch (_managementProfile) {
+      case 'small_account':
+        return 70;
       case 'beginner':
-        return 45;
+        return 70;
       case 'balanced':
-        return 40;
+        return 65;
+      case 'advanced':
+        return 60;
+      case 'fast_growth':
+        return 68;
       default:
-        return 35;
+        return 65;
     }
   }
 
   int _recommendedMaxPositionsPerSymbol() {
     switch (_managementProfile) {
       case 'beginner':
+      case 'small_account':
         return 1;
+      case 'advanced':
+        return _maxOpenTrades >= 3 ? 2 : 1;
       case 'balanced':
         return _maxOpenTrades >= 2 ? 2 : 1;
       default:
-        return _maxOpenTrades >= 2 ? 2 : 1;
+        return 1;
     }
   }
 
   List<String> _recommendedAllowedVolatility() {
     switch (_managementProfile) {
       case 'beginner':
-        return ['Low'];
+        return ['Very Low', 'Low'];
+      case 'small_account':
+        return ['Very Low', 'Low', 'Medium'];
       default:
         return ['Low', 'Medium'];
     }
@@ -3065,7 +3079,7 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                         _applyManagementProfile('advanced'),
                                   ),
                                   ChoiceChip(
-                                    label: const Text('Fast Growth'),
+                                    label: const Text('Quick Profit'),
                                     selected:
                                         _managementProfile == 'fast_growth',
                                     onSelected: (_) =>
@@ -3097,10 +3111,10 @@ class _BotConfigurationScreenState extends State<BotConfigurationScreen> {
                                     : _managementProfile == 'balanced'
                                         ? 'Moderate automation: controlled stacking with medium-volatility access.'
                                         : _managementProfile == 'fast_growth'
-                                            ? 'Fast Growth: For small accounts. Aggressive but capped risk, more trades, tighter SL/TP, and quick compounding.'
+                                          ? 'Quick Profit: Faster entries with stricter signal quality, tighter drawdown limits, and stronger profit lock behavior.'
                                             : _managementProfile ==
                                                     'small_account'
-                                                ? r'Small Account: Optimized for $10-$1000. Micro lots, swing entries, all volatility levels allowed.'
+                                            ? r'Small Account: Optimized for $10-$1000. Micro lots, swing entries, and controlled volatility.'
                                                 : 'Keeps intelligent protections on while allowing broader execution settings.',
                                 style: TextStyle(
                                     fontSize: 11, color: Colors.grey[400]),

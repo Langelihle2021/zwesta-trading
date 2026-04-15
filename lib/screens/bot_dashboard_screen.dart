@@ -150,7 +150,7 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
       case 'advanced':
         return 'Advanced';
       case 'fast_growth':
-        return 'Fast Growth';
+        return 'Quick Profit';
       case 'small_account':
         return 'Small Account';
       default:
