@@ -3290,7 +3290,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ListTile(
             leading: const Icon(Icons.admin_panel_settings, color: Color(0xFFE74C3C)),
             title: const Text('Admin: Verify Withdrawals', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Verify Exness withdrawals & split commission', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            subtitle: const Text('Verify broker withdrawals & split commission', style: TextStyle(color: Colors.white38, fontSize: 11)),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminWithdrawalVerificationScreen()));

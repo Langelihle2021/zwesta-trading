@@ -144,7 +144,7 @@ class _ConsolidatedReportsScreenState extends State<ConsolidatedReportsScreen> {
             'success': true,
             'reports': {
               accountKey: {
-                'broker': account['broker'] ?? 'Exness',
+                'broker': account['broker'] ?? 'Unknown',
                 'accountNumber': account['accountNumber'] ?? 'N/A',
                 'currency': account['currency'] ?? 'USD',
                 'totalTrades': trades.length,

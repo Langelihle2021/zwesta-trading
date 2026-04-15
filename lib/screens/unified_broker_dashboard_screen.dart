@@ -209,12 +209,14 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
 
   Widget _buildBrokerCards() {
     final brokerColors = {
+      'Exness': const Color(0xFF42A5F5),
       'IG': const Color(0xFFE53935),
       'OANDA': const Color(0xFF4CAF50),
       'FXCM': const Color(0xFF7C4DFF),
       'Binance': const Color(0xFFF0B90B),
     };
     final brokerIcons = {
+      'Exness': Icons.account_balance,
       'IG': Icons.show_chart,
       'OANDA': Icons.trending_up,
       'FXCM': Icons.bar_chart,

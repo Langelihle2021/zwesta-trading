@@ -80,7 +80,7 @@ class BrokerCredentialsService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  static const List<String> _brokerPriority = ['exness', 'binance'];
+  static const List<String> _brokerPriority = ['exness', 'binance', 'oanda'];
 
   List<BrokerCredential> _rankCredentials(Iterable<BrokerCredential> credentials) {
     final ranked = credentials.toList();

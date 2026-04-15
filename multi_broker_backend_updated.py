@@ -47,6 +47,7 @@ from metaapi_client import MetaApiClient, MetaApiTradingBridge, get_metaapi_clie
 from rest_price_feed import RestPriceFeed, get_price_feed
 from trade_router import TradeRouter, init_trade_router, get_trade_router, ExecutionMode
 from mt5_socket_bridge import SocketBridgeManager, MT5SocketBridge, init_socket_bridges
+from runtime_infrastructure import build_sqlite_connection, get_database_path, get_runtime_infrastructure_summary, using_postgres
 
 # Load environment variables from .env file
 try:
@@ -79,6 +80,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+logger.info(f"Runtime infrastructure: {get_runtime_infrastructure_summary()}")
 
 MT5_AUTO_LAUNCH = os.getenv('MT5_AUTO_LAUNCH', '0' if os.getenv('DEPLOYMENT_MODE', 'LOCAL').upper() == 'VPS' else '1').strip().lower() in ['1', 'true', 'yes', 'on']
 MT5_AUTO_RESTART = os.getenv('MT5_AUTO_RESTART', '0').strip().lower() in ['1', 'true', 'yes', 'on']
@@ -1247,7 +1249,7 @@ class BrokerType(Enum):
 
 # ==================== DATABASE SETUP ====================
 # ==================== DATABASE SETUP ====================
-DATABASE_PATH = r'C:\backend\zwesta_trading.db'
+DATABASE_PATH = get_database_path()
 
 # ==================== WORKER POOL STATUS ENDPOINT ====================
 @app.route('/api/admin/workers', methods=['GET'])
@@ -1313,6 +1315,7 @@ def get_rest_trading_status():
 
     return jsonify({
         'success': True,
+        'runtime_infrastructure': get_runtime_infrastructure_summary(),
         'socket_bridges': socket_status,
         'metaapi': metaapi_status,
         'price_feed': price_feed_status,
@@ -1322,6 +1325,20 @@ def get_rest_trading_status():
             'estimated_capacity': capacity,
             'ram_note': 'Socket bridges use ~50MB/terminal vs MetaAPI ~2MB but free & self-hosted',
         },
+    })
+
+
+@app.route('/api/admin/runtime-infrastructure', methods=['GET'])
+def get_runtime_infrastructure_status():
+    """Get database and cache runtime configuration for local/VPS verification."""
+    api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if api_key != API_KEY:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    return jsonify({
+        'success': True,
+        'runtime_infrastructure': get_runtime_infrastructure_summary(),
+        'database_path': DATABASE_PATH,
     })
 
 
@@ -1454,12 +1471,11 @@ def delete_all_user_bots():
 
 def init_database():
     """Initialize SQLite database with referral and commission tables"""
-    conn = sqlite3.connect(DATABASE_PATH, timeout=30.0, check_same_thread=False)
+    if using_postgres():
+        logger.warning('PostgreSQL mode is configured, but init_database still initializes SQLite tables only. Run the migration plan before switching production writes.')
+
+    conn = build_sqlite_connection(timeout=30.0)
     cursor = conn.cursor()
-    
-    # Enable WAL mode for better concurrency
-    cursor.execute('PRAGMA journal_mode=WAL')
-    cursor.execute('PRAGMA synchronous=NORMAL')
     cursor.execute('PRAGMA cache_size=-64000')  # 64MB cache
     
     # Users table
@@ -2334,13 +2350,8 @@ def init_database():
 
 def get_db_connection():
     """Get database connection with WAL mode for concurrent writes"""
-    conn = sqlite3.connect(DATABASE_PATH, timeout=3.0, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    # Enable WAL mode for concurrent access — set busy_timeout BEFORE journal_mode
-    conn.execute('PRAGMA busy_timeout = 1500')
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA synchronous=NORMAL')
-    return conn
+    # Slightly longer busy timeout prevents transient signup failures during heavy bot writes.
+    return build_sqlite_connection(timeout=8.0, row_factory=True, busy_timeout_ms=8000)
 
 # Initialize database on startup
 if __name__ == "__main__":
@@ -2351,7 +2362,7 @@ if __name__ == "__main__":
 def init_backup_system(app):
     """Initialize automatic backup and recovery system"""
     
-    db_path = r'C:\backend\zwesta_trading.db'
+    db_path = DATABASE_PATH
     backup_mgr = BackupManager(db_path=db_path)
     recovery_mgr = RecoveryManager(db_path=db_path, backup_manager=backup_mgr)
     
@@ -4831,6 +4842,7 @@ def canonicalize_broker_name(broker_name: str) -> str:
 
     broker_map = {
         'binance': 'Binance',
+        'oanda': 'OANDA',
         'exness': 'Exness',
     }
     return broker_map.get(normalized, broker_name)
@@ -8139,7 +8151,7 @@ def get_trades_alias():
         trades_list = []
         
         # Query database for user's bots and their associated trades
-        conn = sqlite3.connect(r'C:\backend\zwesta_trading.db')
+        conn = build_sqlite_connection(wal=False)
         cursor = conn.cursor()
         
         try:
@@ -11092,7 +11104,7 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
                 logger.info(f"🧠 Bot {bot_id}: ✅ Closed {symbol} (ticket {ticket}) for reallocation")
                 # Update trade in database
                 try:
-                    realloc_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                    realloc_conn = build_sqlite_connection(timeout=30.0)
                     realloc_cursor = realloc_conn.cursor()
                     realloc_cursor.execute('''
                         UPDATE trades SET profit = ?, status = 'closed', time_close = ?,
@@ -11569,8 +11581,7 @@ def _merge_bot_trade_history_from_db(bot_state: Dict[str, Any], bot_id: str) -> 
 
     tconn = None
     try:
-        tconn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
-        tconn.row_factory = sqlite3.Row
+        tconn = build_sqlite_connection(timeout=10.0, row_factory=True)
         tcursor = tconn.cursor()
         tcursor.execute(
             '''
@@ -11708,7 +11719,7 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     # ✅ Always resync totalTrades from DB count — covers both: tradeHistory loaded now
     # AND the case where tradeHistory was already in persisted runtime_state but totalTrades=0
     try:
-        tsync_conn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
+        tsync_conn = build_sqlite_connection(timeout=10.0)
         tsync_cur = tsync_conn.cursor()
         tsync_cur.execute('SELECT COUNT(*) FROM trades WHERE bot_id = ?', (row['bot_id'],))
         db_trade_count = tsync_cur.fetchone()[0] or 0
@@ -11727,8 +11738,7 @@ def _restore_bot_runtime_state(row: sqlite3.Row) -> Dict[str, Any]:
     if not bot_state.get('open_positions'):
         bot_state['open_positions'] = {}
         try:
-            tconn2 = sqlite3.connect(DATABASE_PATH, timeout=10.0)
-            tconn2.row_factory = sqlite3.Row
+            tconn2 = build_sqlite_connection(timeout=10.0, row_factory=True)
             tcursor2 = tconn2.cursor()
             tcursor2.execute(
                 "SELECT ticket, symbol, order_type, volume, price, time_open FROM trades WHERE bot_id = ? AND status = 'open'",
@@ -18716,7 +18726,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                     
                                     # Store open trade in database
                                     try:
-                                        trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                                        trade_conn = build_sqlite_connection(timeout=30.0)
                                         trade_cursor = trade_conn.cursor()
                                         trade_id = f"trade_{int(datetime.now().timestamp()*1000)}_{bot_id[-8:]}"
                                         trade_cursor.execute('''
@@ -18871,7 +18881,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 
                                 # Update trade in database from open to closed
                                 try:
-                                    trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                                    trade_conn = build_sqlite_connection(timeout=30.0)
                                     trade_cursor = trade_conn.cursor()
                                     trade_cursor.execute('''
                                         UPDATE trades SET profit = ?, status = 'closed', time_close = ?, trade_data = ?, updated_at = ?
@@ -19057,7 +19067,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 # Also insert into DB if not already there
                                 if existing_th is None:
                                     try:
-                                        disc_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                                        disc_conn = build_sqlite_connection(timeout=30.0)
                                         disc_cursor = disc_conn.cursor()
                                         trade_id = f"disc_{int(datetime.now().timestamp()*1000)}_{dp_ticket}"
                                         disc_cursor.execute('''
@@ -19161,7 +19171,7 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                                     break
 
                                             try:
-                                                trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+                                                trade_conn = build_sqlite_connection(timeout=30.0)
                                                 trade_cursor = trade_conn.cursor()
                                                 trade_cursor.execute('''
                                                     UPDATE trades
@@ -19235,6 +19245,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
     Supports:
     - Exness (MT5)
     - Binance (REST API)
+    - OANDA (REST API)
     
     Returns: (broker_type, connection_object) or (None, error_message)
     """
@@ -19287,6 +19298,29 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 logger.info(f"✅ Bot {bot_id}: Connected to Binance ({account_number or server})")
                 return 'Binance', binance_conn
             error_msg = 'Failed to connect to Binance'
+            logger.error(error_msg)
+            return None, error_msg
+
+        elif broker_name == 'OANDA':
+            logger.info(f"[Broker Switch] Bot {bot_id}: Using OANDA REST API")
+            api_key = cred['api_key']
+            account_number = cred['account_number']
+            is_live = bool(cred['is_live'])
+
+            if not api_key or not account_number:
+                error_msg = 'OANDA: Missing API key or account number'
+                logger.error(error_msg)
+                return None, error_msg
+
+            oanda_conn = OANDAConnection(credentials={
+                'api_key': api_key,
+                'account_number': account_number,
+                'is_live': is_live,
+            })
+            if oanda_conn.connect():
+                logger.info(f"✅ Bot {bot_id}: Connected to OANDA ({account_number})")
+                return 'OANDA', oanda_conn
+            error_msg = 'Failed to connect to OANDA'
             logger.error(error_msg)
             return None, error_msg
         
@@ -19343,7 +19377,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 return None, error_msg
         
         else:
-            error_msg = f"Unknown broker type: {broker_name}. Supported: Exness, Binance"
+            error_msg = f"Unknown broker type: {broker_name}. Supported: Exness, Binance, OANDA"
             logger.error(error_msg)
             return None, error_msg
     
@@ -21230,7 +21264,7 @@ def close_bot_position(bot_id, ticket):
             bot_config['dailyProfit'] = daily[today]
 
         try:
-            trade_conn = sqlite3.connect(r'C:\backend\zwesta_trading.db', timeout=30)
+            trade_conn = build_sqlite_connection(timeout=30.0)
             trade_cursor = trade_conn.cursor()
             trade_cursor.execute('''
                 UPDATE trades
@@ -23677,33 +23711,71 @@ def register_user():
         # Hash the password
         password_hash = generate_password_hash(password)
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Check if user already exists
-        cursor.execute('SELECT user_id FROM users WHERE email = ?', (email,))
-        if cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'error': 'User already exists'}), 409
-        
-        user_id = str(uuid.uuid4())
-        referral_code = hashlib.sha256(f"{email}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
-        referrer_id = _resolve_signup_referrer_id(cursor, referrer_code)
-        
-        cursor.execute('''
-            INSERT INTO users (user_id, email, name, password_hash, referrer_id, referral_code, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, email, name, password_hash, referrer_id, referral_code, datetime.now().isoformat()))
-        
-        if referrer_id:
-            referral_id = str(uuid.uuid4())
-            cursor.execute('''
-                INSERT INTO referrals (referral_id, referrer_id, referred_user_id, created_at)
-                VALUES (?, ?, ?, ?)
-            ''', (referral_id, referrer_id, user_id, datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
+        max_attempts = 4
+        for attempt in range(1, max_attempts + 1):
+            conn = None
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+
+                # Check if user already exists
+                cursor.execute('SELECT user_id FROM users WHERE email = ?', (email,))
+                if cursor.fetchone():
+                    conn.close()
+                    return jsonify({'success': False, 'error': 'User already exists'}), 409
+
+                user_id = str(uuid.uuid4())
+
+                # Generate referral code and ensure uniqueness.
+                referral_code = None
+                for _ in range(8):
+                    candidate = hashlib.sha256(
+                        f"{email}{uuid.uuid4().hex}{time.time()}".encode()
+                    ).hexdigest()[:12].upper()
+                    cursor.execute('SELECT 1 FROM users WHERE referral_code = ? LIMIT 1', (candidate,))
+                    if not cursor.fetchone():
+                        referral_code = candidate
+                        break
+
+                if not referral_code:
+                    conn.close()
+                    logger.error(f"Failed to generate unique referral code for {email}")
+                    return jsonify({'success': False, 'error': 'Failed to generate referral code. Please retry.'}), 500
+
+                referrer_id = _resolve_signup_referrer_id(cursor, referrer_code)
+
+                cursor.execute('''
+                    INSERT INTO users (user_id, email, name, password_hash, referrer_id, referral_code, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (user_id, email, name, password_hash, referrer_id, referral_code, datetime.now().isoformat()))
+
+                if referrer_id:
+                    referral_id = str(uuid.uuid4())
+                    cursor.execute('''
+                        INSERT INTO referrals (referral_id, referrer_id, referred_user_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                    ''', (referral_id, referrer_id, user_id, datetime.now().isoformat()))
+
+                conn.commit()
+                conn.close()
+                break
+            except sqlite3.OperationalError as oe:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                if 'locked' in str(oe).lower() and attempt < max_attempts:
+                    time.sleep(0.35 * attempt)
+                    continue
+                raise
+            except Exception:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                raise
         
         logger.info(f"✅ New user registered: {email} (ID: {user_id})")
         
@@ -23716,6 +23788,12 @@ def register_user():
             'message': 'Registration successful - use email to login'
         }), 201
     
+    except sqlite3.OperationalError as e:
+        if 'locked' in str(e).lower():
+            logger.error(f"Register user lock timeout for {email}: {e}")
+            return jsonify({'success': False, 'error': 'Registration temporarily busy. Please retry in 10 seconds.'}), 503
+        logger.error(f"Error in register_user: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
     except Exception as e:
         logger.error(f"Error in register_user: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
