@@ -27,20 +27,18 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 
+from runtime_infrastructure import build_sqlite_connection, get_database_path, get_runtime_infrastructure_summary
+
 logger = logging.getLogger(__name__)
 
-DATABASE_PATH = os.environ.get('DATABASE_PATH', r'C:\backend\zwesta_trading.db')
+DATABASE_PATH = get_database_path()
 WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mt5_worker.py')
 HEARTBEAT_TIMEOUT = 30  # seconds before a worker is considered dead
 MONITOR_INTERVAL = 15   # seconds between health checks
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DATABASE_PATH, timeout=30.0, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA synchronous=NORMAL')
-    return conn
+    return build_sqlite_connection(timeout=30.0, row_factory=True)
 
 
 class WorkerPoolManager:
@@ -59,6 +57,7 @@ class WorkerPoolManager:
                         f"(max {max_bots_per_worker} bots/worker)")
         else:
             logger.info("WorkerPoolManager: DISABLED (WORKER_COUNT=0, using single-process mode)")
+        logger.info(f"WorkerPoolManager runtime: {get_runtime_infrastructure_summary()}")
 
     @property
     def enabled(self) -> bool:

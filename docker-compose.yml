@@ -32,6 +32,28 @@ services:
         max-size: "10m"
         max-file: "3"
 
+    # PostgreSQL Database (required for 5000+ user scaling)
+    postgres:
+      image: postgres:15-alpine
+      container_name: zwesta-postgres
+      environment:
+        POSTGRES_DB: zwesta_trading
+        POSTGRES_USER: zwesta
+        POSTGRES_PASSWORD: zwesta_secure_2026
+        PGDATA: /var/lib/postgresql/data/pgdata
+      volumes:
+        - postgres-data:/var/lib/postgresql/data
+      ports:
+        - "5432:5432"
+      restart: always
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U zwesta -d zwesta_trading"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+      networks:
+        - zwesta-network
+
   # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
@@ -69,6 +91,7 @@ services:
 
 volumes:
   redis-data:
+  postgres-data:
 
 networks:
   zwesta-network:
