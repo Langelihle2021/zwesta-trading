@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/auth_service.dart';
 import '../utils/environment_config.dart';
@@ -18,6 +19,105 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
   late Future<Map<String, dynamic>> _tradeDataFuture;
   late Future<Map<String, dynamic>> _tradeSummaryFuture;
   int _selectedTabIndex = 0;
+
+  Future<Map<String, String>> _loadBrokerContext() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'broker': (prefs.getString('broker') ?? 'Exness').trim(),
+      'accountNumber': (prefs.getString('account_number') ?? prefs.getString('mt5_account') ?? '').trim(),
+    };
+  }
+
+  Map<String, dynamic> _buildOandaSummary(List<dynamic> rawTransactions) {
+    final summary = {
+      'totalTrades': 0,
+      'winningTrades': 0,
+      'losingTrades': 0,
+      'totalProfit': 0.0,
+      'totalLoss': 0.0,
+      'netProfit': 0.0,
+      'totalCommission': 0.0,
+      'winRate': 0.0,
+      'avgProfit': 0.0,
+      'avgLoss': 0.0,
+      'largestWin': 0.0,
+      'largestLoss': 0.0,
+    };
+
+    final winningPnl = <double>[];
+    final losingPnl = <double>[];
+
+    for (final item in rawTransactions) {
+      if (item is! Map<String, dynamic>) continue;
+      final type = (item['type'] ?? '').toString().toUpperCase();
+      if (type != 'ORDER_FILL' && type != 'TRADE_CLOSE' && type != 'DAILY_FINANCING') {
+        continue;
+      }
+
+      final profit = ((item['pl'] ?? item['financing'] ?? 0) as num?)?.toDouble() ?? 0.0;
+      final commission = ((item['commission'] ?? 0) as num?)?.toDouble() ?? 0.0;
+
+      summary['totalTrades'] = (summary['totalTrades'] as int) + 1;
+      summary['totalCommission'] = (summary['totalCommission'] as double) + commission;
+
+      if (profit > 0) {
+        summary['winningTrades'] = (summary['winningTrades'] as int) + 1;
+        summary['totalProfit'] = (summary['totalProfit'] as double) + profit;
+        winningPnl.add(profit);
+      } else if (profit < 0) {
+        summary['losingTrades'] = (summary['losingTrades'] as int) + 1;
+        summary['totalLoss'] = (summary['totalLoss'] as double) + profit.abs();
+        losingPnl.add(profit.abs());
+      }
+    }
+
+    final totalTrades = summary['totalTrades'] as int;
+    final winningTrades = summary['winningTrades'] as int;
+    final losingTrades = summary['losingTrades'] as int;
+    final totalProfit = summary['totalProfit'] as double;
+    final totalLoss = summary['totalLoss'] as double;
+
+    summary['netProfit'] = totalProfit - totalLoss;
+    summary['winRate'] = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0.0;
+    summary['avgProfit'] = winningTrades > 0 ? totalProfit / winningTrades : 0.0;
+    summary['avgLoss'] = losingTrades > 0 ? totalLoss / losingTrades : 0.0;
+    summary['largestWin'] = winningPnl.isNotEmpty ? winningPnl.reduce((a, b) => a > b ? a : b) : 0.0;
+    summary['largestLoss'] = losingPnl.isNotEmpty ? losingPnl.reduce((a, b) => a > b ? a : b) : 0.0;
+
+    return summary;
+  }
+
+  List<Map<String, dynamic>> _normalizeOandaTrades(List<dynamic> rawTransactions) {
+    final trades = <Map<String, dynamic>>[];
+
+    for (final item in rawTransactions) {
+      if (item is! Map<String, dynamic>) continue;
+      final type = (item['type'] ?? '').toString().toUpperCase();
+      if (type != 'ORDER_FILL' && type != 'TRADE_CLOSE' && type != 'DAILY_FINANCING') {
+        continue;
+      }
+
+      final units = double.tryParse((item['units'] ?? item['tradeOpened']?['units'] ?? '0').toString()) ?? 0.0;
+      final price = double.tryParse((item['price'] ?? item['fullPrice']?['closeoutBid'] ?? '0').toString()) ?? 0.0;
+      final profit = ((item['pl'] ?? item['financing'] ?? 0) as num?)?.toDouble() ?? 0.0;
+      final commission = ((item['commission'] ?? 0) as num?)?.toDouble() ?? 0.0;
+      final instrument = (item['instrument'] ?? 'OANDA').toString().replaceAll('_', '');
+
+      trades.add({
+        'symbol': instrument,
+        'side': units >= 0 ? 'BUY' : 'SELL',
+        'volume': units.abs(),
+        'entryPrice': price,
+        'exitPrice': price,
+        'commission': commission,
+        'profitLoss': profit,
+        'pnlPercentage': price > 0 ? (profit / price) * 100 : 0.0,
+        'closedAt': item['time'] ?? item['date'] ?? 'N/A',
+      });
+    }
+
+    return trades;
+  }
 
   @override
   void initState() {
@@ -36,17 +136,40 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       final userId = authService.currentUser?.id ?? 'unknown';
+      final brokerContext = await _loadBrokerContext();
+      final broker = brokerContext['broker']!.toLowerCase();
+      final accountNumber = brokerContext['accountNumber']!;
 
-      final response = await http
-          .get(
-            Uri.parse(
-              '${EnvironmentConfig.apiUrl}/api/broker/exness/trades?user_id=$userId&limit=100',
-            ),
-            headers: {
-              'Authorization': 'Bearer ${authService.token}',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
+      late http.Response response;
+
+      if (broker == 'oanda') {
+        final accountParam = accountNumber.isNotEmpty ? '&account_id=$accountNumber' : '';
+        response = await http
+            .get(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/oanda/transactions?pageSize=100$accountParam'),
+              headers: {
+                'Authorization': 'Bearer ${authService.token}',
+              },
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          return {
+            'success': true,
+            'trades': _normalizeOandaTrades((data['transactions'] as List<dynamic>?) ?? []),
+          };
+        }
+      } else {
+        response = await http
+            .get(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/trades?user_id=$userId&limit=100'),
+              headers: {
+                'Authorization': 'Bearer ${authService.token}',
+              },
+            )
+            .timeout(const Duration(seconds: 10));
+      }
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -62,17 +185,40 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       final userId = authService.currentUser?.id ?? 'unknown';
+      final brokerContext = await _loadBrokerContext();
+      final broker = brokerContext['broker']!.toLowerCase();
+      final accountNumber = brokerContext['accountNumber']!;
 
-      final response = await http
-          .get(
-            Uri.parse(
-              '${EnvironmentConfig.apiUrl}/api/broker/exness/trade-summary?user_id=$userId',
-            ),
-            headers: {
-              'Authorization': 'Bearer ${authService.token}',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
+      late http.Response response;
+
+      if (broker == 'oanda') {
+        final accountParam = accountNumber.isNotEmpty ? '&account_id=$accountNumber' : '';
+        response = await http
+            .get(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/oanda/transactions?pageSize=100$accountParam'),
+              headers: {
+                'Authorization': 'Bearer ${authService.token}',
+              },
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          return {
+            'success': true,
+            'summary': _buildOandaSummary((data['transactions'] as List<dynamic>?) ?? []),
+          };
+        }
+      } else {
+        response = await http
+            .get(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/trade-summary?user_id=$userId'),
+              headers: {
+                'Authorization': 'Bearer ${authService.token}',
+              },
+            )
+            .timeout(const Duration(seconds: 10));
+      }
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -88,17 +234,55 @@ class _TradeHistoryScreenState extends State<TradeHistoryScreen> {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       final userId = authService.currentUser?.id ?? 'unknown';
+      final brokerContext = await _loadBrokerContext();
+      final broker = brokerContext['broker']!.toLowerCase();
+      final accountNumber = brokerContext['accountNumber']!;
 
-      final response = await http
-          .get(
-            Uri.parse(
-              '${EnvironmentConfig.apiUrl}/api/broker/exness/withdrawal/history/$userId',
-            ),
-            headers: {
-              'Authorization': 'Bearer ${authService.token}',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
+      late http.Response response;
+
+      if (broker == 'oanda') {
+        final accountParam = accountNumber.isNotEmpty ? '&account_id=$accountNumber' : '';
+        response = await http
+            .get(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/oanda/withdrawal-notifications?user_id=$userId$accountParam'),
+              headers: {
+                'Authorization': 'Bearer ${authService.token}',
+              },
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final notifications = (data['notifications'] as List<dynamic>?) ?? [];
+          return {
+            'success': true,
+            'withdrawals': notifications.map((item) {
+              final row = item as Map<String, dynamic>;
+              final amount = ((row['realized_profit'] ?? 0) as num?)?.toDouble() ?? 0.0;
+              return {
+                'total_amount': amount,
+                'profit_from_trades': amount,
+                'commission_earned': 0.0,
+                'fee': 0.0,
+                'net_amount': amount,
+                'withdrawal_method': 'OANDA Portal',
+                'status': row['status'] ?? 'pending',
+                'created_at': row['created_at'] ?? 'N/A',
+                'completed_at': row['completed_at'],
+              };
+            }).toList(),
+          };
+        }
+      } else {
+        response = await http
+            .get(
+              Uri.parse('${EnvironmentConfig.apiUrl}/api/broker/exness/withdrawal/history/$userId'),
+              headers: {
+                'Authorization': 'Bearer ${authService.token}',
+              },
+            )
+            .timeout(const Duration(seconds: 10));
+      }
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);

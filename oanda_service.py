@@ -416,7 +416,29 @@ def api_oanda_transactions():
         )
         if resp.status_code == 200:
             data = resp.json()
-            return jsonify({"success": True, "transactions": data.get('pages', []), "count": data.get('count', 0)})
+            transactions = data.get('transactions', [])
+
+            # Some OANDA transaction responses return page URLs instead of embedded transactions.
+            # Resolve those pages so the frontend receives actual transaction records.
+            if not transactions:
+                page_urls = data.get('pages', [])
+                resolved_transactions = []
+                for page_url in page_urls:
+                    try:
+                        page_resp = requests.get(page_url, headers=headers, timeout=15)
+                        if page_resp.status_code == 200:
+                            page_data = page_resp.json()
+                            resolved_transactions.extend(page_data.get('transactions', []))
+                    except Exception as page_error:
+                        logger.warning(f"OANDA transactions page fetch failed: {page_error}")
+                transactions = resolved_transactions
+
+            return jsonify({
+                "success": True,
+                "transactions": transactions,
+                "count": len(transactions),
+                "lastTransactionID": data.get('lastTransactionID'),
+            })
         return jsonify({"success": False, "error": resp.text}), resp.status_code
     except Exception as e:
         logger.error(f"OANDA transactions error: {e}")
