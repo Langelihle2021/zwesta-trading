@@ -479,8 +479,15 @@ def find_mt5_terminal_path(broker_name: str, configured_path: str = None, is_liv
 
 
 def normalize_mt5_server_name(broker_name: str, is_live: bool, server: str = None) -> str:
-    # Only Exness supported
-    return 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
+    normalized = canonicalize_broker_name(broker_name)
+    # Allow explicit server override for MT5 brokers when provided by user.
+    provided_server = (server or '').strip()
+    if provided_server:
+        return provided_server
+
+    if normalized == 'Exness':
+        return 'Exness-MT5Real27' if is_live else 'Exness-MT5Trial9'
+    return 'MetaTrader 5'
 
 
 def coerce_bool(value, default: bool = False) -> bool:
@@ -4837,6 +4844,8 @@ def canonicalize_broker_name(broker_name: str) -> str:
     normalized = (broker_name or '').strip().lower()
     if 'exness' in normalized:
         return 'Exness'
+    if normalized in {'fxcm', 'fxm'}:
+        return 'FXCM'
     if normalized in {'xm', 'xm global'}:
         return 'XM Global' if normalized == 'xm global' else 'XM'
 
@@ -4844,6 +4853,8 @@ def canonicalize_broker_name(broker_name: str) -> str:
         'binance': 'Binance',
         'oanda': 'OANDA',
         'exness': 'Exness',
+        'fxcm': 'FXCM',
+        'fxm': 'FXCM',
     }
     return broker_map.get(normalized, broker_name)
 
@@ -13381,15 +13392,6 @@ REGISTERED_BROKERS = [
         'description': 'Social forex trading platform',
     },
     {
-        'id': 'ic-markets',
-        'name': 'IC Markets',
-        'display_name': 'IC Markets',
-        'logo': '📈',
-        'account_types': ['DEMO', 'LIVE'],
-        'is_active': True,
-        'description': 'Australian regulated MT5 broker',
-    },
-    {
         'id': 'ig',
         'name': 'IG',
         'display_name': 'IG Group',
@@ -19266,6 +19268,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
     Supports:
     - Exness (MT5)
     - Binance (REST API)
+    - FXCM (REST API)
     - OANDA (REST API)
     
     Returns: (broker_type, connection_object) or (None, error_message)
@@ -19344,8 +19347,31 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
             error_msg = 'Failed to connect to OANDA'
             logger.error(error_msg)
             return None, error_msg
+
+        elif broker_name == 'FXCM':
+            logger.info(f"[Broker Switch] Bot {bot_id}: Using FXCM REST API")
+            api_key = cred['api_key']
+            account_number = cred['account_number']
+            is_live = bool(cred['is_live'])
+
+            if not api_key:
+                error_msg = 'FXCM: Missing API token'
+                logger.error(error_msg)
+                return None, error_msg
+
+            fxcm_conn = FXCMConnection(credentials={
+                'api_key': api_key,
+                'account_number': account_number,
+                'is_live': is_live,
+            })
+            if fxcm_conn.connect():
+                logger.info(f"✅ Bot {bot_id}: Connected to FXCM ({account_number or 'FXCM'})")
+                return 'FXCM', fxcm_conn
+            error_msg = 'Failed to connect to FXCM'
+            logger.error(error_msg)
+            return None, error_msg
         
-        # ✅ METATRADER 5 - Exness only
+        # ✅ METATRADER 5 - Exness
         elif broker_name == 'Exness':
             logger.info(f"[Broker Switch] Bot {bot_id}: Using MetaTrader 5 SDK")
             account_number = cred['account_number']
@@ -19398,7 +19424,7 @@ def get_broker_connection(credential_id: str, user_id: str, bot_id: str = None):
                 return None, error_msg
         
         else:
-            error_msg = f"Unknown broker type: {broker_name}. Supported: Exness, Binance, OANDA"
+            error_msg = f"Unknown broker type: {broker_name}. Supported: Exness, Binance, FXCM, OANDA"
             logger.error(error_msg)
             return None, error_msg
     

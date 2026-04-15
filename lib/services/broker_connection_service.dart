@@ -89,6 +89,23 @@ class BrokerConnectionService {
           'account_number': accountNumber,
           'is_live': isLive,
         };
+      } else if (normalizedBroker == 'oanda') {
+        payload = {
+          'broker': 'OANDA',
+          'api_key': apiKey,
+          'account_number': accountNumber,
+          'server': server,
+          'is_live': isLive,
+        };
+      } else if (normalizedBroker == 'fxcm' || normalizedBroker == 'fxm') {
+        payload = {
+          'broker': 'FXCM',
+          'api_key': apiKey,
+          'token': apiKey,
+          'account_number': accountNumber,
+          'server': server,
+          'is_live': isLive,
+        };
       } else {
         payload = {
           'broker': broker,
