@@ -7913,7 +7913,8 @@ def list_commodities():
                 'precious_metals': [],
                 'energy': [],
                 'indices': [],
-                'stocks': []
+                'stocks': [],
+                'zar_pairs': [],
             }
             
             # Exness Standard account symbols (NO 'm' suffix — 'm' is for Standard Cent only)
@@ -7961,6 +7962,11 @@ def list_commodities():
                     {'symbol': 'WFC', 'name': '📈 Wells Fargo', 'type': 'Stock CFD', 'min_price': 45, 'max_price': 85},
                     {'symbol': 'ORCL', 'name': '📈 Oracle Corporation', 'type': 'Stock CFD', 'min_price': 100, 'max_price': 220},
                     {'symbol': 'TSM', 'name': '📈 TSMC', 'type': 'Stock CFD', 'min_price': 110, 'max_price': 240},
+                ],
+                'zar_pairs': [
+                    {'symbol': 'USDZAR', 'name': '💱 US Dollar vs South African Rand', 'min_price': 16, 'max_price': 22},
+                    {'symbol': 'GBPZAR', 'name': '💱 British Pound vs South African Rand', 'min_price': 20, 'max_price': 28},
+                    {'symbol': 'ZARJPY', 'name': '💱 South African Rand vs Japanese Yen', 'min_price': 7, 'max_price': 12},
                 ]
             }
             
@@ -7975,11 +7981,15 @@ def list_commodities():
                         live_data = _init_commodity_data(item_config.get('min_price', 1.0), symbol)
                     # Merge config + live data, but config symbol always wins
                     merged_item = {**item_config, **live_data, 'symbol': symbol}
-                    evaluated_signal = evaluate_real_trade_signal(symbol, merged_item)
+                    # Use pre-computed signal from background thread (avoid slow re-evaluation per request)
                     strength_value = _safe_float(
-                        merged_item.get('signal_strength', merged_item.get('signalStrength', evaluated_signal.get('strength', 0.0))),
+                        live_data.get('signal_strength', live_data.get('signalStrength', 0.0)),
                         0.0,
                     )
+                    # Only re-evaluate if no signal from background thread yet
+                    if strength_value == 0.0 and live_data.get('signal', '').startswith('🟡 INITIAL'):
+                        evaluated_signal = evaluate_real_trade_signal(symbol, merged_item)
+                        strength_value = _safe_float(evaluated_signal.get('strength', 0.0), 0.0)
                     strength_value = max(0.0, min(100.0, strength_value))
                     merged_item['signal_strength'] = strength_value
                     merged_item['signalStrength'] = strength_value
@@ -8844,6 +8854,8 @@ VALID_SYMBOLS = {
     # ===== STOCKS =====
     'AAPL', 'AMD', 'MSFT', 'NVDA', 'GOOGL', 'META',
     'TSLA', 'JPM', 'BAC', 'WFC', 'ORCL', 'TSM',
+    # ===== ZAR PAIRS (Exness) =====
+    'USDZAR', 'GBPZAR', 'ZARJPY',
 }
 
 BINANCE_VALID_SYMBOLS = {

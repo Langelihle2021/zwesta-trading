@@ -615,7 +615,7 @@ class _TradesScreenState extends State<TradesScreen> {
           .get(
             Uri.parse('${EnvironmentConfig.apiUrl}/api/commodities/list'),
           )
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
