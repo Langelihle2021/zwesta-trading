@@ -1750,10 +1750,16 @@ def init_database():
             payout_date TEXT,
             bot_id TEXT,
             trading_profit REAL,  -- For profit share commissions
+            broker_source TEXT DEFAULT 'MT5',  -- 'MT5', 'IG', 'FXCM', 'BINANCE', 'OANDA', etc.
             created_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+    # Ensure broker_source column exists for older DB instances
+    try:
+        cursor.execute('ALTER TABLE commission_ledger ADD COLUMN broker_source TEXT DEFAULT \'MT5\'')
+    except Exception:
+        pass  # Column already exists
     
     # Broker credentials table - stores user's broker connections
     cursor.execute('''
@@ -1980,12 +1986,31 @@ def init_database():
             ig_commission_enabled BOOLEAN DEFAULT 1,
             ig_developer_rate REAL DEFAULT 0.25,
             ig_recruiter_rate REAL DEFAULT 0.05,
+            fxcm_commission_enabled BOOLEAN DEFAULT 1,
+            fxcm_developer_rate REAL DEFAULT 0.25,
+            fxcm_recruiter_rate REAL DEFAULT 0.05,
+            binance_commission_enabled BOOLEAN DEFAULT 1,
+            binance_developer_rate REAL DEFAULT 0.25,
+            binance_recruiter_rate REAL DEFAULT 0.05,
             multi_tier_enabled BOOLEAN DEFAULT 0,
             tier2_rate REAL DEFAULT 0.02,
             updated_at TEXT,
             updated_by TEXT
         )
     ''')
+    # Ensure FXCM/Binance commission columns exist for older DB instances
+    for col, default in [
+        ('fxcm_commission_enabled', '1'),
+        ('fxcm_developer_rate', '0.25'),
+        ('fxcm_recruiter_rate', '0.05'),
+        ('binance_commission_enabled', '1'),
+        ('binance_developer_rate', '0.25'),
+        ('binance_recruiter_rate', '0.05'),
+    ]:
+        try:
+            cursor.execute(f'ALTER TABLE commission_config ADD COLUMN {col} REAL DEFAULT {default}')
+        except Exception:
+            pass  # Column already exists
 
     # Seed default config if empty
     cursor.execute('SELECT COUNT(*) FROM commission_config')
@@ -1994,8 +2019,10 @@ def init_database():
             INSERT INTO commission_config
             (config_id, developer_id, developer_direct_rate, developer_referral_rate,
              recruiter_rate, ig_commission_enabled, ig_developer_rate, ig_recruiter_rate,
+             fxcm_commission_enabled, fxcm_developer_rate, fxcm_recruiter_rate,
+             binance_commission_enabled, binance_developer_rate, binance_recruiter_rate,
              multi_tier_enabled, tier2_rate, updated_at)
-            VALUES ('default', 'developer', 0.25, 0.25, 0.05, 1, 0.25, 0.05, 0, 0.02, ?)
+            VALUES ('default', 'developer', 0.25, 0.25, 0.05, 1, 0.25, 0.05, 1, 0.25, 0.05, 1, 0.25, 0.05, 0, 0.02, ?)
         ''', (datetime.now().isoformat(),))
         logger.info("✅ Seeded default commission config")
 
@@ -7618,7 +7645,11 @@ def place_trade():
             if profit and profit > 0:
                 bot_id = data.get('bot_id', 'unknown')
                 user_id = data.get('user_id', 'unknown')
-                distribute_trade_commissions(bot_id, user_id, profit)
+                # Determine broker source from connection type
+                broker_source = str(getattr(getattr(connection, 'broker_type', None), 'value', 'MT5') or 'MT5').upper()
+                if broker_source not in ('MT5', 'IG', 'FXCM', 'BINANCE', 'OANDA'):
+                    broker_source = 'MT5'
+                distribute_trade_commissions(bot_id, user_id, profit, source=broker_source)
             return jsonify(result)
         else:
             # Demo trade - create mock trade record and store it
@@ -14807,6 +14838,10 @@ def _get_commission_config(cursor):
         cfg['ig_developer_rate'] = max(float(cfg.get('ig_developer_rate', direct_rate) or direct_rate), direct_rate)
         cfg['recruiter_rate'] = float(cfg.get('recruiter_rate', 0.05) or 0.05)
         cfg['ig_recruiter_rate'] = float(cfg.get('ig_recruiter_rate', 0.05) or 0.05)
+        cfg['fxcm_developer_rate'] = max(float(cfg.get('fxcm_developer_rate', direct_rate) or direct_rate), direct_rate)
+        cfg['fxcm_recruiter_rate'] = float(cfg.get('fxcm_recruiter_rate', 0.05) or 0.05)
+        cfg['binance_developer_rate'] = max(float(cfg.get('binance_developer_rate', direct_rate) or direct_rate), direct_rate)
+        cfg['binance_recruiter_rate'] = float(cfg.get('binance_recruiter_rate', 0.05) or 0.05)
         cfg['tier2_rate'] = float(cfg.get('tier2_rate', 0.02) or 0.02)
         return cfg
     # Fallback defaults
@@ -14818,6 +14853,12 @@ def _get_commission_config(cursor):
         'ig_commission_enabled': 1,
         'ig_developer_rate': 0.25,
         'ig_recruiter_rate': 0.05,
+        'fxcm_commission_enabled': 1,
+        'fxcm_developer_rate': 0.25,
+        'fxcm_recruiter_rate': 0.05,
+        'binance_commission_enabled': 1,
+        'binance_developer_rate': 0.25,
+        'binance_recruiter_rate': 0.05,
         'multi_tier_enabled': 0,
         'tier2_rate': 0.02,
     }
@@ -14867,10 +14908,40 @@ def _build_commission_distribution(cursor, user_id: str, profit_amount: float, s
             'source': source,
         }
 
+    if source == 'FXCM' and not cfg.get('fxcm_commission_enabled', 1):
+        return {
+            'cfg': cfg,
+            'developer_id': developer_id,
+            'entries': [],
+            'total_commission': 0.0,
+            'trader_keeps': float(profit_amount),
+            'referrer_id': referrer_id,
+            'source': source,
+        }
+
+    if source == 'BINANCE' and not cfg.get('binance_commission_enabled', 1):
+        return {
+            'cfg': cfg,
+            'developer_id': developer_id,
+            'entries': [],
+            'total_commission': 0.0,
+            'trader_keeps': float(profit_amount),
+            'referrer_id': referrer_id,
+            'source': source,
+        }
+
     if source == 'IG':
         direct_rate = float(cfg.get('developer_direct_rate', 0.25) or 0.25)
         developer_rate = float(cfg.get('ig_developer_rate', 0.25) or 0.25)
         recruiter_rate = float(cfg.get('ig_recruiter_rate', 0.05) or 0.05)
+    elif source == 'FXCM':
+        direct_rate = float(cfg.get('fxcm_developer_rate', 0.25) or 0.25)
+        developer_rate = float(cfg.get('fxcm_developer_rate', 0.25) or 0.25)
+        recruiter_rate = float(cfg.get('fxcm_recruiter_rate', 0.05) or 0.05)
+    elif source == 'BINANCE':
+        direct_rate = float(cfg.get('binance_developer_rate', 0.25) or 0.25)
+        developer_rate = float(cfg.get('binance_developer_rate', 0.25) or 0.25)
+        recruiter_rate = float(cfg.get('binance_recruiter_rate', 0.05) or 0.05)
     else:
         direct_rate = float(cfg.get('developer_direct_rate', 0.25) or 0.25)
         developer_rate = float(cfg.get('developer_referral_rate', direct_rate) or direct_rate)
@@ -14920,7 +14991,7 @@ def _build_commission_distribution(cursor, user_id: str, profit_amount: float, s
     }
 
 
-def _insert_commission_record(cursor, earner_id: str, client_id: str, bot_id: str, profit_amount: float, commission_rate: float, commission_amount: float, now: str, entry_type: str):
+def _insert_commission_record(cursor, earner_id: str, client_id: str, bot_id: str, profit_amount: float, commission_rate: float, commission_amount: float, now: str, entry_type: str, broker_source: str = 'MT5'):
     commission_id = str(uuid.uuid4())
     cursor.execute('''
         INSERT INTO commissions
@@ -14929,9 +15000,9 @@ def _insert_commission_record(cursor, earner_id: str, client_id: str, bot_id: st
     ''', (commission_id, earner_id, client_id, bot_id, profit_amount, commission_rate, commission_amount, now))
     cursor.execute('''
         INSERT INTO commission_ledger
-        (entry_id, commission_id, user_id, source_user_id, type, amount, payout_status, bot_id, trading_profit, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-    ''', (str(uuid.uuid4()), commission_id, earner_id, client_id, entry_type, commission_amount, bot_id, profit_amount, now))
+        (entry_id, commission_id, user_id, source_user_id, type, amount, payout_status, bot_id, trading_profit, broker_source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+    ''', (str(uuid.uuid4()), commission_id, earner_id, client_id, entry_type, commission_amount, bot_id, profit_amount, broker_source, now))
     cursor.execute('''
         UPDATE users SET total_commission = COALESCE(total_commission, 0) + ? WHERE user_id = ?
     ''', (commission_amount, earner_id))
@@ -14970,6 +15041,7 @@ def _record_commission_distribution(cursor, user_id: str, bot_id: str, profit_am
     now = datetime.now().isoformat()
     recorded_entries: List[Dict[str, Any]] = []
     developer_id = distribution.get('developer_id')
+    broker_source = distribution.get('source', 'MT5')
 
     for entry in distribution.get('entries', []):
         recipient_id = entry['recipient_id']
@@ -14987,6 +15059,7 @@ def _record_commission_distribution(cursor, user_id: str, bot_id: str, profit_am
             amount,
             now,
             entry['entry_type'],
+            broker_source,
         )
 
         auto_settled = False
@@ -19419,7 +19492,11 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 # Commission distribution on real profit
                                 if real_profit > 0:
                                     try:
-                                        distribute_trade_commissions(bot_id, user_id, real_profit)
+                                        # Determine broker source from bot connection type
+                                        _broker_src = str(bot_config.get('brokerType') or bot_config.get('broker_type') or 'MT5').upper()
+                                        if _broker_src not in ('MT5', 'IG', 'FXCM', 'BINANCE', 'OANDA', 'EXNESS', 'XM'):
+                                            _broker_src = 'MT5'
+                                        distribute_trade_commissions(bot_id, user_id, real_profit, source=_broker_src)
                                     except Exception as comm_e:
                                         logger.error(f"Bot {bot_id}: Commission error: {comm_e}")
 
