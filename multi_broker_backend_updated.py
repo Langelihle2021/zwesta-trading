@@ -10041,14 +10041,14 @@ def scalping_strategy(symbol, account_id, risk_amount, market_data=None):
     entry_window = signal_eval.get('entry_window_seconds', 0)
     if entry_window > 0:
         # Very tight stops/targets for quick upswings
-        stop_loss = params['stop_loss_pips'] * 0.25  # 1/4 of normal
-        take_profit = params['take_profit_pips'] * 0.2  # 1/5 of normal
-        duration = entry_window + 2  # Exit quickly after entry window
+        stop_loss = params['stop_loss_pips'] * 0.2  # Aggressive 1/5 of normal
+        take_profit = params['take_profit_pips'] * 0.15  # Very tight TP for fast exits
+        duration = entry_window + 1  # Exit immediately after entry window
     else:
-        # Normal scalping parameters
-        stop_loss = params['stop_loss_pips'] * 0.5  # Half the normal stop
-        take_profit = params['take_profit_pips'] * 0.3  # Tight TP
-        duration = 300  # 5 minute scalp
+        # Normal scalping parameters - optimized for quicker trades
+        stop_loss = params['stop_loss_pips'] * 0.4  # Tighter stop for faster exits
+        take_profit = params['take_profit_pips'] * 0.25  # Reduced TP (3-5 pips) for quick wins
+        duration = 180  # 3 minute scalp (was 5 min) - get in and out faster
     
     # Tight parameters for scalping
     return {
@@ -15534,7 +15534,7 @@ def _default_strategy_trading_cadence(strategy_name: str, management_profile: st
     normalized_profile = _normalize_management_profile(management_profile)
 
     if normalized_strategy == 'scalping':
-        return {'tradingMode': 'signal-driven', 'tradingInterval': 60, 'pollInterval': 5}
+        return {'tradingMode': 'signal-driven', 'tradingInterval': 30, 'pollInterval': 2}
 
     if normalized_strategy in {'momentum trading', 'breakout trading'}:
         return {'tradingMode': 'signal-driven', 'tradingInterval': 90, 'pollInterval': 8}
