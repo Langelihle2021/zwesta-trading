@@ -10183,9 +10183,9 @@ def trend_following_strategy(symbol, account_id, risk_amount, market_data=None):
         'type': order_type,
         'volume': 0.9,
         'stop_loss': params['stop_loss_pips'] * 1.3,  # Wider stop for trend
-        'take_profit': params['take_profit_pips'] * 2.0,  # Large TP for big move
+        'take_profit': params['take_profit_pips'] * 1.5,  # Realistic TP (was 2.0x causing under-execution)
         'signal': attach_execution_direction(signal_eval, order_type, 'Trend Following'),
-        'duration_seconds': 3600,  # 1 hour
+        'duration_seconds': 1800,  # 30 minutes (was 3600) - let trend develop but don't hold overnight
     }
 
 
@@ -15542,6 +15542,9 @@ def _default_strategy_trading_cadence(strategy_name: str, management_profile: st
     if normalized_strategy == 'swing trend dca':
         return {'tradingMode': 'signal-driven', 'tradingInterval': 300, 'pollInterval': 30}
 
+    if normalized_strategy == 'trend following':
+        return {'tradingMode': 'signal-driven', 'tradingInterval': 600, 'pollInterval': 60}
+    
     if intelligent_scanner:
         return {'tradingMode': 'signal-driven', 'tradingInterval': 120, 'pollInterval': 10}
 
@@ -18780,6 +18783,27 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 f"below required threshold={required_strength}/100"
                             )
                             continue
+
+                        # Skip if trend following has already placed 3+ trades in last 30 minutes (over-trading filter)
+                        recent_trade_history = bot_config.get('tradeHistory', [])
+                        if strategy_name == 'Trend Following' and recent_trade_history:
+                            now_timestamp = datetime.now().timestamp()
+                            recent_trades_30min = []
+                            for t in recent_trade_history:
+                                if not isinstance(t, dict):
+                                    continue
+                                try:
+                                    trade_ts = datetime.fromisoformat(str(t.get('time', '')).replace('Z', '+00:00')).timestamp()
+                                    if (now_timestamp - trade_ts) < 1800:
+                                        recent_trades_30min.append(t)
+                                except:
+                                    pass
+                            if len(recent_trades_30min) >= 3:
+                                logger.info(
+                                    f"⏭️ Bot {bot_id}: Already placed {len(recent_trades_30min)} trades in last 30min "
+                                    f"- cooling down to avoid over-trading chop"
+                                )
+                                continue
 
                         sl_pips = max(_safe_float(trade_params.get('stop_loss'), 0.0), 0.0)
                         tp_pips = max(_safe_float(trade_params.get('take_profit'), 0.0), 0.0)
