@@ -20592,6 +20592,9 @@ def bot_status():
                 'openPositions': open_positions,  # Currently open positions
                 'accountBalance': round(bot.get('accountBalance', 0), 2),  # Latest known balance
                 'accountEquity': round(bot.get('accountEquity', 0), 2),  # Latest known equity
+                'effectiveTradeAmount': round(_safe_float(bot.get('effectiveTradeAmount'), _safe_float(bot.get('tradeAmount'), 0.0)), 2),
+                'tradeAmountAdaptation': bot.get('tradeAmountAdaptation'),
+                'portfolioGuard': _evaluate_user_portfolio_profit_guard(bot),
             }
             if include_history:
                 enhanced_bot['tradeHistory'] = trade_history  # Include full trade history for analytics
@@ -20796,6 +20799,9 @@ def bot_summary():
                 'cumulativeProfitFloorBreach': current_profit <= (cumulative_profit * 0.70) if cumulative_profit > 0 else False,
                 'cumulativeLossAllowance': round(cumulative_loss_allowance, 2),
                 'cumulativeProtectionStatus': cumulative_protection_status,
+                'effectiveTradeAmount': round(_safe_float(bot.get('effectiveTradeAmount'), _safe_float(bot.get('tradeAmount'), 0.0)), 2),
+                'tradeAmountAdaptation': bot.get('tradeAmountAdaptation'),
+                'portfolioGuard': _evaluate_user_portfolio_profit_guard(bot),
                 'createdAt': created_at,
             })
 
