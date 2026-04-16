@@ -1,0 +1,39 @@
+name: Deploy Backend to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'multi_broker_backend_updated.py'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    name: SSH Deploy to VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            echo "=== Pulling latest code ==="
+            cd /root/zwesta-backend
+            git pull origin main
+
+            echo "=== Restarting backend service ==="
+            systemctl restart zwesta-backend || pm2 restart zwesta-backend || pkill -f multi_broker_backend_updated.py && nohup python3 multi_broker_backend_updated.py &
+
+            echo "=== Waiting for backend to start ==="
+            sleep 5
+
+            echo "=== Health check ==="
+            curl -sf http://localhost:9000/api/health && echo "✅ Backend is up" || echo "❌ Backend health check failed"
