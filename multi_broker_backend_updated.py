@@ -12881,6 +12881,160 @@ def get_best_trading_assets(limit=5):
         asset_strings = [f"{s}({asset_scores[s]['score']:.2f})" for s in top_assets]
         logger.info(f"[INTELLIGENT TRADING] Top {limit} assets for trading: {', '.join(asset_strings)}")
         return top_assets
+def _evaluate_user_portfolio_profit_guard(bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Protect cumulative user profits when multiple bots are active on the same account."""
+    if not isinstance(bot_config, dict):
+        return {'allow': True}
+
+    user_id = bot_config.get('user_id')
+    if not user_id:
+        return {'allow': True}
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    protected_profit_pool = 0.0
+    portfolio_open_pnl = 0.0
+    portfolio_realized_daily = 0.0
+    contributing_bots = 0
+
+    for peer_bot in active_bots.values():
+        if not isinstance(peer_bot, dict):
+            continue
+        if peer_bot.get('user_id') != user_id:
+            continue
+
+        contributing_bots += 1
+        peer_total_profit = _safe_float(peer_bot.get('totalProfit'), 0.0)
+        if peer_total_profit > 0:
+            protected_profit_pool += peer_total_profit
+
+        peer_daily_profit = _safe_float((peer_bot.get('dailyProfits') or {}).get(today, peer_bot.get('dailyProfit', 0.0)), 0.0)
+        portfolio_realized_daily += peer_daily_profit
+
+        peer_open_positions = peer_bot.get('open_positions') if isinstance(peer_bot.get('open_positions'), dict) else {}
+        portfolio_open_pnl += sum(_safe_float(position.get('profit'), 0.0) for position in peer_open_positions.values())
+
+    if contributing_bots <= 0 or protected_profit_pool <= 0:
+        return {
+            'allow': True,
+            'protectedProfitPool': round(protected_profit_pool, 2),
+            'portfolioSessionPnl': round(portfolio_realized_daily + portfolio_open_pnl, 2),
+            'maxAllowedPullback': 0.0,
+        }
+
+    # Preserve at least ~75% of already-earned profit across all bots.
+    max_allowed_pullback = protected_profit_pool * 0.25
+    portfolio_session_pnl = portfolio_realized_daily + portfolio_open_pnl
+    if portfolio_session_pnl >= 0:
+        return {
+            'allow': True,
+            'protectedProfitPool': round(protected_profit_pool, 2),
+            'portfolioSessionPnl': round(portfolio_session_pnl, 2),
+            'maxAllowedPullback': round(max_allowed_pullback, 2),
+        }
+
+    current_pullback = abs(portfolio_session_pnl)
+    if current_pullback < max_allowed_pullback:
+        return {
+            'allow': True,
+            'protectedProfitPool': round(protected_profit_pool, 2),
+            'portfolioSessionPnl': round(portfolio_session_pnl, 2),
+            'maxAllowedPullback': round(max_allowed_pullback, 2),
+        }
+
+    return {
+        'allow': False,
+        'protectedProfitPool': round(protected_profit_pool, 2),
+        'portfolioSessionPnl': round(portfolio_session_pnl, 2),
+        'maxAllowedPullback': round(max_allowed_pullback, 2),
+        'reason': (
+            f"portfolio pullback {current_pullback:.2f} exceeded allowed {max_allowed_pullback:.2f} "
+            f"while protecting cumulative gains"
+        ),
+    }
+
+
+def _resolve_adaptive_trade_amount(
+    bot_config: Dict[str, Any],
+    base_trade_amount: float,
+    volatility_level: str = 'Medium',
+) -> Tuple[float, Dict[str, Any]]:
+    """Dynamically scale fixed trade amounts (Binance/FXCM included) using live performance signals."""
+    safe_base_amount = max(_safe_float(base_trade_amount, 0.0), 0.0)
+    if safe_base_amount <= 0:
+        return 0.0, {
+            'multiplier': 0.0,
+            'state': 'disabled',
+            'reason': 'base trade amount not set',
+        }
+
+    performance_state = _build_performance_sizing_state(bot_config, volatility_level)
+    multiplier = max(0.45, _safe_float(performance_state.get('multiplier'), 1.0))
+    state = str(performance_state.get('state') or 'normal')
+    reasons = []
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    daily_profits = bot_config.get('dailyProfits') if isinstance(bot_config.get('dailyProfits'), dict) else {}
+    daily_profit = _safe_float(daily_profits.get(today, bot_config.get('dailyProfit', 0.0)), 0.0)
+
+    daily_profit_peaks = bot_config.get('dailyProfitPeaks') if isinstance(bot_config.get('dailyProfitPeaks'), dict) else {}
+    previous_peak = _safe_float(daily_profit_peaks.get(today), daily_profit)
+    peak_today = max(previous_peak, daily_profit)
+    daily_profit_peaks[today] = round(peak_today, 2)
+    if len(daily_profit_peaks) > 14:
+        oldest_days = sorted(daily_profit_peaks.keys())[:-14]
+        for old_day in oldest_days:
+            daily_profit_peaks.pop(old_day, None)
+    bot_config['dailyProfitPeaks'] = daily_profit_peaks
+
+    retrace = max(0.0, peak_today - daily_profit)
+    retrace_ratio = (retrace / peak_today) if peak_today > 0 else 0.0
+    if retrace_ratio >= 0.40:
+        multiplier *= 0.60
+        reasons.append('profit retrace >= 40% from daily peak')
+    elif retrace_ratio >= 0.25:
+        multiplier *= 0.74
+        reasons.append('profit retrace >= 25% from daily peak')
+    elif retrace_ratio >= 0.12:
+        multiplier *= 0.88
+        reasons.append('profit retrace >= 12% from daily peak')
+
+    if state == 'hot' and daily_profit > 0:
+        momentum_boost = min(0.18, max(0.0, daily_profit) / max(100.0, safe_base_amount * 10.0))
+        multiplier *= (1.0 + momentum_boost)
+        reasons.append('sustained profit momentum')
+    elif state == 'defensive':
+        multiplier *= 0.78
+        reasons.append('defensive sizing state')
+
+    if int(performance_state.get('consecutiveLosses') or 0) >= 2:
+        multiplier *= 0.75
+        reasons.append('consecutive losses')
+
+    if bot_config.get('managementState') == 'recovery':
+        multiplier *= 0.65
+        reasons.append('recovery mode')
+
+    is_live = str(bot_config.get('mode') or bot_config.get('botMode') or 'demo').strip().lower() == 'live' or bool(bot_config.get('is_live'))
+    max_boost = 1.35 if is_live else 1.55
+    multiplier = max(0.45, min(multiplier, max_boost))
+
+    adjusted_amount = round(max(1.0, safe_base_amount * multiplier), 2)
+    bot_config['effectiveTradeAmount'] = adjusted_amount
+    bot_config['tradeAmountAdaptation'] = {
+        'timestamp': datetime.now().isoformat(),
+        'state': state,
+        'multiplier': round(multiplier, 3),
+        'baseTradeAmount': round(safe_base_amount, 2),
+        'adjustedTradeAmount': adjusted_amount,
+        'dailyProfit': round(daily_profit, 2),
+        'dailyProfitPeak': round(peak_today, 2),
+        'retraceRatio': round(retrace_ratio, 3),
+        'reason': '; '.join(reasons) if reasons else 'baseline fixed trade sizing',
+    }
+
+    return adjusted_amount, performance_state
+
+
 # --- ENHANCED RISK MANAGEMENT: Profit Lock-In, Volatility Filter, Regime Check, Drawdown Pause ---
 def should_trade_today(bot_config, symbol):
     """
@@ -12928,6 +13082,15 @@ def should_trade_today(bot_config, symbol):
             logger.info(f"[RISK] Bot {bot_config.get('botId')} loss-streak pause expired, resuming entries.")
         except Exception:
             bot_config['lossStreakPauseUntil'] = None
+
+    portfolio_guard = _evaluate_user_portfolio_profit_guard(bot_config)
+    if not portfolio_guard.get('allow', True):
+        logger.warning(
+            f"[RISK] Bot {bot_config.get('botId')} portfolio guard active, skipping {symbol}: "
+            f"{portfolio_guard.get('reason')} | protected_pool=${portfolio_guard.get('protectedProfitPool', 0.0):.2f}, "
+            f"session_pnl=${portfolio_guard.get('portfolioSessionPnl', 0.0):.2f}"
+        )
+        return False
     
     # CUMULATIVE PROFIT PROTECTION: 30% loss floor on historical profits
     cumulative_profit = bot_config.get('totalProfit', 0.0) or 0.0
@@ -18528,7 +18691,8 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             continue
 
                         # Dynamic position sizing
-                        fixed_trade_amount = bot_config.get('tradeAmount')
+                        configured_trade_amount = bot_config.get('tradeAmount')
+                        fixed_trade_amount = configured_trade_amount
                         if not fixed_trade_amount and _normalize_management_profile(bot_config.get('managementProfile')) == 'small_account':
                             balance_basis = max(
                                 float(bot_config.get('accountEquity') or 0.0),
@@ -18538,10 +18702,17 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                                 balance_basis,
                                 bot_config.get('displayCurrency'),
                             )
+
                         bot_currency = str(bot_config.get('displayCurrency') or 'USD').upper()
                         fixed_trade_volume = None
                         mt5_api = mt5_conn.mt5 if (is_mt5 and mt5_conn and hasattr(mt5_conn, 'mt5')) else None
                         if fixed_trade_amount:
+                            adaptive_trade_amount, sizing_snapshot = _resolve_adaptive_trade_amount(
+                                bot_config,
+                                float(fixed_trade_amount),
+                                volatility_level=bot_config.get('volatilityLevel', 'Medium'),
+                            )
+                            fixed_trade_amount = adaptive_trade_amount
                             fixed_trade_volume, volume_details = estimate_fixed_trade_volume(
                                 float(fixed_trade_amount),
                                 symbol,
@@ -18554,7 +18725,9 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             if conversion_note:
                                 logger.info(f"💱 Bot {bot_id}: Fixed trade amount conversion for {symbol}: {conversion_note}")
                             logger.info(
-                                f"💵 Bot {bot_id}: Using fixed trade amount {float(fixed_trade_amount):.2f} {bot_currency} -> "
+                                f"💵 Bot {bot_id}: Adaptive trade amount {float(fixed_trade_amount):.2f} {bot_currency} "
+                                f"(base {float(_safe_float(configured_trade_amount, fixed_trade_amount)):.2f}, "
+                                f"multiplier {_safe_float(sizing_snapshot.get('multiplier'), 1.0):.2f}) -> "
                                 f"target volume {fixed_trade_volume:.4f} lots ({volume_details.get('method')})"
                             )
                         elif bot_config.get('dynamicSizing', True):
