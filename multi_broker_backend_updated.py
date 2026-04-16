@@ -3430,11 +3430,25 @@ class MT5Connection(BrokerConnection):
             win_count = 0
             loss_count = 0
             total_profit = 0
+
+            trade_type_map = {
+                getattr(self.mt5, 'DEAL_TYPE_BUY', 0): 'BUY',
+                getattr(self.mt5, 'DEAL_TYPE_SELL', 1): 'SELL',
+                getattr(self.mt5, 'DEAL_TYPE_BALANCE', -1): 'WITHDRAWAL',
+                getattr(self.mt5, 'DEAL_TYPE_CREDIT', -2): 'DEPOSIT',
+                getattr(self.mt5, 'DEAL_TYPE_CHARGE', -3): 'FEE',
+                getattr(self.mt5, 'DEAL_TYPE_COMMISSION', -4): 'COMMISSION',
+            }
             
             if deals:
                 for deal in deals:
                     # Only include closed positions
                     if deal.profit != 0 or deal.entry == 1:  # dealing IN or OUT
+                        deal_type = int(getattr(deal, 'type', -999))
+                        mapped_type = trade_type_map.get(deal_type, 'OTHER')
+                        if mapped_type not in {'BUY', 'SELL'}:
+                            continue
+
                         profit = round(float(deal.profit), 2)
                         total_profit += profit
                         if profit > 0:
@@ -3445,7 +3459,7 @@ class MT5Connection(BrokerConnection):
                         result.append({
                             'ticket': deal.ticket,
                             'symbol': deal.symbol,
-                            'type': 'BUY' if deal.type == 0 else 'SELL',
+                            'type': mapped_type,
                             'volume': deal.volume,
                             'openPrice': round(float(deal.price), 5),
                             'profit': profit,
@@ -4005,11 +4019,23 @@ class MT5Connection(BrokerConnection):
 
             deals = self.mt5.history_deals_get(position=0)
             result = []
+            trade_type_map = {
+                getattr(self.mt5, 'DEAL_TYPE_BUY', 0): ('BUY', 'trade'),
+                getattr(self.mt5, 'DEAL_TYPE_SELL', 1): ('SELL', 'trade'),
+                getattr(self.mt5, 'DEAL_TYPE_BALANCE', -1): ('WITHDRAWAL', 'cashflow'),
+                getattr(self.mt5, 'DEAL_TYPE_CREDIT', -2): ('DEPOSIT', 'cashflow'),
+                getattr(self.mt5, 'DEAL_TYPE_CHARGE', -3): ('FEE', 'cashflow'),
+                getattr(self.mt5, 'DEAL_TYPE_COMMISSION', -4): ('COMMISSION', 'cashflow'),
+            }
             for deal in deals[-50:]:
+                deal_type = int(getattr(deal, 'type', -999))
+                mapped = trade_type_map.get(deal_type, ('OTHER', 'cashflow'))
+                direction = mapped[0]
                 result.append({
                     'ticket': deal.ticket,
                     'symbol': deal.symbol,
-                    'type': 'BUY' if deal.type == self.mt5.DEAL_TYPE_BUY else 'SELL',
+                    'type': direction,
+                    'entryCategory': mapped[1],
                     'volume': deal.volume,
                     'price': deal.price,
                     'profit': deal.profit,
@@ -5592,8 +5618,23 @@ def detect_mt5_terminal_for_broker(broker_name: str, configured_path: str = None
 
 
 def detect_exness_mt5():
-    """Detect if Exness MT5 is available on the system"""
-    return detect_mt5_terminal_for_broker('Exness', MT5_CONFIG.get('path'))
+    """Detect if Exness MT5 is available on the system.
+    Prefer explicit dual-path VPS configuration before generic broker path lookup."""
+    is_live_mode = str(ENVIRONMENT).upper() == 'LIVE'
+    preferred_path = EXNESS_LIVE_PATH if is_live_mode else EXNESS_DEMO_PATH
+
+    # 1) Prefer mode-specific explicit path (VPS dual terminal setup)
+    result = detect_mt5_terminal_for_broker('Exness', preferred_path or MT5_CONFIG.get('path'))
+
+    # 2) Fallback to the opposite mode path in case env mode/path is temporarily mismatched
+    if not result.get('available'):
+        fallback_path = EXNESS_DEMO_PATH if is_live_mode else EXNESS_LIVE_PATH
+        if fallback_path and fallback_path != preferred_path:
+            fallback_result = detect_mt5_terminal_for_broker('Exness', fallback_path)
+            if fallback_result.get('available'):
+                result = fallback_result
+
+    return result
 
 
 def check_exness_connectivity(account_id=None, password=None, server='Exness-MT5'):
@@ -7896,9 +7937,17 @@ def list_commodities():
                         live_data = _init_commodity_data(item_config.get('min_price', 1.0), symbol)
                     # Merge config + live data, but config symbol always wins
                     merged_item = {**item_config, **live_data, 'symbol': symbol}
+                    evaluated_signal = evaluate_real_trade_signal(symbol, merged_item)
+                    strength_value = _safe_float(
+                        merged_item.get('signal_strength', merged_item.get('signalStrength', evaluated_signal.get('strength', 0.0))),
+                        0.0,
+                    )
+                    strength_value = max(0.0, min(100.0, strength_value))
+                    merged_item['signal_strength'] = strength_value
+                    merged_item['signalStrength'] = strength_value
+                    merged_item['signalPercentage'] = round(strength_value, 1)
                     categorized[category].append(merged_item)
                     # Also store in flat dict for easy lookup by symbol
-                    flat_market_data[symbol] = merged_item
                     flat_market_data[symbol] = merged_item
             
             # Log sample signals for debugging
@@ -10264,16 +10313,42 @@ def build_scanner_symbol_universe(bot_config: Dict[str, Any]) -> List[str]:
     expand_small_account_universe = idle_cycles >= ADAPTIVE_SCANNER_TRIGGER_MISSES
 
     if profile == 'small_account':
+        account_currency = str(bot_config.get('displayCurrency') or 'USD').strip().upper()
+        balance_basis = max(
+            _safe_float(bot_config.get('accountEquity'), 0.0),
+            _safe_float(bot_config.get('accountBalance'), 0.0),
+        )
+        crypto_min_balance = _get_small_live_crypto_min_balance(account_currency)
+        configured_crypto_bases = {
+            _normalize_symbol_base(symbol)
+            for symbol in normalized_configured
+            if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_OPTIONAL_CRYPTO_BASE_SYMBOLS
+        }
+        allow_requested_crypto = bool(configured_crypto_bases) and balance_basis >= crypto_min_balance
+
+        allowed_base_symbols = set(SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS)
+        if allow_requested_crypto:
+            allowed_base_symbols.update(configured_crypto_bases)
+
         allowed_symbols = [
             symbol for symbol in broker_symbol_universe
-            if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
+            if _normalize_symbol_base(symbol) in allowed_base_symbols
         ]
+        preferred_order = {base: idx for idx, base in enumerate(SMALL_LIVE_ACCOUNT_PREFERRED_BASE_SYMBOLS)}
+        allowed_symbols = sorted(
+            allowed_symbols,
+            key=lambda sym: preferred_order.get(_normalize_symbol_base(sym), len(preferred_order)),
+        )
 
         if normalized_configured:
             configured_safe = [
                 symbol for symbol in normalized_configured
-                if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS
+                if _normalize_symbol_base(symbol) in allowed_base_symbols
             ]
+            configured_safe = sorted(
+                configured_safe,
+                key=lambda sym: preferred_order.get(_normalize_symbol_base(sym), len(preferred_order)),
+            )
             if configured_safe:
                 if not allow_cross_market and not expand_small_account_universe:
                     return configured_safe
@@ -11173,7 +11248,17 @@ def execute_intelligent_reallocation(bot_id, bot_config, active_conn, is_mt5, mt
         'totalScanned': len(symbol_universe),
         'qualifyingOpportunities': len(tradeable_opportunities),
         'scannerMode': 'adaptive' if force_scan and not bot_config.get('intelligentScanner', False) else ('always_on' if bot_config.get('intelligentScanner', False) else 'disabled'),
-        'topOpportunities': [{'symbol': o['symbol'], 'strength': o['strength'], 'signal': o['signal'], 'trend': o['trend']} for o in tradeable_opportunities[:5]],
+        'topOpportunities': [
+            {
+                'symbol': o['symbol'],
+                'strength': o['strength'],
+                'signalStrength': round(_safe_float(o.get('strength'), 0.0), 1),
+                'signalPercentage': round(_safe_float(o.get('strength'), 0.0), 1),
+                'signal': o['signal'],
+                'trend': o['trend'],
+            }
+            for o in tradeable_opportunities[:5]
+        ],
         'closedForReallocation': len(tickets_to_close),
         'cycleSymbols': cycle_symbols,
     }
@@ -12294,6 +12379,8 @@ def scan_all_markets_now():
                 {
                     'symbol': o['symbol'],
                     'strength': o['strength'],
+                    'signalStrength': round(_safe_float(o.get('strength'), 0.0), 1),
+                    'signalPercentage': round(_safe_float(o.get('strength'), 0.0), 1),
                     'signal': o['signal'],
                     'trend': o['trend'],
                     'rsi': o['rsi'],
@@ -12751,15 +12838,15 @@ def should_trade_today(bot_config, symbol):
     symbol_base = _normalize_symbol_base(symbol)
     if is_live and symbol_base in SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS:
         account_currency = str(bot_config.get('displayCurrency') or 'USD').strip().upper()
-        small_account_threshold = _get_small_live_account_threshold(account_currency)
+        crypto_min_balance = _get_small_live_crypto_min_balance(account_currency)
         balance_basis = max(
             _safe_float(bot_config.get('accountEquity'), 0.0),
             _safe_float(bot_config.get('accountBalance'), 0.0),
         )
-        if 0 < balance_basis <= small_account_threshold:
+        if 0 < balance_basis < crypto_min_balance:
             logger.warning(
                 f"[RISK] Bot {bot_config.get('botId')} skipping {symbol}: "
-                f"small live balance {balance_basis:.2f} {account_currency} cannot safely trade {symbol_base}"
+                f"balance {balance_basis:.2f} {account_currency} is below crypto safety floor {crypto_min_balance:.2f}"
             )
             return False
 
@@ -13203,9 +13290,12 @@ def live_market_data_updater():
                             
                             # Evaluate real trading signal using technical indicators
                             signal_eval = evaluate_real_trade_signal(symbol, commodity_market_data[symbol])
-                            commodity_market_data[symbol]['signal_strength'] = signal_eval['strength']
+                            strength_value = max(0.0, min(100.0, _safe_float(signal_eval.get('strength'), 0.0)))
+                            commodity_market_data[symbol]['signal_strength'] = strength_value
+                            commodity_market_data[symbol]['signalStrength'] = strength_value
+                            commodity_market_data[symbol]['signalPercentage'] = round(strength_value, 1)
                             # Update signal with real evaluation if strength > 0
-                            if signal_eval['strength'] > 0:
+                            if strength_value > 0:
                                 signal_prefix = '🟢 ' if 'BUY' in signal_eval['signal'] else '🔴 ' if 'SELL' in signal_eval['signal'] else '🟡 '
                                 commodity_market_data[symbol]['signal'] = signal_prefix + signal_eval['signal']
                             
@@ -13268,6 +13358,9 @@ def _init_commodity_data(price, symbol_name):
         'volatility': 'Medium',
         'volatility_pct': 0.1,
         'signal': '🟡 INITIALIZING',
+        'signal_strength': 0.0,
+        'signalStrength': 0.0,
+        'signalPercentage': 0.0,
         'recommendation': 'Waiting for market data',
         'profitability_score': 0.50,
     }
@@ -14958,11 +15051,11 @@ BOT_RISK_LIMITS = {
 ADAPTIVE_SIGNAL_THRESHOLD_STEP = 5
 ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP = 10
 ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 70
-ADAPTIVE_SIGNAL_THRESHOLD_MIN = 45
+ADAPTIVE_SIGNAL_THRESHOLD_MIN = 40
 ADAPTIVE_SCANNER_TRIGGER_MISSES = 1
 ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 25
-ADAPTIVE_FORCED_SCANNER_IDLE_CYCLES = 999
-ADAPTIVE_FORCED_SCANNER_THRESHOLD_REDUCTION = 0
+ADAPTIVE_FORCED_SCANNER_IDLE_CYCLES = 3
+ADAPTIVE_FORCED_SCANNER_THRESHOLD_REDUCTION = 20
 ADAPTIVE_FALLBACK_MIN_STRENGTH = 60
 UNIVERSAL_ADAPTATION_MIN_SAMPLE_TRADES = 6
 UNIVERSAL_ADAPTATION_RECENT_TRADE_WINDOW = 8
@@ -15083,12 +15176,12 @@ BOT_MANAGEMENT_PROFILES = {
         'dynamicSizing': True,
     },
     'fast_growth': {
-        'riskPerTrade': 30.0,
-        'maxDailyLoss': 160.0,
+        'riskPerTrade': 20.0,
+        'maxDailyLoss': 120.0,
         'profitLock': 90.0,
-        'drawdownPausePercent': 12.0,
+        'drawdownPausePercent': 10.0,
         'drawdownPauseHours': 3.0,
-        'maxOpenPositions': 6,
+        'maxOpenPositions': 4,
         'maxPositionsPerSymbol': 2,
         'signalThreshold': 60,
         'allowedVolatility': ['Low', 'Medium'],
@@ -15108,11 +15201,41 @@ SMALL_ACCOUNT_TRADE_AMOUNT_CAPS = {
     'ZAR': 80.0,
     'GBP': 7.0,
 }
-SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
-    'AUDUSD', 'EURUSD', 'GBPUSD', 'NZDUSD', 'USDCAD', 'USDCHF', 'USDJPY', 'EURJPY', 'GBPJPY', 'EURGBP'
+SMALL_LIVE_ACCOUNT_GUARD_LIMIT_MULTIPLIER = 3.0
+SMALL_LIVE_ACCOUNT_BALANCE_TIERS = {
+    'USD': [
+        {'min_balance': 0.0, 'ratio': 0.020, 'min_trade': 2.0, 'max_trade': 6.0, 'max_open_positions': 1, 'risk_per_trade': 5.0, 'max_daily_loss': 20.0, 'profit_lock': 30.0, 'signal_floor': 68, 'allowed_volatility': ['Very Low', 'Low']},
+        {'min_balance': 60.0, 'ratio': 0.028, 'min_trade': 3.0, 'max_trade': 10.0, 'max_open_positions': 1, 'risk_per_trade': 5.5, 'max_daily_loss': 25.0, 'profit_lock': 35.0, 'signal_floor': 67, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 100.0, 'ratio': 0.034, 'min_trade': 4.0, 'max_trade': 14.0, 'max_open_positions': 2, 'risk_per_trade': 6.0, 'max_daily_loss': 35.0, 'profit_lock': 45.0, 'signal_floor': 66, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 200.0, 'ratio': 0.040, 'min_trade': 6.0, 'max_trade': 20.0, 'max_open_positions': 2, 'risk_per_trade': 6.5, 'max_daily_loss': 45.0, 'profit_lock': 60.0, 'signal_floor': 65, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+    ],
+    'ZAR': [
+        {'min_balance': 0.0, 'ratio': 0.012, 'min_trade': 4.0, 'max_trade': 10.0, 'max_open_positions': 1, 'risk_per_trade': 4.5, 'max_daily_loss': 15.0, 'profit_lock': 20.0, 'signal_floor': 69, 'allowed_volatility': ['Very Low', 'Low']},
+        {'min_balance': 300.0, 'ratio': 0.026, 'min_trade': 8.0, 'max_trade': 40.0, 'max_open_positions': 1, 'risk_per_trade': 5.0, 'max_daily_loss': 20.0, 'profit_lock': 30.0, 'signal_floor': 68, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 700.0, 'ratio': 0.032, 'min_trade': 15.0, 'max_trade': 65.0, 'max_open_positions': 1, 'risk_per_trade': 5.5, 'max_daily_loss': 25.0, 'profit_lock': 35.0, 'signal_floor': 67, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 1000.0, 'ratio': 0.038, 'min_trade': 25.0, 'max_trade': 95.0, 'max_open_positions': 2, 'risk_per_trade': 6.0, 'max_daily_loss': 32.0, 'profit_lock': 45.0, 'signal_floor': 66, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 1500.0, 'ratio': 0.044, 'min_trade': 35.0, 'max_trade': 125.0, 'max_open_positions': 2, 'risk_per_trade': 6.25, 'max_daily_loss': 40.0, 'profit_lock': 55.0, 'signal_floor': 66, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 2500.0, 'ratio': 0.050, 'min_trade': 55.0, 'max_trade': 170.0, 'max_open_positions': 2, 'risk_per_trade': 6.5, 'max_daily_loss': 50.0, 'profit_lock': 70.0, 'signal_floor': 65, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+    ],
+    'GBP': [
+        {'min_balance': 0.0, 'ratio': 0.020, 'min_trade': 2.0, 'max_trade': 6.0, 'max_open_positions': 1, 'risk_per_trade': 5.0, 'max_daily_loss': 20.0, 'profit_lock': 30.0, 'signal_floor': 68, 'allowed_volatility': ['Very Low', 'Low']},
+        {'min_balance': 50.0, 'ratio': 0.028, 'min_trade': 3.0, 'max_trade': 9.0, 'max_open_positions': 1, 'risk_per_trade': 5.5, 'max_daily_loss': 25.0, 'profit_lock': 35.0, 'signal_floor': 67, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 80.0, 'ratio': 0.034, 'min_trade': 4.0, 'max_trade': 12.0, 'max_open_positions': 2, 'risk_per_trade': 6.0, 'max_daily_loss': 35.0, 'profit_lock': 45.0, 'signal_floor': 66, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+        {'min_balance': 160.0, 'ratio': 0.040, 'min_trade': 6.0, 'max_trade': 18.0, 'max_open_positions': 2, 'risk_per_trade': 6.5, 'max_daily_loss': 45.0, 'profit_lock': 60.0, 'signal_floor': 65, 'allowed_volatility': ['Very Low', 'Low', 'Medium']},
+    ],
 }
+SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS = {
+    'AUDUSD', 'GBPUSD', 'USDJPY'
+}
+SMALL_LIVE_ACCOUNT_OPTIONAL_CRYPTO_BASE_SYMBOLS = {'BTCUSD', 'ETHUSD'}
+SMALL_LIVE_ACCOUNT_CRYPTO_MIN_BALANCES = {
+    'USD': 25.0,
+    'ZAR': 300.0,
+    'GBP': 20.0,
+}
+SMALL_LIVE_ACCOUNT_PREFERRED_BASE_SYMBOLS = ['AUDUSD', 'BTCUSD', 'ETHUSD', 'GBPUSD', 'USDJPY']
 SMALL_LIVE_ACCOUNT_WEEKEND_BASE_SYMBOLS = {'BTCUSD', 'ETHUSD'}
-SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'EURUSDm', 'USDCHFm', 'USDCADm']
+SMALL_LIVE_ACCOUNT_DEFAULT_SYMBOLS = ['AUDUSDm', 'GBPUSDm', 'USDJPYm']
 
 DEFAULT_PROFIT_PROTECTION_CONFIG = {
     'enabled': True,
@@ -15831,6 +15954,11 @@ def _get_small_live_account_threshold(currency: str) -> float:
     return SMALL_LIVE_ACCOUNT_THRESHOLDS.get(normalized_currency, SMALL_LIVE_ACCOUNT_THRESHOLDS['USD'])
 
 
+def _get_small_live_crypto_min_balance(currency: str) -> float:
+    normalized_currency = str(currency or 'USD').strip().upper()
+    return SMALL_LIVE_ACCOUNT_CRYPTO_MIN_BALANCES.get(normalized_currency, SMALL_LIVE_ACCOUNT_CRYPTO_MIN_BALANCES['USD'])
+
+
 def _is_guarded_small_live_account(bot_config: Dict[str, Any], multiplier: float = 1.5) -> bool:
     if not isinstance(bot_config, dict):
         return False
@@ -16134,16 +16262,20 @@ def derive_small_account_trade_amount(balance: float, currency: Optional[str]) -
 
     threshold = _get_small_live_account_threshold(normalized_currency)
     cap = SMALL_ACCOUNT_TRADE_AMOUNT_CAPS.get(normalized_currency, SMALL_ACCOUNT_TRADE_AMOUNT_CAPS['USD'])
+    tiers = SMALL_LIVE_ACCOUNT_BALANCE_TIERS.get(normalized_currency, SMALL_LIVE_ACCOUNT_BALANCE_TIERS['USD'])
+    selected_tier = tiers[0]
+    for tier in tiers:
+        if safe_balance >= _safe_float(tier.get('min_balance'), 0.0):
+            selected_tier = tier
 
-    if safe_balance <= threshold:
-        ratio = 0.025
-    elif safe_balance <= threshold * 2:
-        ratio = 0.035
-    else:
-        ratio = 0.045
+    ratio = max(0.01, _safe_float(selected_tier.get('ratio'), 0.025))
+    tier_min_trade = max(0.0, _safe_float(selected_tier.get('min_trade'), safe_balance * 0.015))
+    tier_max_trade = max(0.0, _safe_float(selected_tier.get('max_trade'), cap))
+    dynamic_cap = max(cap, tier_max_trade)
 
-    target_amount = min(safe_balance * ratio, safe_balance * 0.08, cap)
-    return round(max(target_amount, safe_balance * 0.015), 2)
+    safety_soft_cap = safe_balance * 0.08 if safe_balance <= threshold else safe_balance * 0.06
+    target_amount = min(safe_balance * ratio, safety_soft_cap, dynamic_cap)
+    return round(max(target_amount, tier_min_trade), 2)
 
 
 def enforce_small_live_account_guard(
@@ -16161,14 +16293,46 @@ def enforce_small_live_account_guard(
     balance = max(_safe_float(cached_balance), _safe_float(cached_margin_free))
     currency = str(account_currency or data.get('displayCurrency') or 'USD').strip().upper()
     threshold = _get_small_live_account_threshold(currency)
-    if balance <= 0 or balance > threshold:
+    guard_limit = threshold * SMALL_LIVE_ACCOUNT_GUARD_LIMIT_MULTIPLIER
+    if balance <= 0 or balance > guard_limit:
         return data, symbols, [], False
 
     defaults = BOT_MANAGEMENT_PROFILES['small_account']
+    tiers = SMALL_LIVE_ACCOUNT_BALANCE_TIERS.get(currency, SMALL_LIVE_ACCOUNT_BALANCE_TIERS['USD'])
+    selected_tier = tiers[0]
+    for tier in tiers:
+        if balance >= _safe_float(tier.get('min_balance'), 0.0):
+            selected_tier = tier
+
+    tier_max_open_positions = int(max(1, min(2, round(_safe_float(selected_tier.get('max_open_positions'), 1)))))
+    tier_risk_per_trade = max(4.0, min(7.5, _safe_float(selected_tier.get('risk_per_trade'), defaults['riskPerTrade'])))
+    tier_max_daily_loss = max(defaults['maxDailyLoss'], _safe_float(selected_tier.get('max_daily_loss'), defaults['maxDailyLoss']))
+    tier_profit_lock = max(defaults['profitLock'], _safe_float(selected_tier.get('profit_lock'), defaults['profitLock']))
+    tier_signal_floor = int(max(65, min(70, round(_safe_float(selected_tier.get('signal_floor'), defaults['signalThreshold'])))))
+    tier_allowed_volatility = list(selected_tier.get('allowed_volatility') or ['Very Low', 'Low', 'Medium'])
+
     guarded_data = dict(data)
+    requested_crypto_bases = {
+        _normalize_symbol_base(symbol)
+        for symbol in symbols
+        if _normalize_symbol_base(symbol) in SMALL_LIVE_ACCOUNT_OPTIONAL_CRYPTO_BASE_SYMBOLS
+    }
+    crypto_min_balance = _get_small_live_crypto_min_balance(currency)
+    allow_requested_crypto = bool(requested_crypto_bases) and balance >= crypto_min_balance
+
     allowed_base_symbols = set(SMALL_LIVE_ACCOUNT_SAFE_BASE_SYMBOLS)
+    if allow_requested_crypto:
+        allowed_base_symbols.update(requested_crypto_bases)
+
     filtered_symbols = [symbol for symbol in symbols if _normalize_symbol_base(symbol) in allowed_base_symbols]
+    preferred_order = {base: idx for idx, base in enumerate(SMALL_LIVE_ACCOUNT_PREFERRED_BASE_SYMBOLS)}
+    filtered_symbols = sorted(
+        filtered_symbols,
+        key=lambda sym: preferred_order.get(_normalize_symbol_base(sym), len(preferred_order)),
+    )
     warnings = [f"Small live account guard applied for {currency} balance {balance:.2f}"]
+    if requested_crypto_bases and not allow_requested_crypto:
+        warnings.append(f"BTC/ETH kept off until balance reaches {crypto_min_balance:.2f} {currency}")
     derived_trade_amount = derive_small_account_trade_amount(balance, currency)
 
     if filtered_symbols:
@@ -16195,16 +16359,16 @@ def enforce_small_live_account_guard(
         'intelligentScanner': False,
         'managementProfile': 'small_account',
         'riskProfile': 'small_account',
-        'riskPerTrade': defaults['riskPerTrade'],
-        'maxDailyLoss': defaults['maxDailyLoss'],
-        'profitLock': defaults['profitLock'],
+        'riskPerTrade': tier_risk_per_trade,
+        'maxDailyLoss': tier_max_daily_loss,
+        'profitLock': tier_profit_lock,
         'drawdownPausePercent': defaults['drawdownPausePercent'],
         'drawdownPauseHours': defaults['drawdownPauseHours'],
-        'maxOpenPositions': 1,
-        'maxOpenTrades': 1,
+        'maxOpenPositions': tier_max_open_positions,
+        'maxOpenTrades': tier_max_open_positions,
         'maxPositionsPerSymbol': 1,
-        'signalThreshold': max(65, min(max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 20), 70)),
-        'allowedVolatility': ['Very Low', 'Low', 'Medium'],
+        'signalThreshold': max(tier_signal_floor, min(max(int(_safe_float(guarded_data.get('signalThreshold'), defaults['signalThreshold'])), 20), 70)),
+        'allowedVolatility': tier_allowed_volatility,
         'autoSwitch': False,
         'dynamicSizing': True,
         'displayCurrency': currency,
@@ -16212,7 +16376,10 @@ def enforce_small_live_account_guard(
     })
 
     if derived_trade_amount:
-        warnings.append(f'Set micro trade amount to {derived_trade_amount:.2f} {currency} for adaptive lot sizing')
+        warnings.append(
+            f"Set stepped trade amount to {derived_trade_amount:.2f} {currency} "
+            f"(tier starts at {int(_safe_float(selected_tier.get('min_balance'), 0.0))} {currency})"
+        )
 
     return guarded_data, filtered_symbols, warnings, True
 
@@ -16763,7 +16930,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         if profile == 'fast_growth':
             effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 2)
             effective['maxPositionsPerSymbol'] = 1
-            effective['signalThreshold'] = max(effective['signalThreshold'], 68 if is_assisted else defaults['signalThreshold'])
+            effective['signalThreshold'] = max(effective['signalThreshold'], 60 if is_assisted else defaults['signalThreshold'])
             effective['allowedVolatility'] = [
                 level for level in effective['allowedVolatility'] if level in ['Low', 'Medium']
             ] or ['Low', 'Medium']
@@ -16791,13 +16958,14 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         recent_win_rate = (recent_wins / recent_count * 100) if recent_count else 100.0
 
         is_recovery_condition = consecutive_losses >= 2 or (recent_count >= 4 and recent_win_rate < 40)
-        if is_recovery_condition:
+        fast_growth_recovery = profile == 'fast_growth' and (consecutive_losses >= 1 or (recent_count >= 3 and recent_win_rate < 45))
+        if is_recovery_condition or fast_growth_recovery:
             effective['signalThreshold'] = min(85, effective['signalThreshold'] + 10)
             effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 1 if profile == 'beginner' else 2)
             effective['maxPositionsPerSymbol'] = 1
             effective['allowedVolatility'] = ['Very Low', 'Low', 'Medium']  # Tighten but still allow trading
             if profile == 'fast_growth':
-                effective['signalThreshold'] = min(88, max(effective['signalThreshold'], 75))
+                effective['signalThreshold'] = min(90, max(effective['signalThreshold'], 80))
                 effective['maxOpenPositions'] = 1
                 effective['allowedVolatility'] = ['Very Low', 'Low']
             bot_config['managementState'] = 'recovery'
@@ -16810,7 +16978,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
             no_open_positions = not bool(bot_config.get('open_positions'))
             if latest_trade_dt and no_open_positions:
                 idle_minutes = (datetime.now() - latest_trade_dt).total_seconds() / 60.0
-                if idle_minutes >= 45:
+                if idle_minutes >= 30:
                     bot_config['managementState'] = 'normal'
                     relaxed_threshold = defaults['signalThreshold']
                     if guarded_small_live:
@@ -19546,7 +19714,7 @@ def quick_create_bot():
             quick_profit_defaults = BOT_MANAGEMENT_PROFILES.get('fast_growth', {})
             management_profile = 'fast_growth'  # User-facing label: Quick Profit
             management_mode = 'assisted'
-            signal_threshold = max(68, int(quick_profit_defaults.get('signalThreshold', 60) or 60))
+            signal_threshold = max(60, int(quick_profit_defaults.get('signalThreshold', 60) or 60))
             allowed_volatility = ['Low', 'Medium']
             max_open_positions = min(2, int(quick_profit_defaults.get('maxOpenPositions', 2) or 2))
             max_positions_per_symbol = 1
@@ -23120,7 +23288,9 @@ def get_recent_withdrawals():
                 total_amount as amount,
                 status,
                 created_at as date,
-                'exness' as type
+                'exness' as type,
+                'withdrawal' as eventCategory,
+                'bank_withdrawal' as eventType
             FROM exness_withdrawals
             WHERE user_id = ?
             ORDER BY created_at DESC
@@ -23139,7 +23309,9 @@ def get_recent_withdrawals():
                 cw.amount,
                 cw.status,
                 cw.created_at as date,
-                'commission' as type
+                'commission' as type,
+                'withdrawal' as eventCategory,
+                'commission_withdrawal' as eventType
             FROM commission_withdrawals cw
             WHERE cw.user_id = ?
             ORDER BY cw.created_at DESC
@@ -23158,7 +23330,9 @@ def get_recent_withdrawals():
                 amount,
                 status,
                 created_at as date,
-                'general' as type
+                'general' as type,
+                'withdrawal' as eventCategory,
+                'generic_withdrawal' as eventType
             FROM withdrawals
             WHERE user_id = ?
             ORDER BY created_at DESC
@@ -23166,11 +23340,33 @@ def get_recent_withdrawals():
         ''', (user_id,))
         
         general_withdrawals = [dict(row) for row in cursor.fetchall()]
+
+        # Include broker-native notifications (FXCM/Binance/OANDA etc.)
+        cursor.execute('''
+            SELECT
+                notification_id as withdrawal_id,
+                user_id,
+                broker_name as broker,
+                NULL as accountNumber,
+                amount,
+                status,
+                created_at as date,
+                'broker_notification' as type,
+                'withdrawal' as eventCategory,
+                'broker_withdrawal_notification' as eventType,
+                message
+            FROM broker_withdrawal_notifications
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+        ''', (user_id,))
+
+        broker_notifications = [dict(row) for row in cursor.fetchall()]
         
         conn.close()
         
         # Combine and sort by date
-        all_withdrawals = exness_withdrawals + commission_withdrawals + general_withdrawals
+        all_withdrawals = exness_withdrawals + commission_withdrawals + general_withdrawals + broker_notifications
         all_withdrawals.sort(key=lambda x: x.get('date', ''), reverse=True)
         
         # Return only recent ones
@@ -25572,17 +25768,39 @@ def exness_withdrawal_request():
 
 @app.route('/api/broker/exness/withdrawal/history/<user_id>', methods=['GET'])
 def exness_withdrawal_history(user_id):
-    """Get Exness withdrawal history for user"""
+    """Get Exness withdrawal history for user.
+
+    Optional query params:
+    - start_date: ISO datetime/date lower bound (inclusive)
+    - end_date: ISO datetime/date upper bound (inclusive)
+    - limit: max rows (default 50, max 200)
+    """
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT * FROM exness_withdrawals 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC
-            LIMIT 50
-        ''', (user_id,))
+        start_date = (request.args.get('start_date') or '').strip()
+        end_date = (request.args.get('end_date') or '').strip()
+        limit_raw = request.args.get('limit', default=50, type=int)
+        limit_value = max(1, min(int(limit_raw or 50), 200))
+
+        query = '''
+            SELECT * FROM exness_withdrawals
+            WHERE user_id = ?
+        '''
+        params: List[Any] = [user_id]
+
+        if start_date:
+            query += ' AND created_at >= ?'
+            params.append(start_date)
+        if end_date:
+            query += ' AND created_at <= ?'
+            params.append(end_date)
+
+        query += ' ORDER BY created_at DESC LIMIT ?'
+        params.append(limit_value)
+
+        cursor.execute(query, tuple(params))
 
         withdrawals = cursor.fetchall()
         conn.close()

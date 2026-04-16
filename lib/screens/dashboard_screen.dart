@@ -55,6 +55,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<dynamic> _realBotsList = [];
   Timer? _refreshTimer;
   int _refreshFailureCount = 0;
+  String _preferredBrokerDisplay = 'Exness';
 
   /// Convert currency code to symbol (e.g., ZAR → R, USD → $, EUR → €)
   String _currencySymbol(String code) {
@@ -247,6 +248,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String _modeLabel(String mode) => mode == 'live' ? 'Live' : 'Demo';
 
+  String _normalizeBrokerDisplayName(String broker) {
+    final raw = broker.trim();
+    if (raw.isEmpty) return '';
+    final lower = raw.toLowerCase();
+    if (lower == 'fxm') return 'FXCM';
+    if (lower == 'prime xbt' || lower == 'pxbt') return 'PXBT';
+    if (lower == 'binance') return 'Binance';
+    if (lower == 'exness') return 'Exness';
+    if (lower == 'oanda') return 'OANDA';
+    if (lower == 'ig markets' || lower == 'ig') return 'IG';
+    return raw;
+  }
+
+  int _brokerDisplayPriority(String broker) {
+    final normalized = _normalizeBrokerDisplayName(broker).toLowerCase();
+    final preferred = _normalizeBrokerDisplayName(_preferredBrokerDisplay).toLowerCase();
+    if (preferred.isNotEmpty && normalized == preferred) {
+      return 0;
+    }
+    return 1;
+  }
+
+  List<Map<String, dynamic>> _sortedByPreferredBroker(Iterable<Map<String, dynamic>> accounts) {
+    final sorted = accounts.toList();
+    sorted.sort((a, b) {
+      final brokerA = _normalizeBrokerDisplayName((a['broker'] ?? '').toString());
+      final brokerB = _normalizeBrokerDisplayName((b['broker'] ?? '').toString());
+      final priorityCompare = _brokerDisplayPriority(brokerA).compareTo(_brokerDisplayPriority(brokerB));
+      if (priorityCompare != 0) {
+        return priorityCompare;
+      }
+      return brokerA.toLowerCase().compareTo(brokerB.toLowerCase());
+    });
+    return sorted;
+  }
+
   Color _modeAccent(String mode) {
     return mode == 'live'
         ? const Color(0xFFFFB74D)
@@ -255,10 +292,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<Map<String, dynamic>> _filteredBrokerAccounts([String? mode]) {
     final selectedMode = mode ?? _balanceMode;
-    return _brokerAccounts
+    return _sortedByPreferredBroker(_brokerAccounts
         .where((account) => selectedMode == 'all' || _accountMode(account) == selectedMode)
         .cast<Map<String, dynamic>>()
-        .toList();
+      .toList());
   }
 
   List<Map<String, dynamic>> _filteredBots([String? mode]) {
@@ -397,6 +434,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // Demo/Live balance toggle
   String _balanceMode = 'all'; // 'all', 'live', 'demo'
+  String _portfolioBrokerFilter = 'All';
 
   // Balance tracking for increases/decreases
   // _sessionStartBalances is set ONCE on first fetch and never updated,
@@ -412,10 +450,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _loadPreferredBrokerDisplay();
     _fetchRealBots();
     _fetchBrokerBalances();
     _fetchRecentWithdrawals();
     _startAutoRefresh();
+  }
+
+  Future<void> _loadPreferredBrokerDisplay() async {
+    final prefs = await SharedPreferences.getInstance();
+    final selected = prefs.getString('preferred_broker_display') ?? prefs.getString('broker') ?? 'Exness';
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _preferredBrokerDisplay = _normalizeBrokerDisplayName(selected);
+      _portfolioBrokerFilter = _preferredBrokerDisplay;
+    });
   }
 
   @override
@@ -643,17 +694,136 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Build the connected broker account card showing balance and withdrawals
   Widget _buildConnectedBrokerCard() {
-    final connectedAccounts = _filteredBrokerAccounts()
+    final allConnectedAccounts = _filteredBrokerAccounts()
         .where((account) => account['connected'] == true)
         .cast<Map<String, dynamic>>()
         .toList();
 
-    if (connectedAccounts.isEmpty) {
+    if (allConnectedAccounts.isEmpty) {
       return const SizedBox.shrink();
     }
+
+    final brokerOptions = <String>{'All', 'Exness', 'Binance', 'FXCM'};
+    for (final account in allConnectedAccounts) {
+      final broker = (account['broker'] ?? '').toString().trim();
+      if (broker.isNotEmpty) {
+        brokerOptions.add(broker);
+      }
+    }
+
+    final preferredFromSelection = _normalizeBrokerDisplayName(_portfolioBrokerFilter);
+    final selectedBrokerFilter = brokerOptions.contains(preferredFromSelection)
+      ? preferredFromSelection
+      : (brokerOptions.contains(_preferredBrokerDisplay) ? _preferredBrokerDisplay : 'All');
+
+    final selectedAccounts = selectedBrokerFilter == 'All'
+        ? allConnectedAccounts
+        : allConnectedAccounts
+            .where((account) => (account['broker'] ?? '').toString().trim().toLowerCase() == selectedBrokerFilter.toLowerCase())
+            .toList();
+
+    final selectedBalance = selectedAccounts.fold<double>(
+      0.0,
+      (sum, account) => sum + ((account['balance'] as num?)?.toDouble() ?? 0.0),
+    );
+
+    final selectedWithdrawals = _recentWithdrawals.where((withdrawal) {
+      if (selectedBrokerFilter == 'All') {
+        return true;
+      }
+      final withdrawalBroker = (withdrawal['broker'] ?? '').toString().trim().toLowerCase();
+      return withdrawalBroker == selectedBrokerFilter.toLowerCase();
+    }).toList();
+    final selectedWithdrawnTotal = selectedWithdrawals.fold<double>(
+      0.0,
+      (sum, withdrawal) => sum + ((withdrawal['amount'] as num?)?.toDouble() ?? 0.0),
+    );
+
+    final sortedBrokers = brokerOptions.toList()
+      ..sort((a, b) {
+        if (a == 'All') return -1;
+        if (b == 'All') return 1;
+        final priorityCompare = _brokerDisplayPriority(a).compareTo(_brokerDisplayPriority(b));
+        if (priorityCompare != 0) {
+          return priorityCompare;
+        }
+        return a.compareTo(b);
+      });
+
+    final brokerFilterChips = sortedBrokers
+        .map((broker) => ChoiceChip(
+              label: Text(broker),
+              selected: selectedBrokerFilter == broker,
+              onSelected: (_) {
+                setState(() {
+                  _portfolioBrokerFilter = _normalizeBrokerDisplayName(broker);
+                });
+              },
+              labelStyle: GoogleFonts.poppins(
+                color: selectedBrokerFilter == broker ? const Color(0xFF0A0E21) : Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              selectedColor: const Color(0xFF00E5FF),
+              backgroundColor: Colors.white10,
+              side: BorderSide(color: Colors.white.withOpacity(0.2)),
+            ))
+        .toList();
+
     return Column(
       children: [
-        ...connectedAccounts.asMap().entries.map((entry) {
+        _glassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Broker Portfolio Navigator',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: brokerFilterChips,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildMetricCard(
+                      'Portfolio Balance',
+                      '\$${selectedBalance.toStringAsFixed(2)}',
+                      Colors.white,
+                      const Color(0xFF00E5FF),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildMetricCard(
+                      'Withdrawals',
+                      '\$${selectedWithdrawnTotal.toStringAsFixed(2)}',
+                      Colors.white,
+                      const Color(0xFFFFB74D),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (selectedAccounts.isEmpty)
+          _glassCard(
+            child: Text(
+              'No connected accounts under ${selectedBrokerFilter.toUpperCase()}.',
+              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
+            ),
+          ),
+        ...selectedAccounts.asMap().entries.map((entry) {
           final connected = entry.value;
           final broker = connected['broker'] ?? 'Broker';
           final accountId = connected['accountId']?.toString() ?? '';
@@ -666,12 +836,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final balanceChange = _balanceChanges[key] ?? 0.0;
           final isIncreasing = balanceChange >= 0;
           final accountWithdrawals = _recentWithdrawals
-              .where((w) => w['broker']?.toString() == broker && w['accountNumber']?.toString() == accountNum)
+              .where((w) {
+                final sameBroker = (w['broker']?.toString() ?? '').trim().toLowerCase() == broker.toString().trim().toLowerCase();
+                if (!sameBroker) {
+                  return false;
+                }
+                final withdrawalAccount = (w['accountNumber']?.toString() ?? '').trim();
+                if (withdrawalAccount.isEmpty) {
+                  return true;
+                }
+                return withdrawalAccount == accountNum;
+              })
               .toList();
           final totalWithdrawn = accountWithdrawals.fold<double>(0, (sum, w) => sum + ((w['amount'] as num?)?.toDouble() ?? 0));
 
           return Padding(
-            padding: EdgeInsets.only(bottom: entry.key == connectedAccounts.length - 1 ? 0 : 16),
+            padding: EdgeInsets.only(bottom: entry.key == selectedAccounts.length - 1 ? 0 : 16),
             child: _glassCard(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -824,6 +1004,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ...accountWithdrawals.take(2).map((withdrawal) {
                       final amount = (withdrawal['amount'] as num?)?.toDouble() ?? 0;
                       final status = withdrawal['status']?.toString() ?? 'pending';
+                      final eventType = withdrawal['eventType']?.toString() ?? withdrawal['type']?.toString() ?? 'withdrawal';
+                      final eventLabel = eventType
+                          .replaceAll('_', ' ')
+                          .toUpperCase();
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Row(
@@ -840,6 +1024,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Text(
                                     'Status: $status',
                                     style: GoogleFonts.poppins(color: Colors.white54, fontSize: 10),
+                                  ),
+                                  Text(
+                                    eventLabel,
+                                    style: GoogleFonts.poppins(color: const Color(0xFFFFCC80), fontSize: 10, fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),

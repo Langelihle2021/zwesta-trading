@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/unified_broker_service.dart';
 import '../widgets/logo_widget.dart';
 
@@ -18,11 +19,44 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
   Map<String, dynamic> _brokers = {};
   List<dynamic> _positions = [];
   String? _error;
+  String _preferredBrokerDisplay = 'Exness';
 
   @override
   void initState() {
     super.initState();
+    _loadPreferredBrokerDisplay();
     _loadPortfolio();
+  }
+
+  String _normalizeBrokerDisplayName(String broker) {
+    final raw = broker.trim();
+    if (raw.isEmpty) return 'Exness';
+    final lower = raw.toLowerCase();
+    if (lower == 'fxm') return 'FXCM';
+    if (lower == 'prime xbt' || lower == 'pxbt') return 'PXBT';
+    if (lower == 'binance') return 'Binance';
+    if (lower == 'exness') return 'Exness';
+    if (lower == 'oanda') return 'OANDA';
+    if (lower == 'ig markets' || lower == 'ig') return 'IG';
+    return raw;
+  }
+
+  Future<void> _loadPreferredBrokerDisplay() async {
+    final prefs = await SharedPreferences.getInstance();
+    final selected = prefs.getString('preferred_broker_display') ?? prefs.getString('broker') ?? 'Exness';
+    if (!mounted) return;
+    setState(() {
+      _preferredBrokerDisplay = _normalizeBrokerDisplayName(selected);
+    });
+  }
+
+  int _brokerPriority(String brokerName) {
+    final normalized = _normalizeBrokerDisplayName(brokerName).toLowerCase();
+    final preferred = _normalizeBrokerDisplayName(_preferredBrokerDisplay).toLowerCase();
+    if (preferred.isNotEmpty && normalized == preferred) {
+      return 0;
+    }
+    return 1;
   }
 
   Future<void> _loadPortfolio() async {
@@ -228,7 +262,14 @@ class _UnifiedBrokerDashboardScreenState extends State<UnifiedBrokerDashboardScr
       children: [
         Text('Broker Breakdown', style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
-        ..._brokers.entries.map((entry) {
+        ...(_brokers.entries.toList()
+          ..sort((a, b) {
+            final priorityCompare = _brokerPriority(a.key).compareTo(_brokerPriority(b.key));
+            if (priorityCompare != 0) {
+              return priorityCompare;
+            }
+            return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+          })).map((entry) {
           final name = entry.key;
           final data = Map<String, dynamic>.from(entry.value);
           final connected = data['connected'] == true;

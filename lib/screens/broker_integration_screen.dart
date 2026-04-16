@@ -108,6 +108,24 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       _selectedBroker.toLowerCase() == 'prime xbt';
   bool get _isMt5Broker => !_isIgBroker && !_isBinanceBroker && !_isOandaBroker && !_isFxcmBroker;
 
+  String _normalizeBrokerDisplayName(String broker) {
+    final raw = broker.trim();
+    if (raw.isEmpty) return 'Exness';
+    final lower = raw.toLowerCase();
+    if (lower == 'fxm') return 'FXCM';
+    if (lower == 'prime xbt' || lower == 'pxbt') return 'PXBT';
+    if (lower == 'binance') return 'Binance';
+    if (lower == 'exness') return 'Exness';
+    if (lower == 'oanda') return 'OANDA';
+    if (lower == 'ig markets' || lower == 'ig') return 'IG';
+    return raw;
+  }
+
+  Future<void> _persistPreferredBrokerChoice(String broker) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('preferred_broker_display', _normalizeBrokerDisplayName(broker));
+  }
+
   double _doubleValue(dynamic value) =>
       value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '0') ?? 0.0;
 
@@ -325,8 +343,9 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         return {
           'available': data['available'] ?? false,
           'installed': data['installed'] ?? false,
+          'path_exists': data['path_exists'] ?? false,
           'version': data['version'] ?? 'Unknown',
-          'error': data['error'],
+          'error': data['error'] ?? data['reason'],
         };
       } else {
         return {
@@ -355,8 +374,9 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         return {
           'available': data['available'] ?? false,
           'installed': data['installed'] ?? false,
+          'path_exists': data['path_exists'] ?? false,
           'version': data['version'] ?? 'Unknown',
-          'error': data['error'],
+          'error': data['error'] ?? data['reason'],
         };
       } else {
         return {
@@ -379,19 +399,17 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
       
       final exnessCheck = await _checkExnessAvailability();
       
-      // ✅ FIXED: Use proper comparison (was "!available == true" which is wrong)
+      // Availability precheck is advisory only; still allow real credential test.
       if (exnessCheck['available'] != true) {
         if (mounted) {
-          setState(() => _isTestingConnection = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('❌ Exness MT5 not available: ${exnessCheck['error'] ?? "Unknown error"}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
+              content: Text('⚠️ Exness precheck warning: ${exnessCheck['error'] ?? "MT5 path/IPC not confirmed yet"}. Continuing with connection test...'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 4),
             ),
           );
         }
-        return;
       }
     }
 
@@ -400,19 +418,17 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
 
       final pxbtCheck = await _checkPxbtAvailability();
 
-      // ✅ FIXED: Use proper comparison (was "!available == true" which is wrong)
+      // Availability precheck is advisory only; still allow real credential test.
       if (pxbtCheck['available'] != true) {
         if (mounted) {
-          setState(() => _isTestingConnection = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('❌ PXBT MT5 not available: ${pxbtCheck['error'] ?? "Unknown error"}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
+              content: Text('⚠️ PXBT precheck warning: ${pxbtCheck['error'] ?? "MT5 path/IPC not confirmed yet"}. Continuing with connection test...'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 4),
             ),
           );
         }
-        return;
       }
     }
 
@@ -539,6 +555,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         }
 
         await _persistModeScopedCredentials();
+          await prefs.setString('preferred_broker_display', _normalizeBrokerDisplayName(_selectedBroker));
 
         if (mounted) {
           final tradingService = Provider.of<TradingService>(context, listen: false);
@@ -844,6 +861,7 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
                       _selectedBroker = newValue;
                       _serverController.text = _defaultServerForSelectedBroker();
                     });
+                    _persistPreferredBrokerChoice(newValue);
                   }
                 },
                 items: brokers.map((broker) => DropdownMenuItem<String>(
