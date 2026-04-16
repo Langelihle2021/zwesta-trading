@@ -8336,25 +8336,28 @@ def get_account_info_alias():
 @app.route('/api/account/detailed', methods=['GET'])
 @require_session
 def get_account_detailed():
-    """Get COMPREHENSIVE account data from Exness with all metrics"""
+    """Get COMPREHENSIVE account data from ANY broker (Exness, Binance, FXCM, OANDA) with all metrics"""
     user_id = request.user_id
     
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         requested_mode = str(request.args.get('mode') or '').strip().upper()
+        broker_filter = request.args.get('broker', default='', type=str).strip()
         preferred_mode = requested_mode if requested_mode in ['LIVE', 'DEMO'] else get_user_trading_mode_value(user_id)
         desired_live = 1 if preferred_mode == 'LIVE' else 0
         
-        cursor.execute('''
+        # Query all active credentials, optionally filtered by broker
+        broker_clause = f"AND broker_name = '{broker_filter}'" if broker_filter else ""
+        cursor.execute(f'''
             SELECT credential_id, broker_name, account_number, password, server, is_live,
                    cached_balance, cached_equity, cached_margin_free, cached_margin,
-                   cached_margin_level, cached_profit, account_currency, last_update, updated_at
+                   cached_margin_level, cached_profit, account_currency, last_update, updated_at, api_key
             FROM broker_credentials 
-            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
-            ORDER BY COALESCE(updated_at, last_update, '') DESC,
+            WHERE user_id = ? AND is_active = 1 {broker_clause}
+            ORDER BY broker_name, COALESCE(updated_at, last_update, '') DESC,
                      credential_id DESC
-            LIMIT 5
+            LIMIT 10
         ''', (user_id,))
         
         creds = [dict(row) for row in cursor.fetchall()]
@@ -8363,91 +8366,153 @@ def get_account_detailed():
         if not creds:
             return jsonify({
                 'success': False,
-                'error': f'No Exness credentials found for current {preferred_mode} mode'
+                'error': f'No broker credentials found'
             }), 404
 
+        accounts_data = []
+        
+        # Fetch account details from each broker
         for cred in creds:
-            cred['effective_is_live'] = int(
-                normalize_mt5_is_live_flag('Exness', cred.get('is_live'), cred.get('server'))
-            )
-
-        matching_mode_creds = [cred for cred in creds if int(cred.get('effective_is_live') or 0) == desired_live]
-        mode_fallback_used = not matching_mode_creds
-        ordered_creds = matching_mode_creds or creds
-        
-        # Read only from the active MT5 session or cached snapshot.
-        # Do not switch accounts from request threads; that causes lock storms
-        # when the dashboard refreshes multiple endpoints concurrently.
-        import MetaTrader5 as mt5
-        account_info = None
-        selected_credential = ordered_creds[0]
-        active_mt5_login = None
-        
-        # First, try to use the currently logged-in MT5 session (where bots are actually trading)
-        try:
-            existing = mt5.account_info()
-            if existing:
-                active_mt5_login = str(existing.login)
-                # Check if ANY of the user's accounts matches the currently logged-in account
-                for cred in ordered_creds:
-                    if existing.login == int(cred['account_number']):
-                        selected_credential = cred
+            broker_name = canonicalize_broker_name(cred.get('broker_name'))
+            account_num = cred['account_number']
+            account_info = None
+            
+            try:
+                # ==================== EXNESS / MT5 ====================
+                if broker_name in ['Exness', 'MetaTrader5', 'PXBT']:
+                    effective_is_live = int(normalize_mt5_is_live_flag(broker_name, cred.get('is_live'), cred.get('server')))
+                    if effective_is_live == desired_live:
+                        mt5_conn = MT5Connection({
+                            'account': int(account_num),
+                            'password': cred['password'],
+                            'server': cred.get('server', 'Exness-MT5Trial9'),
+                            'broker': broker_name,
+                            'is_live': bool(cred['is_live']),
+                        })
+                        mt5_conn.connected = True
+                        account_info = mt5_conn.get_account_info()
+                        if account_info:
+                            account_info['broker'] = broker_name
+                            account_info['credential_id'] = cred['credential_id']
+                            logger.info(f"✅ Fetched account details from {broker_name} {account_num}")
+                
+                # ==================== BINANCE ====================
+                elif broker_name == 'Binance':
+                    binance_conn = BinanceConnection({
+                        'api_key': cred.get('api_key'),
+                        'api_secret': cred['password'],
+                        'account_number': account_num,
+                        'server': cred.get('server', 'spot'),
+                        'is_live': bool(cred['is_live']),
+                    })
+                    if binance_conn.connect():
+                        account_info = binance_conn.get_account_info()
+                        if account_info:
+                            account_info['broker'] = 'Binance'
+                            account_info['credential_id'] = cred['credential_id']
+                            logger.info(f"✅ Fetched account details from Binance {account_num}")
+                        binance_conn.disconnect()
+                
+                # ==================== FXCM ====================
+                elif broker_name == 'FXCM':
+                    fxcm_conn = FXCMConnection({
+                        'api_key': cred.get('api_key'),
+                        'account_number': account_num,
+                        'is_live': bool(cred['is_live']),
+                    })
+                    if fxcm_conn.connect():
+                        account_info = fxcm_conn.get_account_info()
+                        if account_info:
+                            account_info['broker'] = 'FXCM'
+                            account_info['credential_id'] = cred['credential_id']
+                            logger.info(f"✅ Fetched account details from FXCM {account_num}")
+                        fxcm_conn.disconnect()
+                
+                # ==================== OANDA ====================
+                elif broker_name == 'OANDA':
+                    oanda_conn = OANDAConnection({
+                        'api_key': cred.get('api_key'),
+                        'account_number': account_num,
+                        'is_live': bool(cred['is_live']),
+                    })
+                    if oanda_conn.connect():
+                        account_info = oanda_conn.get_account_info()
+                        if account_info:
+                            account_info['broker'] = 'OANDA'
+                            account_info['credential_id'] = cred['credential_id']
+                            logger.info(f"✅ Fetched account details from OANDA {account_num}")
+                        oanda_conn.disconnect()
+                
+                # Backup to cached data if live fetch failed
+                if not account_info:
+                    cached_balance = float(cred.get('cached_balance') or 0)
+                    if cached_balance > 0 or cred.get('cached_equity'):
                         account_info = {
-                            'accountNumber': cred['account_number'],
-                            'balance': existing.balance,
-                            'equity': existing.equity,
-                            'marginFree': existing.margin_free,
-                            'currency': existing.currency,
-                            'leverage': existing.leverage,
-                            'broker': 'Exness',
-                            'profit': existing.profit,
-                            'margin': existing.margin,
-                            'margin_level': existing.margin_level if existing.margin_level else 0,
-                            'name': existing.name,
-                            'server': existing.server,
-                            'trade_mode': existing.trade_mode,
-                            'mode': 'Live' if cred.get('effective_is_live') else 'Demo',
-                            'dataSource': 'live',
+                            'account_id': account_num,
+                            'accountNumber': account_num,
+                            'balance': cached_balance,
+                            'equity': float(cred.get('cached_equity') or cached_balance),
+                            'marginFree': float(cred.get('cached_margin_free') or 0),
+                            'margin': float(cred.get('cached_margin') or 0),
+                            'margin_level': float(cred.get('cached_margin_level') or 0),
+                            'profit': float(cred.get('cached_profit') or 0),
+                            'currency': str(cred.get('account_currency') or 'USD').upper(),
+                            'broker': broker_name,
+                            'credential_id': cred['credential_id'],
+                            'dataSource': 'cached',
                         }
-                        persist_account_snapshot('Exness', cred['account_number'], account_info, credential_id=cred['credential_id'], user_id=user_id)
-                        logger.info(f"✅ Account detailed: Read from existing MT5 session for {existing.login}")
-                        break
-        except Exception as e:
-            logger.warning(f"Could not read existing MT5 session: {e}")
+                
+                if account_info:
+                    accounts_data.append(account_info)
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch account details from {broker_name} {account_num}: {e}")
+                continue
 
-        if not account_info and active_mt5_login:
-            logger.info(
-                f"ℹ️ Account detailed: MT5 is currently attached to account {active_mt5_login}; "
-                f"serving cached data for requested {ordered_creds[0]['account_number']} instead of forcing an account switch"
-            )
-
-        if not account_info:
-            for cred in ordered_creds:
+        if not accounts_data:
+            # Return first cached option
+            if creds:
+                cred = creds[0]
                 cached_balance = float(cred.get('cached_balance') or 0)
-                cached_equity = float(cred.get('cached_equity') or cached_balance)
-                cached_margin_free = float(cred.get('cached_margin_free') or 0)
-                cached_margin = float(cred.get('cached_margin') or 0)
-                cached_margin_level = float(cred.get('cached_margin_level') or 0)
-                cached_profit = float(cred.get('cached_profit') or 0)
-                account_currency = str(cred.get('account_currency') or 'USD').upper()
+                return jsonify({
+                    'success': True,
+                    'accountNumber': cred['account_number'],
+                    'balance': cached_balance,
+                    'equity': float(cred.get('cached_equity') or cached_balance),
+                    'marginFree': float(cred.get('cached_margin_free') or 0),
+                    'margin': float(cred.get('cached_margin') or 0),
+                    'margin_level': float(cred.get('cached_margin_level') or 0),
+                    'profit': float(cred.get('cached_profit') or 0),
+                    'currency': str(cred.get('account_currency') or 'USD').upper(),
+                    'broker': cred['broker_name'],
+                    'dataSource': 'cached',
+                }), 200
+            else:
+                return jsonify({'success': False, 'error': 'No account data available'}), 404
 
-                if any([
-                    cached_balance,
-                    cached_equity,
-                    cached_margin_free,
-                    cached_margin,
-                    cached_margin_level,
-                    cached_profit,
-                ]):
-                    selected_credential = cred
-                    account_info = {
-                        'accountNumber': cred['account_number'],
-                        'balance': cached_balance,
-                        'equity': cached_equity,
-                        'marginFree': cached_margin_free,
-                        'margin': cached_margin,
-                        'margin_level': cached_margin_level,
-                        'profit': cached_profit,
+        # Return all accounts or the first one depending on usage
+        primary_account = accounts_data[0]
+        return jsonify({
+            'success': True,
+            'accountNumber': primary_account.get('accountNumber', primary_account.get('account_id')),
+            'balance': primary_account.get('balance', 0),
+            'equity': primary_account.get('equity', 0),
+            'marginFree': primary_account.get('marginFree', 0),
+            'margin': primary_account.get('margin', 0),
+            'margin_level': primary_account.get('margin_level', 0),
+            'profit': primary_account.get('profit', 0),
+            'currency': primary_account.get('currency', 'USD'),
+            'broker': primary_account.get('broker'),
+            'dataSource': primary_account.get('dataSource', 'live'),
+            'allAccounts': accounts_data,  # Include all accounts for dashboard display
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting account detailed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
                         'currency': account_currency,
                         'leverage': None,
                         'broker': 'Exness',
@@ -8600,9 +8665,10 @@ def get_positions_detailed():
 @app.route('/api/trades/history', methods=['GET'])
 @require_session
 def get_trades_history():
-    """Get TRADE HISTORY (closed trades) from the last N days"""
+    """Get TRADE HISTORY (closed trades) from the last N days - supports all brokers"""
     user_id = request.user_id
     days = request.args.get('days', default=30, type=int)
+    broker_filter = request.args.get('broker', default='', type=str).strip()  # Optional: filter by broker
     
     try:
         conn = get_db_connection()
@@ -8610,67 +8676,118 @@ def get_trades_history():
         preferred_mode = get_user_trading_mode_value(user_id)
         desired_live = 1 if preferred_mode == 'LIVE' else 0
         
-        cursor.execute('''
-            SELECT credential_id, broker_name, account_number, password, server, is_live
+        # Query all active credentials for user, optionally filtered by broker
+        broker_clause = f"AND broker_name = '{broker_filter}'" if broker_filter else ""
+        cursor.execute(f'''
+            SELECT credential_id, broker_name, account_number, password, server, is_live, api_key
             FROM broker_credentials 
-            WHERE user_id = ? AND is_active = 1 AND broker_name = 'Exness'
-            ORDER BY credential_id DESC
+            WHERE user_id = ? AND is_active = 1 {broker_clause}
+            ORDER BY broker_name, credential_id DESC
         ''', (user_id,))
         
-        rows = [dict(row) for row in cursor.fetchall()]
+        creds = [dict(row) for row in cursor.fetchall()]
         conn.close()
 
-        cred = next(
-            (
-                row for row in rows
-                if int(normalize_mt5_is_live_flag('Exness', row.get('is_live'), row.get('server'))) == desired_live
-            ),
-            rows[0] if rows else None,
-        )
-
-        if not cred:
+        if not creds:
             return jsonify({
                 'success': False,
-                'trades': []
-            })
-
-        import MetaTrader5 as mt5
-        try:
-            active_info = mt5.account_info()
-        except Exception as exc:
-            logger.warning(f"Could not read MT5 session for trade history endpoint: {exc}")
-            active_info = None
-
-        if not active_info or str(active_info.login) != str(cred['account_number']):
-            return jsonify({
-                'success': True,
                 'trades': [],
                 'totalCount': 0,
-                'period': f'Last {days} days',
-                'dataSource': 'inactive-session',
-                'warning': (
-                    f"MT5 is currently attached to {getattr(active_info, 'login', 'no account')}. "
-                    f"Trade history for {cred['account_number']} is unavailable until that mode is warmed."
-                ),
-            })
+                'message': f'No broker credentials found for user'
+            }), 200
 
-        mt5_conn = MT5Connection({
-            'account': int(cred['account_number']),
-            'password': cred['password'],
-            'server': cred['server'],
-            'broker': 'Exness',
-            'is_live': bool(cred['is_live']),
-        })
-        mt5_conn.connected = True
-        trades = mt5_conn.get_trade_history(days=days)
+        all_trades = []
+        
+        # Fetch trades from each broker
+        for cred in creds:
+            broker_name = canonicalize_broker_name(cred.get('broker_name'))
+            account_num = cred['account_number']
+            
+            try:
+                # ==================== EXNESS ====================
+                if broker_name in ['Exness', 'MetaTrader5']:
+                    effective_is_live = int(normalize_mt5_is_live_flag(broker_name, cred.get('is_live'), cred.get('server')))
+                    if effective_is_live == desired_live:
+                        mt5_conn = MT5Connection({
+                            'account': int(account_num),
+                            'password': cred['password'],
+                            'server': cred.get('server', 'Exness-MT5Trial9'),
+                            'broker': broker_name,
+                            'is_live': bool(cred['is_live']),
+                        })
+                        mt5_conn.connected = True
+                        broker_trades = mt5_conn.get_trade_history(days=days)
+                        all_trades.extend(broker_trades or [])
+                        logger.info(f"✅ Fetched {len(broker_trades or [])} trades from {broker_name} {account_num}")
+                
+                # ==================== BINANCE ====================
+                elif broker_name == 'Binance':
+                    binance_conn = BinanceConnection({
+                        'api_key': cred.get('api_key'),
+                        'api_secret': cred['password'],
+                        'account_number': account_num,
+                        'server': cred.get('server', 'spot'),
+                        'is_live': bool(cred['is_live']),
+                    })
+                    if binance_conn.connect():
+                        broker_trades = binance_conn.get_trades() or []
+                        # Add broker info to each trade
+                        for trade in broker_trades:
+                            trade['broker'] = 'Binance'
+                            trade['account_number'] = account_num
+                        all_trades.extend(broker_trades)
+                        logger.info(f"✅ Fetched {len(broker_trades)} trades from Binance {account_num}")
+                        binance_conn.disconnect()
+                
+                # ==================== FXCM ====================
+                elif broker_name == 'FXCM':
+                    fxcm_conn = FXCMConnection({
+                        'api_key': cred.get('api_key'),
+                        'account_number': account_num,
+                        'is_live': bool(cred['is_live']),
+                    })
+                    if fxcm_conn.connect():
+                        broker_trades = fxcm_conn.get_trades() or []
+                        # Add broker info to each trade
+                        for trade in broker_trades:
+                            trade['broker'] = 'FXCM'
+                            trade['account_number'] = account_num
+                        all_trades.extend(broker_trades)
+                        logger.info(f"✅ Fetched {len(broker_trades)} trades from FXCM {account_num}")
+                        fxcm_conn.disconnect()
+                
+                # ==================== OANDA ====================
+                elif broker_name == 'OANDA':
+                    oanda_conn = OANDAConnection({
+                        'api_key': cred.get('api_key'),
+                        'account_number': account_num,
+                        'is_live': bool(cred['is_live']),
+                    })
+                    if oanda_conn.connect():
+                        broker_trades = oanda_conn.get_trades() or []
+                        # Add broker info to each trade
+                        for trade in broker_trades:
+                            trade['broker'] = 'OANDA'
+                            trade['account_number'] = account_num
+                        all_trades.extend(broker_trades)
+                        logger.info(f"✅ Fetched {len(broker_trades)} trades from OANDA {account_num}")
+                        oanda_conn.disconnect()
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch trades from {broker_name} {account_num}: {e}")
+                continue
+
+        # Sort trades by timestamp (most recent first)
+        all_trades.sort(key=lambda t: t.get('closeTime') or t.get('closedAt') or '0', reverse=True)
 
         return jsonify({
             'success': True,
-            'trades': trades,
-            'totalCount': len(trades),
+            'trades': all_trades,
+            'totalCount': len(all_trades),
             'period': f'Last {days} days',
-            'dataSource': 'live-session',
-        })
+            'dataSource': 'multi-broker',
+            'brokers': list(set([t.get('broker', 'unknown') for t in all_trades]))
+        }), 200
             
     except Exception as e:
         logger.error(f"Error getting trade history: {e}")
