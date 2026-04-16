@@ -8513,68 +8513,6 @@ def get_account_detailed():
             'success': False,
             'error': str(e)
         }), 500
-                        'currency': account_currency,
-                        'leverage': None,
-                        'broker': 'Exness',
-                        'name': None,
-                        'server': cred.get('server'),
-                        'trade_mode': None,
-                        'mode': 'Live' if cred.get('effective_is_live') else 'Demo',
-                        'dataSource': 'cache',
-                        'warning': 'Showing last cached account snapshot while MT5 is attached to a different account or still reconnecting.',
-                    }
-                    if active_mt5_login:
-                        account_info['sessionAttachedAccount'] = active_mt5_login
-                    logger.info(f"ℹ️ Account detailed: Using cached snapshot for {cred['account_number']} ({account_currency})")
-                    break
-        
-        if account_info:
-            return jsonify({
-                'success': True,
-                'account': account_info,
-                'modeRequested': preferred_mode,
-                'modeReturned': account_info.get('mode'),
-                'modeFallbackUsed': mode_fallback_used,
-                'credential_id': selected_credential.get('credential_id') if isinstance(selected_credential, dict) else None,
-                'lastUpdate': datetime.utcnow().isoformat(),
-            })
-        else:
-            disconnected_credential = selected_credential if isinstance(selected_credential, dict) else ordered_creds[0]
-            return jsonify({
-                'success': True,
-                'account': {
-                    'accountNumber': disconnected_credential.get('account_number'),
-                    'balance': 0.0,
-                    'equity': 0.0,
-                    'marginFree': 0.0,
-                    'margin': 0.0,
-                    'margin_level': 0.0,
-                    'profit': 0.0,
-                    'currency': str(disconnected_credential.get('account_currency') or 'USD').upper(),
-                    'leverage': None,
-                    'broker': 'Exness',
-                    'name': None,
-                    'server': disconnected_credential.get('server'),
-                    'trade_mode': None,
-                    'mode': 'Live' if disconnected_credential.get('effective_is_live') else 'Demo',
-                    'dataSource': 'not_connected',
-                    'connected': False,
-                    'warning': 'No cached Exness account snapshot is available yet. Start a bot or warm the requested mode to populate account details.',
-                    'sessionAttachedAccount': active_mt5_login,
-                },
-                'modeRequested': preferred_mode,
-                'modeReturned': 'Live' if disconnected_credential.get('effective_is_live') else 'Demo',
-                'modeFallbackUsed': mode_fallback_used,
-                'credential_id': disconnected_credential.get('credential_id'),
-                'lastUpdate': datetime.utcnow().isoformat(),
-            })
-            
-    except Exception as e:
-        logger.error(f"Error getting detailed account info: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
 
 @app.route('/api/positions/detailed', methods=['GET'])
@@ -13711,14 +13649,14 @@ def get_broker_credentials():
         rows = cursor.fetchall()
         conn.close()
         
-        # Deduplicate: keep only the latest credential for each broker+account combo
-        seen = {}  # key: (broker_name, account_number), value: credential_dict
+        # Deduplicate: keep only the latest credential for each broker+account+mode combo
+        seen = {}  # key: (broker_name, account_number, is_live), value: credential_dict
         
         for row in rows:
             broker_name = canonicalize_broker_name(row[1])
             account_number = str(row[2] or '').strip()
             normalized_is_live = bool(normalize_mt5_is_live_flag(broker_name, row[4], row[3]))
-            key = (broker_name, account_number)  # (broker_name, account_number)
+            key = (broker_name, account_number, normalized_is_live)
             if key not in seen:  # Keep first (most recent due to ORDER BY DESC)
                 seen[key] = {
                     'credential_id': row[0],
@@ -13804,7 +13742,7 @@ def save_broker_credentials():
                     'error': 'FXCM requires: token'
                 }), 400
             account_number = account_number or 'FXCM'
-            server = server or 'REST-API'
+            server = server or ('REST-API-LIVE' if is_live else 'REST-API-DEMO')
             password = ''
         elif broker_name in ['OANDA']:
             if not api_key or not account_number:
@@ -13855,8 +13793,8 @@ def save_broker_credentials():
         # IG Markets integration removed
         cursor.execute('''
             SELECT credential_id FROM broker_credentials
-            WHERE user_id = ? AND broker_name = ? AND account_number = ?
-        ''', (user_id, broker_name, account_number))
+            WHERE user_id = ? AND broker_name = ? AND account_number = ? AND is_live = ?
+        ''', (user_id, broker_name, account_number, 1 if is_live else 0))
         
         existing = cursor.fetchone()
         
@@ -14086,7 +14024,7 @@ def test_broker_connection():
                 INSERT INTO broker_credentials 
                 (credential_id, user_id, broker_name, account_number, password, server, is_live, is_active, api_key, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-            ''', (credential_id, user_id, 'FXCM', account_id, '', 'REST-API', int(is_live), token, datetime.now().isoformat(), datetime.now().isoformat()))
+            ''', (credential_id, user_id, 'FXCM', account_id, '', ('REST-API-LIVE' if is_live else 'REST-API-DEMO'), int(is_live), token, datetime.now().isoformat(), datetime.now().isoformat()))
             conn.commit()
             conn.close()
 
