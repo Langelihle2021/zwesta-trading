@@ -760,13 +760,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 });
               },
               labelStyle: GoogleFonts.poppins(
-                color: selectedBrokerFilter == broker ? const Color(0xFF0A0E21) : Colors.white70,
+                color: selectedBrokerFilter == broker ? const Color(0xFF0A0E21) : Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
               selectedColor: const Color(0xFF00E5FF),
-              backgroundColor: Colors.white10,
-              side: BorderSide(color: Colors.white.withOpacity(0.2)),
+              backgroundColor: Colors.white.withOpacity(0.22),
+              side: BorderSide(color: Colors.white.withOpacity(0.38), width: 1.1),
             ))
         .toList();
 

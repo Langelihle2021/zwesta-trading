@@ -996,28 +996,108 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
             ),
           ],
           if (_isFxcmBroker) ...[
+            // FXCM Info Box
+            Container(
+              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '🌐 FXCM REST API Connection',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: Colors.blue.shade300,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'FXCM uses a REST API token for secure connectivity. No MT5 terminal installation required.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.white70,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Supported trading pairs:',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, NZD/USD, USD/CAD, XAU/USD, XAG/USD',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      color: Colors.white60,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // How to Get API Token Instructions
+            Text('Getting Your API Token', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _guideStep('1', 'Log in to your FXCM trading account at my.fxcm.com'),
+                  _guideStep('2', 'Navigate to Settings → API Authentication'),
+                  _guideStep('3', 'Generate a new API token (or copy existing one)'),
+                  _guideStep('4', 'Copy the full token and paste it below'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // API Token Input
             Text('FXCM API Token', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             TextField(
               controller: _apiKeyController,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'API Token (Bearer token from FXCM portal)',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.vpn_key),
-                hintText: 'Paste FXCM API token',
+              decoration: InputDecoration(
+                labelText: 'Paste your API token here',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.vpn_key),
+                hintText: 'xxxx-xxxx-xxxx-xxxx-xxxx...',
+                helperText: 'Your token is kept secure and never shared',
+                helperMaxLines: 2,
               ),
             ),
             const SizedBox(height: 24),
-            Text('FXCM Account ID (Optional)', style: Theme.of(context).textTheme.titleMedium),
+            
+            // Optional Account ID
+            Text('Account Number (Optional)', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             TextField(
               controller: _accountController,
-              decoration: const InputDecoration(
-                labelText: 'Account ID (optional)',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.account_circle),
-                hintText: 'Leave blank to auto-detect',
+              decoration: InputDecoration(
+                labelText: 'Account Number (auto-detect if blank)',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.account_circle),
+                hintText: 'E.g., D291208900 or leave blank',
+                helperText: 'Leave blank to auto-detect your connected account',
+                helperMaxLines: 2,
               ),
             ),
           ],
@@ -1611,4 +1691,46 @@ class _BrokerIntegrationScreenState extends State<BrokerIntegrationScreen> {
         ),
       ],
     );
+
+  /// Helper widget for numbered guide steps
+  Widget _guideStep(String number, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.blue.withOpacity(0.3),
+              border: Border.all(color: Colors.blue.withOpacity(0.6), width: 1.5),
+            ),
+            child: Center(
+              child: Text(
+                number,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                  color: Colors.blue.shade300,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: Colors.white70,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

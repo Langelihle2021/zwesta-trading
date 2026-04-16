@@ -1118,6 +1118,14 @@ def require_session(f):
     def decorated_function(*args, **kwargs):
         # Get session token from header - CRITICAL DEBUGGING FOR 401 ISSUES
         session_token = request.headers.get('X-Session-Token')
+
+        def _mask_session_token(token: str) -> str:
+            token_str = str(token or '').strip()
+            if not token_str:
+                return '<empty>'
+            if len(token_str) <= 12:
+                return token_str
+            return f"{token_str[:6]}...{token_str[-4:]}"
         
         # Log all headers to diagnose missing token issue
         if not session_token:
@@ -1139,7 +1147,7 @@ def require_session(f):
             expires_at = datetime.fromisoformat(cached_session['expires_at'])
             if expires_at >= datetime.now():
                 request.user_id = cached_session['user_id']
-                logger.info(f"[SESSION OK] Temporary cached session for user {cached_session['user_id']} authenticated for {request.endpoint}")
+                logger.debug(f"[SESSION OK] Temporary cached session for user {cached_session['user_id']} authenticated for {request.endpoint}")
                 return f(*args, **kwargs)
             TEMP_SESSION_CACHE.pop(session_token, None)
         
@@ -1148,7 +1156,7 @@ def require_session(f):
             cursor = conn.cursor()
             
             # Query user_sessions table
-            logger.info(f"[🔍 SESSION QUERY] Looking for token: '{session_token}'")
+            logger.debug(f"[SESSION QUERY] Looking for token: '{_mask_session_token(session_token)}'")
             cursor.execute('''
                 SELECT user_id, expires_at, is_active 
                 FROM user_sessions 
@@ -1156,7 +1164,7 @@ def require_session(f):
             ''', (session_token,))
             
             session = cursor.fetchone()
-            logger.info(f"[🔍 SESSION QUERY RESULT] {session}")
+            logger.debug(f"[SESSION QUERY RESULT] token_found={bool(session)}")
             conn.close()
             
             if not session:
@@ -1181,7 +1189,7 @@ def require_session(f):
             
             # Attach user_id to request for use in the route handler
             request.user_id = session['user_id']
-            logger.info(f"[SESSION OK] User {session['user_id']} authenticated for {request.endpoint}")
+            logger.debug(f"[SESSION OK] User {session['user_id']} authenticated for {request.endpoint}")
             return f(*args, **kwargs)
         
         except Exception as e:
@@ -7059,9 +7067,11 @@ def get_account_balances():
                         now_unix = time.time()
                     
                         if cache_empty:
-                            # Only log warning if more than 1 hour has passed since last warning
+                            # Log as info only; SQLite fallback may still provide a valid cached balance.
                             if now_unix - last_zar_warning > 3600:
-                                logger.warning(f"[DIAGNOSTIC] No cached balance for {broker_name} {account_num}. Returning disconnected account state without probing MT5 from balances endpoint.")
+                                logger.info(
+                                    f"[DIAGNOSTIC] In-memory cache empty for {broker_name} {account_num}; will evaluate SQLite cache fallback."
+                                )
                                 if not hasattr(get_account_balances, '_last_warnings'):
                                     get_account_balances._last_warnings = {}
                                 get_account_balances._last_warnings[cache_diag_key] = now_unix
@@ -7072,9 +7082,6 @@ def get_account_balances():
                                 if not hasattr(get_account_balances, '_last_warnings'):
                                     get_account_balances._last_warnings = {}
                                 get_account_balances._last_warnings[cache_diag_key] = now_unix
-                        if cache_empty:
-                            logger.warning(f"[WARNING] No cached or live balance for {broker_name} {account_num}. Returning $0 and warning in API response.")
-                            error_msg = "No cached or live balance available. Start a bot to update balance."
                 
                 elif broker_name == 'Binance':
                     # Connect to Binance API with timeout
@@ -13000,19 +13007,23 @@ def _apply_loss_streak_safety(bot_config: Dict[str, Any], closed_trade: Dict[str
     if streak < LOSS_STREAK_PAUSE_AFTER:
         return
 
-    pause_until = datetime.now() + timedelta(minutes=LOSS_STREAK_PAUSE_MINUTES)
+    pause_minutes = LOSS_STREAK_PAUSE_MINUTES
+    if streak >= LOSS_STREAK_HARD_PAUSE_AFTER:
+        pause_minutes = max(pause_minutes, LOSS_STREAK_HARD_PAUSE_MINUTES)
+
+    pause_until = datetime.now() + timedelta(minutes=pause_minutes)
     bot_config['lossStreakPauseUntil'] = pause_until.isoformat()
     bot_config['managementState'] = 'recovery'
     _set_symbol_reentry_cooldown(
         bot_config,
         closed_trade.get('symbol', ''),
-        LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES,
+        max(LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES, pause_minutes),
         'LOSS_STREAK_COOLDOWN',
     )
     logger.warning(
         f"[RISK] Bot {bot_config.get('botId')}: {streak} consecutive losses -> "
-        f"pausing entries for {LOSS_STREAK_PAUSE_MINUTES}m and cooling down "
-        f"{closed_trade.get('symbol', '')} for {LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES}m"
+        f"pausing entries for {pause_minutes}m and cooling down "
+        f"{closed_trade.get('symbol', '')} for {max(LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES, pause_minutes)}m"
     )
 
 
@@ -15051,7 +15062,7 @@ BOT_RISK_LIMITS = {
 ADAPTIVE_SIGNAL_THRESHOLD_STEP = 5
 ADAPTIVE_SIGNAL_THRESHOLD_LOW_SIGNAL_STEP = 10
 ADAPTIVE_SIGNAL_THRESHOLD_MAX_REDUCTION = 70
-ADAPTIVE_SIGNAL_THRESHOLD_MIN = 40
+ADAPTIVE_SIGNAL_THRESHOLD_MIN = 70
 ADAPTIVE_SCANNER_TRIGGER_MISSES = 1
 ADAPTIVE_STRATEGY_MIN_SIGNAL_REDUCTION_MAX = 25
 ADAPTIVE_FORCED_SCANNER_IDLE_CYCLES = 3
@@ -15064,7 +15075,11 @@ UNIVERSAL_ADAPTATION_SUCCESS_WIN_RATE = 60.0
 UNIVERSAL_ADAPTATION_STRUGGLE_WIN_RATE = 35.0
 LOSS_STREAK_PAUSE_AFTER = 2
 LOSS_STREAK_PAUSE_MINUTES = 20
+LOSS_STREAK_HARD_PAUSE_AFTER = 3
+LOSS_STREAK_HARD_PAUSE_MINUTES = 60
 LOSS_STREAK_SYMBOL_COOLDOWN_MINUTES = 30
+MAX_ASSISTED_SYMBOLS_PER_CYCLE = 2
+MIN_RISK_REWARD_RATIO = 1.5
 PERFORMANCE_SIZING_WINDOW = 6
 PERFORMANCE_SIZING_MIN_SAMPLE = 3
 PERFORMANCE_SIZING_MAX_BOOST = 1.35
@@ -16922,7 +16937,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         if profile == 'small_account':
             effective['maxOpenPositions'] = 1
             effective['maxPositionsPerSymbol'] = 1
-            effective['signalThreshold'] = min(max(effective['signalThreshold'], 20), 55 if guarded_small_live else 40)
+            effective['signalThreshold'] = max(effective['signalThreshold'], 70)
             effective['allowedVolatility'] = [
                 level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
             ] or ['Very Low', 'Low', 'Medium']
@@ -16930,7 +16945,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         if profile == 'fast_growth':
             effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 2)
             effective['maxPositionsPerSymbol'] = 1
-            effective['signalThreshold'] = max(effective['signalThreshold'], 60 if is_assisted else defaults['signalThreshold'])
+            effective['signalThreshold'] = max(effective['signalThreshold'], 70 if is_assisted else defaults['signalThreshold'])
             effective['allowedVolatility'] = [
                 level for level in effective['allowedVolatility'] if level in ['Low', 'Medium']
             ] or ['Low', 'Medium']
@@ -16938,7 +16953,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         if guarded_small_live:
             effective['maxOpenPositions'] = 1
             effective['maxPositionsPerSymbol'] = 1
-            effective['signalThreshold'] = max(effective['signalThreshold'], 65)
+            effective['signalThreshold'] = max(effective['signalThreshold'], 70)
             effective['allowedVolatility'] = [
                 level for level in effective['allowedVolatility'] if level in ['Very Low', 'Low', 'Medium']
             ] or ['Very Low', 'Low', 'Medium']
@@ -16960,7 +16975,7 @@ def apply_assisted_management_overrides(bot_config: Dict[str, Any]) -> Dict[str,
         is_recovery_condition = consecutive_losses >= 2 or (recent_count >= 4 and recent_win_rate < 40)
         fast_growth_recovery = profile == 'fast_growth' and (consecutive_losses >= 1 or (recent_count >= 3 and recent_win_rate < 45))
         if is_recovery_condition or fast_growth_recovery:
-            effective['signalThreshold'] = min(85, effective['signalThreshold'] + 10)
+            effective['signalThreshold'] = min(90, max(70, effective['signalThreshold'] + 10))
             effective['maxOpenPositions'] = min(effective['maxOpenPositions'], 1 if profile == 'beginner' else 2)
             effective['maxPositionsPerSymbol'] = 1
             effective['allowedVolatility'] = ['Very Low', 'Low', 'Medium']  # Tighten but still allow trading
@@ -17109,7 +17124,7 @@ def sanitize_bot_risk_config(data: Dict, account_currency: str = 'USD') -> Dict[
     signal_threshold = _clamp_int_value(
         'signalThreshold',
         data.get('signalThreshold', profile_defaults['signalThreshold']),
-        45,
+        70,
         90,
         profile_defaults['signalThreshold'],
         warnings,
@@ -18318,6 +18333,12 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                 trades_placed = 0
                 symbols = bot_config.get('symbols', ['EURUSDm'])
 
+                if bot_config.get('managementMode', 'assisted') != 'manual' and len(symbols) > MAX_ASSISTED_SYMBOLS_PER_CYCLE:
+                    symbols = list(symbols[:MAX_ASSISTED_SYMBOLS_PER_CYCLE])
+                    logger.info(
+                        f"🧭 Bot {bot_id}: Limiting cycle to top {MAX_ASSISTED_SYMBOLS_PER_CYCLE} symbols for risk control: {symbols}"
+                    )
+
                 runtime_safety_changes = enforce_runtime_capital_safety(bot_config)
                 if runtime_safety_changes:
                     logger.info(
@@ -18529,6 +18550,15 @@ def continuous_bot_trading_loop(bot_id: str, user_id: str, bot_credentials: Dict
                             logger.info(
                                 f"⏭️ Bot {bot_id}: Skipping {symbol} - strength={signal_strength:.0f}/100 "
                                 f"below required threshold={required_strength}/100"
+                            )
+                            continue
+
+                        sl_pips = max(_safe_float(trade_params.get('stop_loss'), 0.0), 0.0)
+                        tp_pips = max(_safe_float(trade_params.get('take_profit'), 0.0), 0.0)
+                        rr_ratio = (tp_pips / sl_pips) if sl_pips > 0 else 0.0
+                        if rr_ratio < MIN_RISK_REWARD_RATIO:
+                            logger.info(
+                                f"⏭️ Bot {bot_id}: Skipping {symbol} - reward:risk {rr_ratio:.2f} below minimum {MIN_RISK_REWARD_RATIO:.2f}"
                             )
                             continue
 
@@ -26948,7 +26978,6 @@ if __name__ == '__main__':
     if WEBSOCKET_AVAILABLE:
         ws_price_thread = threading.Thread(target=ws_broadcast_prices, daemon=True)
         ws_price_thread.start()
-        logger.info("🔄 WebSocket price broadcaster thread started")
     else:
         logger.info("ℹ️ WebSocket disabled - use REST /api/prices/realtime for price polling")
     
